@@ -22,23 +22,21 @@ jobs:
       - name: Run C++ Unit Tests (Math & Emulation)
         run: ctest --preset sitl-debug
 
-  # build-kpu-cross is disabled until cross-toolchain.cmake lands in #6.
-  # build-kpu-cross:
-  #   name: Cross-Compile (KPU Target)
-  #   runs-on: ubuntu-22.04
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Install Rust toolchain
-  #       uses: dtolnay/rust-toolchain@master
-  #       with:
-  #         toolchain: 1.83.0
-  #         targets: aarch64-unknown-linux-gnu
-  #     - name: Setup Cross-Compilation Toolchain
-  #       run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-  #     - name: Configure CMake for KPU
-  #       run: |
-  #         cmake -B build \
-  #           -DCMAKE_TOOLCHAIN_FILE=cross-toolchain.cmake \
-  #           -DBUILD_TARGET_KPU=ON
-  #     - name: Build KPU Binaries
-  #       run: cmake --build build -j$(nproc)
+  build-kpu-cross:
+    name: Cross-Compile (KPU Target - aarch64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
+          targets: aarch64-unknown-linux-gnu
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Configure
+        run: cmake --preset kpu-cross
+      - name: Build
+        run: cmake --build --preset kpu-cross
+      - name: Verify aarch64 artifact
+        run: aarch64-linux-gnu-objdump -f build/kpu-cross/libcortex_core.a | head -20
