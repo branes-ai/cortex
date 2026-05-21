@@ -1,14 +1,5 @@
-#[cxx::bridge(namespace = "branes::core")]
-mod ffi {
-    // Define the C-Structs for your tensor metadata here
-    struct TensorMetadata {
-        data_ptr: usize, // Raw pointer to the zero-copy buffer
-        rows: u32,
-        cols: u32,
-    }
-
-    extern "Rust" {
-        // Expose Rust functions for C++ to call
-        fn request_kpu_buffer(size: usize) -> TensorMetadata;
-    }
-}
+//! cortex-core — Rust Resource Manager.
+//!
+//! Placeholder crate. The `MemoryProvider` trait, the SITL and KPU
+//! implementations, the lifecycle state machine, and the `cxx::bridge`
+//! land in issues #13-#20 (Phase 1).
