@@ -1,3 +1,3 @@
-
-add_library(cortex_sdk SHARED src/vio.cpp src/scene_graph.cpp)
-target_link_libraries(cortex_sdk PUBLIC cortex_core_rust branes_math)
+# Placeholder. Real targets land starting with the VioBackend interface (#34)
+# and the top-level VioEstimator API (#45) — see docs/plan/bootstrap-plan.md
+# Phase 3.

@@ -1,0 +1,10 @@
+[package]
+name = "cortex-core"
+version = "0.0.1"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Cortex Rust Resource Manager — KPU memory pools + cxx bridge to the C++ SDK"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
