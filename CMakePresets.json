@@ -1,0 +1,72 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "sitl-debug",
+      "inherits": "base",
+      "displayName": "SITL Debug (host x86)",
+      "description": "Host SITL build with debug symbols. Default for day-to-day development.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TARGET_KPU": "OFF"
+      }
+    },
+    {
+      "name": "sitl-release",
+      "inherits": "base",
+      "displayName": "SITL Release (host x86)",
+      "description": "Host SITL build with optimizations enabled.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TARGET_KPU": "OFF"
+      }
+    },
+    {
+      "name": "kpu-cross",
+      "inherits": "base",
+      "displayName": "KPU Cross-Compile (aarch64)",
+      "description": "Cross-compile for the custom KPU silicon. Requires gcc-aarch64-linux-gnu and cross-toolchain.cmake (lands in issue #6).",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TARGET_KPU": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cross-toolchain.cmake"
+      }
+    },
+    {
+      "name": "wsl2-sitl",
+      "inherits": "sitl-debug",
+      "displayName": "WSL2 SITL (Linux build from Visual Studio)",
+      "description": "SITL build invoked from Visual Studio 2022 on Windows via WSL2. Identical settings to sitl-debug; the Visual Studio vendor metadata routes the build through the Linux toolchain.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [ "Linux" ]
+        }
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "displayName": "SITL Debug" },
+    { "name": "sitl-release", "configurePreset": "sitl-release", "displayName": "SITL Release" },
+    { "name": "kpu-cross",    "configurePreset": "kpu-cross",    "displayName": "KPU Cross" },
+    { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" }
+  ],
+  "testPresets": [
+    { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
+    { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } }
+  ]
+}
