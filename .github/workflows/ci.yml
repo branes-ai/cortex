@@ -9,31 +9,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        # rust-toolchain.toml at the repo root pins the channel + targets.
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential
       - name: Configure CMake
-        run: cmake -B build -DBUILD_TARGET_SOC=OFF
+        run: cmake -B build -DBUILD_TARGET_KPU=OFF
       - name: Build
         run: cmake --build build -j$(nproc)
       - name: Run C++ Unit Tests (Math & Emulation)
         run: cd build && ctest --output-on-failure
 
-  build-soc-cross:
-    name: Cross-Compile (SoC Target)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu # Or your specific SoC architecture
-      - name: Setup Cross-Compilation Toolchain
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      - name: Configure CMake for SoC
-        run: |
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=cross-toolchain.cmake \
-            -DBUILD_TARGET_SOC=ON
-      - name: Build SoC Binaries
-        run: cmake --build build -j$(nproc)
+  # build-kpu-cross is disabled until cross-toolchain.cmake lands in #6.
+  # build-kpu-cross:
+  #   name: Cross-Compile (KPU Target)
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@master
+  #       with:
+  #         toolchain: 1.83.0
+  #         targets: aarch64-unknown-linux-gnu
+  #     - name: Setup Cross-Compilation Toolchain
+  #       run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+  #     - name: Configure CMake for KPU
+  #       run: |
+  #         cmake -B build \
+  #           -DCMAKE_TOOLCHAIN_FILE=cross-toolchain.cmake \
+  #           -DBUILD_TARGET_KPU=ON
+  #     - name: Build KPU Binaries
+  #       run: cmake --build build -j$(nproc)
