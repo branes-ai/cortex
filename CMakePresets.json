@@ -35,10 +35,11 @@
       "name": "kpu-cross",
       "inherits": "base",
       "displayName": "KPU Cross-Compile (aarch64)",
-      "description": "Cross-compile for the custom KPU silicon. Requires gcc-aarch64-linux-gnu and cross-toolchain.cmake (lands in issue #6).",
+      "description": "Cross-compile for the custom KPU silicon. Requires gcc-aarch64-linux-gnu and cross-toolchain.cmake. Tests are disabled (we have no aarch64 emulator step yet).",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "BUILD_TARGET_KPU": "ON",
+        "BUILD_TESTING": "OFF",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cross-toolchain.cmake"
       }
     },

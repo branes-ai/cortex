@@ -28,7 +28,17 @@ FetchContent_MakeAvailable(Corrosion)
 # 3. Import the Rust Core Resource Manager
 corrosion_import_crate(MANIFEST_PATH core/Cargo.toml)
 
-# 4. Add Subdirectories
+# 4. Fetch foundational third-party deps (MTL5, Universal, yaml-cpp,
+#    Catch2, Tracy, stb_image). All permissive licenses; see docs/adr/0001.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/deps.cmake)
+
+# 5. Tests (enabled by default; use -DBUILD_TESTING=OFF to skip).
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
+# 6. Project subdirectories
 add_subdirectory(math)
 add_subdirectory(sdk)
 add_subdirectory(daemons)
