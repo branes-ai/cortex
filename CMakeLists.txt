@@ -21,7 +21,7 @@ include(FetchContent)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.4.2 # Use a stable release
+    GIT_TAG v0.6.1 # v0.4.2 had a rustc --version parse bug on Rust 1.80+
 )
 FetchContent_MakeAvailable(Corrosion)
 
