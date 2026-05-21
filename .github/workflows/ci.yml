@@ -1,0 +1,39 @@
+name: Cortex CI
+
+on: [push, pull_request]
+
+jobs:
+  build-and-test-sitl:
+    name: Build and Test (SITL - x86)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+      - name: Configure CMake
+        run: cmake -B build -DBUILD_TARGET_SOC=OFF
+      - name: Build
+        run: cmake --build build -j$(nproc)
+      - name: Run C++ Unit Tests (Math & Emulation)
+        run: cd build && ctest --output-on-failure
+
+  build-soc-cross:
+    name: Cross-Compile (SoC Target)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu # Or your specific SoC architecture
+      - name: Setup Cross-Compilation Toolchain
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Configure CMake for SoC
+        run: |
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=cross-toolchain.cmake \
+            -DBUILD_TARGET_SOC=ON
+      - name: Build SoC Binaries
+        run: cmake --build build -j$(nproc)
