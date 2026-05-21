@@ -5,12 +5,12 @@ project(branes_cortex LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 1. Define the Hardware Target Flag (SITL vs SOC)
-option(BUILD_TARGET_SOC "Build for custom SoC with KPU/DMA drivers" OFF)
-if(BUILD_TARGET_SOC)
-    add_compile_definitions(TARGET_SOC)
+# 1. Define the Hardware Target Flag (SITL vs KPU)
+option(BUILD_TARGET_KPU "Build for the custom KPU silicon (DMA + kernel driver)" OFF)
+if(BUILD_TARGET_KPU)
+    add_compile_definitions(TARGET_KPU)
     # This environment variable tells Rust to compile the real kernel bindings
-    set(ENV{RUST_HAL_TARGET} "SOC") 
+    set(ENV{RUST_HAL_TARGET} "KPU")
 else()
     add_compile_definitions(TARGET_SITL)
     set(ENV{RUST_HAL_TARGET} "SITL")
@@ -21,7 +21,7 @@ include(FetchContent)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-    GIT_TAG v0.4.2 # Use a stable release
+    GIT_TAG v0.6.1 # v0.4.2 had a rustc --version parse bug on Rust 1.80+
 )
 FetchContent_MakeAvailable(Corrosion)
 
