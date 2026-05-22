@@ -2,6 +2,15 @@ name: Cortex CI
 
 on: [push, pull_request]
 
+env:
+  # GitHub Actions cache backend for sccache. Caches both rustc objects
+  # (via RUSTC_WRAPPER) and clang/gcc objects (via the CMake launcher
+  # variables we set in each preset).
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+  CMAKE_C_COMPILER_LAUNCHER: "sccache"
+  CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
+
 jobs:
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
@@ -15,12 +24,17 @@ jobs:
           toolchain: 1.83.0
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential
+      - name: Run sccache-action
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Configure
         run: cmake --preset sitl-debug
       - name: Build
         run: cmake --build --preset sitl-debug
       - name: Run C++ Unit Tests (Math & Emulation)
         run: ctest --preset sitl-debug
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   build-kpu-cross:
     name: Cross-Compile (KPU Target - aarch64)
@@ -34,9 +48,14 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Run sccache-action
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Configure
         run: cmake --preset kpu-cross
       - name: Build
         run: cmake --build --preset kpu-cross
       - name: Verify aarch64 artifact
         run: aarch64-linux-gnu-objdump -f build/kpu-cross/libcortex_core.a | head -20
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
