@@ -26,6 +26,10 @@ jobs:
           components: rustfmt, clippy
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Run sccache-action
+        # Needed because the workflow-level RUSTC_WRAPPER=sccache would
+        # otherwise fail clippy on a fresh runner without sccache.
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: cargo fmt --check
         working-directory: core
         run: cargo fmt --all -- --check
