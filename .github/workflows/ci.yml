@@ -12,6 +12,41 @@ env:
   CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
 
 jobs:
+  lint:
+    name: Lint (clippy + cargo fmt + clang-format)
+    # Use 24.04 to get a recent clang-format (18.x) that supports the
+    # IncludeBlocks/Regroup options we configure in .clang-format.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
+          components: rustfmt, clippy
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Run sccache-action
+        # Needed because the workflow-level RUSTC_WRAPPER=sccache would
+        # otherwise fail clippy on a fresh runner without sccache.
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: cargo fmt --check
+        working-directory: core
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        working-directory: core
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: clang-format --dry-run on tracked C/C++ sources
+        run: |
+          set -e
+          files=$(git ls-files '*.cpp' '*.hpp' '*.h' '*.cc' '*.cxx' '*.hxx')
+          if [ -z "$files" ]; then
+            echo "No C/C++ source files tracked — skipping clang-format."
+            exit 0
+          fi
+          echo "Checking $(echo "$files" | wc -l) files."
+          echo "$files" | xargs clang-format --dry-run --Werror
+
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
     runs-on: ubuntu-22.04
