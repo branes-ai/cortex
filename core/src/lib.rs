@@ -7,6 +7,8 @@
 
 mod error;
 mod memory_provider;
+mod sitl_provider;
 
 pub use error::MemErr;
 pub use memory_provider::{BufferHandle, BufferProps, MemoryProvider};
+pub use sitl_provider::SitlMemoryProvider;
