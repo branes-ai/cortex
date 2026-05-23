@@ -71,6 +71,40 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  coverage:
+    name: Coverage (cargo-llvm-cov, measure-only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain (with llvm-tools)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.83.0
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Run sccache-action
+        # Workflow-level RUSTC_WRAPPER=sccache requires sccache installed.
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Coverage (core/)
+        working-directory: core
+        # No --fail-under-lines floor yet — Phase 0 has no real tests in
+        # core/. Phase 1 (#13-#20) lands the MemoryProvider trait, lifecycle
+        # state machine, and bridge tests; that's where we tighten this
+        # into a real gate (target: >= 85%).
+        run: |
+          cargo llvm-cov --workspace --all-features --summary-only --lcov --output-path coverage.lcov
+          echo ""
+          echo "Coverage summary above; floor enforcement lands with first real tests (Phase 1)."
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: core/coverage.lcov
+          retention-days: 14
+
   build-kpu-cross:
     name: Cross-Compile (KPU Target - aarch64)
     runs-on: ubuntu-22.04

@@ -1,0 +1,47 @@
+// branes/test/budgets.hpp — per-operator latency budgets.
+//
+// Each constant is the upper bound on the named metric. Tests use them
+// via branes::test::measure_n (see branes/test/timing.hpp):
+//
+//     auto stats = branes::test::measure_n(50, [] { ... });
+//     REQUIRE(stats.p99 < branes::test::budgets::fast_detect_p99);
+//
+// Budgets are intentionally tight. If a regression bumps you over, the
+// expectation is "fix the regression". Bumping the budget itself is
+// allowed but must be explicit in the same PR and called out in the
+// commit message, so the velocity loss shows up in the CHANGELOG.
+//
+// Naming convention:
+//   <operator>_<percentile>   — e.g. fast_detect_p99, vio_feed_image_median
+//
+// Initial state: empty. Phase 3+ issues populate this as operators land.
+// First entry is expected with issue #37 (FAST corner detector).
+
+#pragma once
+
+#include <chrono>
+
+namespace branes::test::budgets {
+
+using namespace std::chrono_literals;
+
+/// Sentinel for "no budget set yet — placeholder accepts any timing".
+/// Use this when scaffolding a test before the operator is benchmarked
+/// (so the test still runs and validates correctness, just not perf).
+inline constexpr auto unset = std::chrono::microseconds::max();
+
+// CV front-end (cv/) — populated by Phase 3, issues #37, #38, #48, #49.
+// inline constexpr auto fast_detect_p99   = ... us;  // #37
+// inline constexpr auto klt_track_p99     = ... us;  // #38
+// inline constexpr auto pyramid_build_p99 = ... us;  // #49
+
+// MSCKF backend (sdk/) — populated by Phase 3, issues #40, #43, #44.
+// inline constexpr auto imu_preintegration_p99 = ... us;  // #40
+// inline constexpr auto state_propagator_p99   = ... us;  // #43
+// inline constexpr auto camera_update_p99      = ... us;  // #44
+
+// Top-level VIO API — populated by Phase 3, issue #47.
+// inline constexpr auto vio_feed_image_median = ... ms;  // #47
+// inline constexpr auto vio_feed_image_p99    = ... ms;  // #47
+
+}  // namespace branes::test::budgets
