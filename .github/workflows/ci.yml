@@ -2,6 +2,11 @@ name: Cortex CI
 
 on: [push, pull_request]
 
+# Top-level least-privilege default. Per-job overrides only when a job
+# genuinely needs more.
+permissions:
+  contents: read
+
 env:
   # GitHub Actions cache backend for sccache. Caches both rustc objects
   # (via RUSTC_WRAPPER) and clang/gcc objects (via the CMake launcher
@@ -18,9 +23,11 @@ jobs:
     # IncludeBlocks/Regroup options we configure in .clang-format.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
           components: rustfmt, clippy
@@ -29,7 +36,7 @@ jobs:
       - name: Run sccache-action
         # Needed because the workflow-level RUSTC_WRAPPER=sccache would
         # otherwise fail clippy on a fresh runner without sccache.
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: cargo fmt --check
         working-directory: core
         run: cargo fmt --all -- --check
@@ -51,16 +58,18 @@ jobs:
     name: Build and Test (SITL - x86)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
         # rust-toolchain.toml at the repo root pins the channel + targets.
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build build-essential
       - name: Run sccache-action
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
         run: cmake --preset sitl-debug
       - name: Build
@@ -75,19 +84,21 @@ jobs:
     name: Coverage (cargo-llvm-cov, measure-only)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain (with llvm-tools)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
           components: llvm-tools-preview
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@6c1f7cf125e42770ff087ea443901b487cc5471a  # v2
         with:
           tool: cargo-llvm-cov
       - name: Run sccache-action
         # Workflow-level RUSTC_WRAPPER=sccache requires sccache installed.
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Coverage (core/)
         working-directory: core
         # No --fail-under-lines floor yet — Phase 0 has no real tests in
@@ -99,7 +110,7 @@ jobs:
           echo ""
           echo "Coverage summary above; floor enforcement lands with first real tests (Phase 1)."
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: coverage-lcov
           path: core/coverage.lcov
@@ -109,16 +120,18 @@ jobs:
     name: Cross-Compile (KPU Target - aarch64)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
           targets: aarch64-unknown-linux-gnu
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       - name: Run sccache-action
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
         run: cmake --preset kpu-cross
       - name: Build
