@@ -7,6 +7,13 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## [0.1.2](https://github.com/branes-ai/cortex/compare/v0.1.1...v0.1.2) (2026-05-23)
+
+
+### Documentation
+
+* add Phase 1 design — Rust RM + cxx bridge ([#125](https://github.com/branes-ai/cortex/issues/125)) ([bec0037](https://github.com/branes-ai/cortex/commit/bec0037ffeeda49bfaa2a7a632343c8991ae81ea))
+
 ## [0.1.1](https://github.com/branes-ai/cortex/compare/v0.1.0...v0.1.1) (2026-05-23)
 
 
