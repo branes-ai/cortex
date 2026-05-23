@@ -78,7 +78,10 @@ mod tests {
 
     #[test]
     fn size_exceeded_display_includes_both_values() {
-        let err = MemErr::SizeExceeded { byte_size: 9_000_000_000, limit: 4_294_967_296 };
+        let err = MemErr::SizeExceeded {
+            byte_size: 9_000_000_000,
+            limit: 4_294_967_296,
+        };
         let s = format!("{}", err);
         assert!(s.contains("9000000000"), "got: {s}");
         assert!(s.contains("4294967296"), "got: {s}");
@@ -86,7 +89,10 @@ mod tests {
 
     #[test]
     fn out_of_memory_display_includes_request() {
-        let err = MemErr::OutOfMemory { byte_size: 1024, alignment: 64 };
+        let err = MemErr::OutOfMemory {
+            byte_size: 1024,
+            alignment: 64,
+        };
         let s = format!("{}", err);
         assert!(s.contains("1024"), "got: {s}");
         assert!(s.contains("64"), "got: {s}");

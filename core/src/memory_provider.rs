@@ -188,7 +188,10 @@ mod tests {
 
     #[test]
     fn buffer_props_construction() {
-        let props = BufferProps { byte_size: 1024, alignment: 64 };
+        let props = BufferProps {
+            byte_size: 1024,
+            alignment: 64,
+        };
         assert_eq!(props.byte_size, 1024);
         assert_eq!(props.alignment, 64);
         // Copy works.
