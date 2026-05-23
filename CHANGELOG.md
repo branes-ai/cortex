@@ -7,6 +7,50 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## 1.0.0 (2026-05-23)
+
+
+### Build System
+
+* **cmake:** add CMakePresets.json with sitl/kpu-cross/wsl2 presets ([89440ff](https://github.com/branes-ai/cortex/commit/89440ffadd94e479e6debb71e985a628f18d230c))
+* **cmake:** add CMakePresets.json with sitl/kpu-cross/wsl2 presets ([8d37aa8](https://github.com/branes-ai/cortex/commit/8d37aa850b191298e000dbaac5216b1cded612b6))
+* **cmake:** add cross-toolchain.cmake for KPU aarch64 cross-compile ([d6b1471](https://github.com/branes-ai/cortex/commit/d6b147147d34ce2bbfc620478901a5ed3e635a3c))
+* **cmake:** add cross-toolchain.cmake for KPU aarch64 cross-compile ([89e0e1c](https://github.com/branes-ai/cortex/commit/89e0e1c35fd1f53ee9c4c8ce77acc767c6d80fd1))
+* **cmake:** wire FetchContent for foundational dependencies ([8eb02f8](https://github.com/branes-ai/cortex/commit/8eb02f885effd3a1474016d9fd001701d1792839))
+* **cmake:** wire FetchContent for foundational dependencies ([0e6dc7c](https://github.com/branes-ai/cortex/commit/0e6dc7c6db10e6837f5e63455163a84250fbbf63))
+
+
+### Continuous Integration
+
+* add lint job (clippy + cargo fmt + clang-format) ([2622eb7](https://github.com/branes-ai/cortex/commit/2622eb79b6e0df2c29ebb8622517d59b4405b07f))
+* add lint job (clippy + cargo fmt + clang-format) ([75d3c91](https://github.com/branes-ai/cortex/commit/75d3c91f96968fb4c74b80d0256f304b851f1717))
+* install sccache in lint job too (RUSTC_WRAPPER consistency) ([dd341a0](https://github.com/branes-ai/cortex/commit/dd341a086faecd364fc915410ecf99b1a15020e0))
+* integrate sccache for Rust + C++ object caching ([69851c6](https://github.com/branes-ai/cortex/commit/69851c61008f20dda729f6d9833e0aabfbe6f67c))
+* integrate sccache for Rust + C++ object caching ([0865db2](https://github.com/branes-ai/cortex/commit/0865db201b35be3403a788fd33b176afecf783ef))
+
+
+### Documentation
+
+* add CLAUDE.md and bootstrap plan ([c2dc4f1](https://github.com/branes-ai/cortex/commit/c2dc4f1c10aa2b4992b9d0b3369a99e2630cb631))
+* add CLAUDE.md and bootstrap plan; gitignore .claude/ ([4509cca](https://github.com/branes-ai/cortex/commit/4509ccabfb9f7b6d8623f274e10088202961877d))
+* add Phase 0 Foundation retrospective ([589a74e](https://github.com/branes-ai/cortex/commit/589a74e52350749ede14238367f069d7da54d3e8))
+* add Phase 0 Foundation retrospective ([6e2bd0e](https://github.com/branes-ai/cortex/commit/6e2bd0e4c06797153ab15a9aaf65e9314666b0a5))
+
+
+### Maintenance
+
+* **bootstrap:** add bootstrap.sh + bootstrap.ps1 for new-dev setup ([602b172](https://github.com/branes-ai/cortex/commit/602b17209a13e3606d59137f7dbb233a1b7d6302))
+* **bootstrap:** add bootstrap.sh + bootstrap.ps1 for new-dev setup ([a5d2397](https://github.com/branes-ai/cortex/commit/a5d2397276e35b0dbf97892309f38c76632fe21b))
+* **format:** add .clang-format, .editorconfig, and license ADR ([c95aadb](https://github.com/branes-ai/cortex/commit/c95aadb6a5083d9d8140ac08ca72754f0d421e34))
+* **format:** add .clang-format, .editorconfig, and license-compatibility ADR ([b1f52fd](https://github.com/branes-ai/cortex/commit/b1f52fdb103165f6c028679269c8d57784187ae6))
+* **release:** add commitlint + release-please for SemVer ([8cd388b](https://github.com/branes-ai/cortex/commit/8cd388b2772c57a14380752677adcf809e9e7f69))
+* **release:** add commitlint + release-please for SemVer ([24e2eab](https://github.com/branes-ai/cortex/commit/24e2eab68bc7e138067756cf7481b2e9877a3f6b))
+* **toolchain:** bump Corrosion v0.4.2 -&gt; v0.6.1 ([bf96317](https://github.com/branes-ai/cortex/commit/bf9631756731dcb0879c8db80738026cf02f7a4d))
+* **toolchain:** pin Rust 1.83.0 and unblock skeleton build ([417bd10](https://github.com/branes-ai/cortex/commit/417bd1049548cca2d231cddfaca15e483ea5b6fd))
+* **toolchain:** pin Rust 1.83.0 and unblock skeleton build ([68b4c62](https://github.com/branes-ai/cortex/commit/68b4c62e8a0faf2e953cdba8ae6e769479dc77a4))
+* wrapup Phase 0 — add CHANGELOG.md, session log, gitignore cargo target ([fcb855e](https://github.com/branes-ai/cortex/commit/fcb855e4a2c70d0908be27ae3702e00f4cd75ee9))
+* wrapup Phase 0 — CHANGELOG.md, session log, gitignore target/ ([37143d4](https://github.com/branes-ai/cortex/commit/37143d43c8950b609c125f9eca29062f19f05b88))
+
 ## [Unreleased]
 
 ### Phase 0 — Foundation
