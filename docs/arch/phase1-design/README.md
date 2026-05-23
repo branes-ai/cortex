@@ -20,11 +20,11 @@ A SITL-only Rust Resource Manager exposing a strictly typed memory-allocation su
 - IPC broker over Unix Domain Socket + POSIX shm — issue #21.
 - Crash-only recovery / client replay protocol — issue #22.
 - KPU resource allocation arbiter (live tile/memory map, conflict detection) — issue #23.
-- Any KPU silicon driver code. The SoC `MemoryProvider` stub returns `Err(NotYetImplemented)` for every call.
+- Any KPU silicon driver code. The KPU `MemoryProvider` stub returns `Err(NotYetImplemented)` for every call.
 
 ## 3. Architecture (Phase 1 only)
 
-```
+```text
          ┌──────────────────────────────────────────────┐
          │  C++ SDK / tests (consumer)                  │
          │   #include <branes/core/lib.rs.h>            │
@@ -40,7 +40,7 @@ A SITL-only Rust Resource Manager exposing a strictly typed memory-allocation su
          │   └──────────┬───────────────────────────┘   │
          │              │                               │
          │   ┌──────────▼─────────┐  ┌───────────────┐  │
-         │   │ SitlMemoryProvider │  │ SocMemoryProv │  │
+         │   │ SitlMemoryProvider │  │ KpuMemoryProv │  │
          │   │  (shm + mmap;      │  │  (stub: Err)  │  │
          │   │   heap fallback)   │  │               │  │
          │   └────────────────────┘  └───────────────┘  │
@@ -53,7 +53,7 @@ A SITL-only Rust Resource Manager exposing a strictly typed memory-allocation su
          └──────────────────────────────────────────────┘
 ```
 
-Selection between SITL and SoC providers happens via the `RUST_HAL_TARGET` env var set by the CMake preset (`SITL` or `KPU`). The unselected impl still compiles — both are present in the binary, picked at construction time.
+Selection between SITL and KPU providers happens via the `RUST_HAL_TARGET` env var set by the CMake preset (`SITL` or `KPU`). The unselected impl still compiles — both are present in the binary, picked at construction time.
 
 ## 4. `MemoryProvider` trait
 
@@ -161,13 +161,13 @@ pub enum MemErr {
 
 **Decisions encoded here:**
 - Variants are exhaustive and named after the failure mode, not the call site.
-- `NotYetImplemented` is for the SoC stub — every method returns this. Distinct from `NotSupported` (which means "this backend will never do that").
+- `NotYetImplemented` is for the KPU stub — every method returns this. Distinct from `NotSupported` (which means "this backend will never do that").
 - `Os` variant absorbs `std::io::Error` for OS-call failures (shm_open, mmap, etc.).
 - Across the cxx bridge: errors become `Result<T, String>` where the string is `format!("{}", err)`. C++ side checks for `Err` and propagates as a `std::expected<T, std::string>` or throws — see §10.
 
 ## 7. Lifecycle state machine
 
-```
+```text
     Unconfigured ──configure(yaml)──▶ Inactive
                                        │
                                        │ activate()
@@ -285,33 +285,33 @@ enum BackendEntry {
 - `release` is idempotent only in the "InvalidHandle on second call" sense — it does NOT silently succeed twice.
 - Drop of `SitlProviderInner` releases all outstanding buffers (RAII cleanup).
 
-## 9. SoC `MemoryProvider` stub
+## 9. KPU `MemoryProvider` stub
 
-Per #15 — trait conformance only. Every method returns `Err(MemErr::NotYetImplemented { target: "soc" })`.
+Per #15 — trait conformance only. Every method returns `Err(MemErr::NotYetImplemented { target: "kpu" })`.
 
 ```rust
-pub struct SocMemoryProvider;
+pub struct KpuMemoryProvider;
 
-impl MemoryProvider for SocMemoryProvider {
+impl MemoryProvider for KpuMemoryProvider {
     fn request(&self, _byte_size: usize, _alignment: usize) -> Result<BufferHandle, MemErr> {
-        Err(MemErr::NotYetImplemented { target: "soc" })
+        Err(MemErr::NotYetImplemented { target: "kpu" })
     }
     fn release(&self, _handle: BufferHandle) -> Result<(), MemErr> {
-        Err(MemErr::NotYetImplemented { target: "soc" })
+        Err(MemErr::NotYetImplemented { target: "kpu" })
     }
     fn lock(&self, _handle: BufferHandle) -> Result<(*mut u8, BufferProps), MemErr> {
-        Err(MemErr::NotYetImplemented { target: "soc" })
+        Err(MemErr::NotYetImplemented { target: "kpu" })
     }
 }
 ```
 
-The accompanying `core/src/soc_provider.rs` includes a `// IMPLEMENTATION PLAN` block at the top of the file outlining:
+The accompanying `core/src/kpu_provider.rs` includes a `// IMPLEMENTATION PLAN` block at the top of the file outlining:
 - The kernel device node (`/dev/kpu`, expected ioctls).
 - The expected DMA-buf protocol.
 - Page-locking strategy.
 - Concurrency requirements (likely a single-process arbiter).
 
-This block becomes the implementation guide when the SoC issue (#21–#23 region) lands.
+This block becomes the implementation guide when the KPU issues (#21–#23 region) land.
 
 ## 10. cxx::bridge surface
 
@@ -372,7 +372,7 @@ pub mod ffi {
     extern "Rust" {
         type ResourceManager;
 
-        /// Construct a new RM bound to the SITL or SoC provider, picked
+        /// Construct a new RM bound to the SITL or KPU provider, picked
         /// by the `RUST_HAL_TARGET` env var at construction time.
         fn make_resource_manager() -> Result<Box<ResourceManager>>;
 
@@ -479,7 +479,7 @@ Per file:
 | `lifecycle.rs` | All valid transitions; all 12 invalid transitions emit `InvalidTransition`; state observability |
 | `memory_provider.rs` | Trait is object-safe (dyn-compatible — compile-time check via `let _: &dyn MemoryProvider = ...`) |
 | `sitl_provider.rs` | request/release/lock happy path; double-release returns `InvalidHandle`; non-pow2 alignment returns `AlignmentNotPow2`; size > 4GiB returns `SizeExceeded`; lock returns same pointer twice |
-| `soc_provider.rs` | Every method returns `NotYetImplemented { target: "soc" }` |
+| `kpu_provider.rs` | Every method returns `NotYetImplemented { target: "kpu" }` |
 | `bridge.rs` | `make_resource_manager()` succeeds; bridge enum values match Rust enum values |
 
 Total: ~20 tests. `cargo llvm-cov` should report ≥ 85% line coverage of `core/src/*` after this lands. **The PR closing #20 turns on `--fail-under-lines 85` in the coverage CI step.**
@@ -531,7 +531,7 @@ TEST_CASE("invalid lifecycle transitions return Err", "[bridge][lifecycle]") {
 |---|---|---|
 | #13 | Trait compiles + dyn-compatible | `memory_provider::tests::object_safety` |
 | #14 | shm/Windows/heap backends work; no leaks | `sitl_provider::tests::*` + Valgrind step on the integration test |
-| #15 | SoC stub returns NotYetImplemented | `soc_provider::tests::all_methods_unimplemented` |
+| #15 | KPU stub returns NotYetImplemented | `kpu_provider::tests::all_methods_unimplemented` |
 | #16 | C++ test calls bridge, writes, Rust verifies | `cxx_bridge_test.cpp::ResourceManager round-trip` |
 | #17 | `#include <branes/core/bridge.rs.h>` works | The bridge integration test's `#include` line is the test |
 | #18 | Lifecycle transitions valid + invalid handled | `lifecycle::tests::*` |
