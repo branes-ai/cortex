@@ -6,9 +6,11 @@
 //! `docs/arch/phase1-design/README.md`.
 
 mod error;
+mod kpu_provider;
 mod memory_provider;
 mod sitl_provider;
 
 pub use error::MemErr;
+pub use kpu_provider::KpuMemoryProvider;
 pub use memory_provider::{BufferHandle, BufferProps, MemoryProvider};
 pub use sitl_provider::SitlMemoryProvider;
