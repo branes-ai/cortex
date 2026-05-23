@@ -25,9 +25,37 @@ use crate::error::MemErr;
 /// refer to the same allocation; double-release of the same handle
 /// returns [`MemErr::InvalidHandle`] (per trait invariant 3) rather
 /// than corrupting state.
+///
+/// The inner field is private and there is no public constructor —
+/// only [`MemoryProvider`] implementations (via [`from_raw`] inside
+/// this crate) issue handles. External callers cannot forge handles
+/// or couple themselves to the provider-private encoding.
+///
+/// [`from_raw`]: BufferHandle::from_raw
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct BufferHandle(pub u64);
+pub struct BufferHandle(u64);
+
+// Crate-private constructor + accessor. Only `MemoryProvider`
+// implementations (#14, #15) and the cxx bridge (#16) call these.
+// Tagged `#[allow(dead_code)]` because this PR only adds the trait
+// surface — call sites land in the follow-up issues.
+#[allow(dead_code)]
+impl BufferHandle {
+    /// Construct a `BufferHandle` from a raw `u64`. Crate-private —
+    /// only `MemoryProvider` implementations (and the cxx bridge in
+    /// #16) call this. External callers must not synthesise handles.
+    pub(crate) const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// Expose the inner `u64` for crate-internal use (provider
+    /// hashmap keys, the cxx bridge `TensorMetadata::handle` field).
+    /// External callers must treat handles as opaque.
+    pub(crate) const fn as_raw(self) -> u64 {
+        self.0
+    }
+}
 
 /// Properties of an allocated buffer, returned by
 /// [`MemoryProvider::lock`] so the caller (typically the C++ SDK)
@@ -144,11 +172,11 @@ mod tests {
             Err(MemErr::NotYetImplemented { target: "noop" }) => {}
             other => panic!("expected NotYetImplemented {{ target: \"noop\" }}, got {other:?}"),
         }
-        match provider.release(BufferHandle(0)) {
+        match provider.release(BufferHandle::from_raw(0)) {
             Err(MemErr::NotYetImplemented { target: "noop" }) => {}
             other => panic!("expected NotYetImplemented {{ target: \"noop\" }}, got {other:?}"),
         }
-        match provider.lock(BufferHandle(0)) {
+        match provider.lock(BufferHandle::from_raw(0)) {
             Err(MemErr::NotYetImplemented { target: "noop" }) => {}
             other => panic!("expected NotYetImplemented {{ target: \"noop\" }}, got {other:?}"),
         }
@@ -167,9 +195,23 @@ mod tests {
     fn buffer_handle_is_copy_and_eq() {
         fn assert_copy<T: Copy>() {}
         assert_copy::<BufferHandle>();
-        let a = BufferHandle(42);
+        let a = BufferHandle::from_raw(42);
         let b = a;
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn buffer_handle_from_raw_as_raw_round_trip() {
+        // The crate-private constructor + accessor are used by both
+        // MemoryProvider implementations (issues #14, #15) and the cxx
+        // bridge (#16). External callers never see them — this test
+        // documents the invariant.
+        let h = BufferHandle::from_raw(0xDEAD_BEEF);
+        assert_eq!(h.as_raw(), 0xDEAD_BEEF);
+
+        // Sentinel value zero is fine; providers may issue it.
+        let h0 = BufferHandle::from_raw(0);
+        assert_eq!(h0.as_raw(), 0);
     }
 
     #[test]

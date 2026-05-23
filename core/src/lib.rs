@@ -5,8 +5,8 @@
 //! the `cxx::bridge` land in subsequent Phase 1 issues — see
 //! `docs/arch/phase1-design/README.md`.
 
-pub mod error;
-pub mod memory_provider;
+mod error;
+mod memory_provider;
 
 pub use error::MemErr;
 pub use memory_provider::{BufferHandle, BufferProps, MemoryProvider};

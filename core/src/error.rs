@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn invalid_handle_display_mentions_handle_and_invalid() {
-        let err = MemErr::InvalidHandle(BufferHandle(0xABCD));
+        let err = MemErr::InvalidHandle(BufferHandle::from_raw(0xABCD));
         let s = format!("{}", err);
         assert!(s.contains("BufferHandle"), "got: {s}");
         assert!(s.contains("invalid"), "got: {s}");
