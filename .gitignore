@@ -70,3 +70,6 @@ Testing/
 
 # Claude Code session state
 .claude/
+
+# Cargo build output (alongside any Cargo.toml in the tree)
+**/target/
