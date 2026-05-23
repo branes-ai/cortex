@@ -7,6 +7,14 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## [0.3.0](https://github.com/branes-ai/cortex/compare/v0.2.0...v0.3.0) (2026-05-23)
+
+
+### Features
+
+* **core:** add SITL MemoryProvider with shm + heap backends ([7075ac7](https://github.com/branes-ai/cortex/commit/7075ac7d50cc1827f918724b0cdc29d6553db123))
+* **core:** SITL MemoryProvider — Linux shm + heap backends ([#129](https://github.com/branes-ai/cortex/issues/129)) ([7075ac7](https://github.com/branes-ai/cortex/commit/7075ac7d50cc1827f918724b0cdc29d6553db123))
+
 ## [0.2.0](https://github.com/branes-ai/cortex/compare/v0.1.2...v0.2.0) (2026-05-23)
 
 
