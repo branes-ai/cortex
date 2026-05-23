@@ -69,9 +69,19 @@ use crate::error::MemErr;
 /// Opaque handle to a buffer owned by a MemoryProvider. The bit pattern
 /// is provider-private; never inspect or compare the inner field
 /// outside the provider that issued it.
+///
+/// The inner field is *private* (no `pub`) so external callers cannot
+/// fabricate handles. Only `MemoryProvider` implementations (and the
+/// cxx bridge in #16) construct handles, via the crate-private
+/// `BufferHandle::from_raw` / `as_raw` helpers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct BufferHandle(pub u64);
+pub struct BufferHandle(u64);
+
+impl BufferHandle {
+    pub(crate) const fn from_raw(raw: u64) -> Self { Self(raw) }
+    pub(crate) const fn as_raw(self) -> u64 { self.0 }
+}
 
 /// Properties of an allocated buffer that the lock step exposes back
 /// to the caller (so the C++ side can construct a `std::span` without

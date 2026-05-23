@@ -8,3 +8,6 @@ description = "Cortex Rust Resource Manager — KPU memory pools + cxx bridge to
 
 [lib]
 crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+thiserror = "1.0"
