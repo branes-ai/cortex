@@ -7,6 +7,13 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## [0.1.1](https://github.com/branes-ai/cortex/compare/v0.1.0...v0.1.1) (2026-05-23)
+
+
+### Maintenance
+
+* **testing:** add regression infra — coverage + latency budget framework ([#123](https://github.com/branes-ai/cortex/issues/123)) ([d0c9805](https://github.com/branes-ai/cortex/commit/d0c98051e60966f247b6268384b0e7a7bd428f5f))
+
 ## 0.1.0 (2026-05-23)
 
 
