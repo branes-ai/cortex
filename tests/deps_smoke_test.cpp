@@ -7,6 +7,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+// Branes test support — verify the timing + budgets headers compile
+// and the measure_n helper produces sensible stats. Real budget
+// assertions land with the operator PRs that populate budgets.hpp.
+#include <branes/test/budgets.hpp>
+#include <branes/test/timing.hpp>
+
 // MTL5 — pull in the lightweight config header.
 #include <mtl/config.hpp>
 
@@ -39,5 +45,25 @@ TEST_CASE("foundational deps are reachable", "[smoke][deps]") {
         // smoke check.
         auto fn = &stbi_load;
         REQUIRE(fn != nullptr);
+    }
+
+    SECTION("branes::test::measure_n produces sane stats") {
+        // Trivial workload; we only check that the helper compiles,
+        // returns the right sample count, and orders min <= median
+        // <= p99 <= max. Budget assertions land with Phase 3.
+        auto stats = branes::test::measure_n(20, [] {
+            volatile int x = 0;
+            for (int i = 0; i < 100; ++i) {
+                x += i;
+            }
+            (void)x;
+        });
+        REQUIRE(stats.samples == 20);
+        REQUIRE(stats.min <= stats.median);
+        REQUIRE(stats.median <= stats.p99);
+        REQUIRE(stats.p99 <= stats.max);
+        // budgets::unset is the placeholder — any positive measurement
+        // satisfies it.
+        REQUIRE(stats.p99 < branes::test::budgets::unset);
     }
 }

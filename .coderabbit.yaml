@@ -9,11 +9,11 @@
 
 language: en-US
 early_access: false
-tone_instructions: |
-  Be direct and substantive. Skip pleasantries. Cite the file/line and the
-  rule being applied (e.g. "violates no-GPL policy — see ADR-0001"). Treat
-  every PR as if you're the second pair of eyes on a hardware-accelerated
-  robotics stack — small bugs become production incidents.
+tone_instructions: >-
+  Be direct and substantive. Cite the file/line and rule (e.g. "violates
+  no-GPL policy — see ADR-0001"). Treat every PR as the second pair of
+  eyes on a hardware-accelerated robotics stack; small bugs become
+  production incidents.
 
 reviews:
   profile: assertive
