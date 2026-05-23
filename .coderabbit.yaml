@@ -1,0 +1,192 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for branes-ai/cortex. The repo-level rules in
+# this file complement the per-PR Conventional-Commits and clang-format
+# gates already enforced in .github/workflows/ci.yml. Goal: catch the
+# kind of issue a fresh reviewer would, especially the load-bearing
+# architectural and licensing invariants documented in CLAUDE.md and
+# docs/arch/phase0-foundation/README.md.
+
+language: en-US
+early_access: false
+tone_instructions: |
+  Be direct and substantive. Skip pleasantries. Cite the file/line and the
+  rule being applied (e.g. "violates no-GPL policy — see ADR-0001"). Treat
+  every PR as if you're the second pair of eyes on a hardware-accelerated
+  robotics stack — small bugs become production incidents.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: false
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: false
+  suggested_reviewers: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - main
+
+  # Skip generated / vendored / build directories. We never want CR to
+  # spend review budget on FetchContent'd source or Cargo target/.
+  path_filters:
+    - "!build/**"
+    - "!**/build/**"
+    - "!**/_deps/**"
+    - "!**/target/**"
+    - "!**/*.lock"
+    - "!core/Cargo.lock"
+    # docs/arch/cortex-repo.md is the original architecture conversation
+    # (carry-over from the seed). Don't review it as code.
+    - "!docs/arch/cortex-repo.md"
+
+  # Per-directory review guidance. These are the load-bearing invariants
+  # of the cortex stack; if a PR violates one, CodeRabbit should flag it
+  # before CI catches it.
+  path_instructions:
+    - path: "core/**/*.rs"
+      instructions: |
+        Rust Resource Manager. Strict layering rule (CLAUDE.md):
+        - This crate must NOT depend on the C++ SDK, Zenoh, or ROS 2.
+        - Only the OS, kernel drivers, and the `cxx` bridge are allowed.
+
+        Lifecycle: transitions are Unconfigured → Inactive → Active → Teardown.
+        Invalid transitions must return typed errors — never `panic!`,
+        `unwrap`, or `expect` in production paths.
+
+        RM responsibility split (`cortex-rm-vs-dfa-compiler` invariant): the
+        RM manages *allocations*, not *schedules*. Scheduling lives in the
+        DFA graph compiler in a separate repo. Flag any code that looks like
+        scheduling logic (tile placement decisions, fusion, time-slicing)
+        and suggest it belongs upstream.
+
+        KPU output programs are called "domain flow programs", never
+        "streamer programs".
+
+    - path: "math/**/*.{hpp,h,hxx}"
+      instructions: |
+        Header-only math layer. Templates parameterized on arithmetic type
+        (Universal posits, custom floats, fixed-point) — never hardcode
+        `double` or `float`. C++20 with concepts.
+
+        Analytical Jacobians only — no automatic differentiation in this
+        phase. Sparse types: CSR, CSC, COO views over caller-owned buffers.
+
+        Lie groups (SO3, SE3, Sim3) are clean-room from textbook references
+        only (Barfoot, Solà). No code contact with Sophus or g2o (GPL).
+
+    - path: "math/**/*.{cpp,cc,cxx}"
+      instructions: |
+        math/ is strictly header-only. Reject any .cpp / .cc / .cxx
+        additions here unless they are explicitly tests under math/tests/.
+
+    - path: "sdk/**/*.{cpp,hpp,h}"
+      instructions: |
+        Operator SDK (VIO, SLAM, 3DSG). Hybrid model: templated headers for
+        arithmetic-generic operators; thin .cpp glue for I/O / lifecycle /
+        non-template surface.
+
+        Must NOT depend on Zenoh, ROS 2, or yaml-cpp. Configs cross into
+        the SDK as typed POD structs only — yaml-cpp parsing lives in
+        daemons/.
+
+        VIO is MSCKF-style as primary backend; sliding-window optimization
+        is a parallel pluggable backend. Both must implement the same
+        VioBackend interface (see issue #34).
+
+        No GPL/LGPL/MPL/SSPL source contact — clean-room from papers only.
+        Forbidden references: OpenVINS, MINS, ORB-SLAM3, DBoW3.
+
+    - path: "cv/**/*.{cpp,hpp,h}"
+      instructions: |
+        In-house clean-room CV stack. API signatures mirror OpenCV
+        (cv::-shaped function names + signatures) so customers can migrate
+        via namespace replace. But no OpenCV linkage — only `stb_image`
+        for image loaders.
+
+        Pixel-type templated where it pays off (Image, pyramid, FAST,
+        KLT). Clean-room from public papers (Rublee et al. 2011 for ORB,
+        Bouguet for pyramidal KLT).
+
+    - path: "daemons/**/*.{cpp,hpp,h}"
+      instructions: |
+        Zenoh middleware adapters. Thin: sensor topic ingress → SDK call
+        → topic egress. No algorithm code in this layer.
+
+        yaml-cpp parsing happens here, into typed POD structs that cross
+        into the SDK. Honor the lifecycle state machine — new config
+        means teardown/reinit, never hot-swap.
+
+        Zero-copy egress for large payloads (images, scene graph) via
+        Zenoh shared memory.
+
+    - path: "**/*.cmake"
+      instructions: |
+        Pinned versions only — never branch heads, except for `stb` which
+        has no releases (pin commit SHA).
+
+        Reject any FetchContent of GPL / LGPL / AGPL / MPL / SSPL deps.
+        Apache-2.0 / BSD / MIT / BSL / public domain only. See ADR-0001.
+
+        BUILD_TARGET_KPU is the flag name (not BUILD_TARGET_SOC).
+        TARGET_KPU / TARGET_SITL are the C++ defines.
+
+    - path: "CMakeLists.txt"
+      instructions: |
+        Same dep-license rules as **/*.cmake. C++20 standard is required
+        and must not be lowered.
+
+    - path: ".github/workflows/*.yml"
+      instructions: |
+        Pin GitHub Actions to specific versions (commit SHA or version
+        tag), not @main or @master. sccache + RUSTC_WRAPPER must be set
+        consistently across all jobs that touch cargo.
+
+    - path: "**/*.{md,markdown}"
+      instructions: |
+        Terminology: use "domain flow programs", never "streamer programs".
+        Use "BUILD_TARGET_KPU", never "BUILD_TARGET_SOC".
+        Use "KPU", never "SoC" unless referring to the broader hardware
+        concept (host with multiple accelerators).
+
+  tools:
+    languagetool:
+      enabled: true
+      level: default
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    # Rust-specific
+    clippy:
+      enabled: true
+    rustfmt:
+      enabled: true
+    # C/C++-specific
+    cppcheck:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto
