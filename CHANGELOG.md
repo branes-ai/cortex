@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.6.0](https://github.com/branes-ai/cortex/compare/v0.5.3...v0.6.0) (2026-05-24)
+
+
+### Features
+
+* **math:** tensor views over std::span with stride/shape metadata ([bb868d5](https://github.com/branes-ai/cortex/commit/bb868d5bda1ec3fc683fa5a1957701a41cdda041)), closes [#24](https://github.com/branes-ai/cortex/issues/24)
+* **math:** TensorView&lt;T,Rank&gt; over std::span with stride/shape metadata ([#141](https://github.com/branes-ai/cortex/issues/141)) ([bb868d5](https://github.com/branes-ai/cortex/commit/bb868d5bda1ec3fc683fa5a1957701a41cdda041))
+
 ## [0.5.3](https://github.com/branes-ai/cortex/compare/v0.5.2...v0.5.3) (2026-05-24)
 
 
