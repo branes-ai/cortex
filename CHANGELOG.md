@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.12.0](https://github.com/branes-ai/cortex/compare/v0.11.0...v0.12.0) (2026-05-24)
+
+
+### Features
+
+* **math:** non-linear least squares solvers (GN, LM, Dogleg) ([d85444d](https://github.com/branes-ai/cortex/commit/d85444d169255098258622cc1f621dcf59a503dd)), closes [#30](https://github.com/branes-ai/cortex/issues/30)
+* **math:** non-linear least squares solvers (gn, lm, dogleg) ([#153](https://github.com/branes-ai/cortex/issues/153)) ([d85444d](https://github.com/branes-ai/cortex/commit/d85444d169255098258622cc1f621dcf59a503dd))
+
 ## [0.11.0](https://github.com/branes-ai/cortex/compare/v0.10.0...v0.11.0) (2026-05-24)
 
 
