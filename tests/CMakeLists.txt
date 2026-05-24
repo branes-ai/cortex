@@ -142,3 +142,14 @@ target_link_libraries(math_nls_golden_test PRIVATE
 target_compile_features(math_nls_golden_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_nls_golden_test)
+
+# SDK layer — VioBackend interface (issue #34).
+add_executable(sdk_vio_backend_test sdk_vio_backend_test.cpp)
+target_link_libraries(sdk_vio_backend_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::sdk
+    branes::test_support
+)
+target_compile_features(sdk_vio_backend_test PRIVATE cxx_std_20)
+
+catch_discover_tests(sdk_vio_backend_test)
