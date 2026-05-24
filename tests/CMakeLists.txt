@@ -68,3 +68,16 @@ target_compile_features(math_type_smoke PRIVATE cxx_std_20)
 # Prefix the discovered ctest names so `ctest -R math_type_smoke`
 # (the issue #25 acceptance command) selects this suite.
 catch_discover_tests(math_type_smoke TEST_PREFIX "math_type_smoke.")
+
+# Math layer — sparse storage views CSR/CSC/COO (issue #26). Element
+# access + conversions validated against a dense reference.
+add_executable(math_sparse_test math_sparse_test.cpp)
+target_link_libraries(math_sparse_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_sparse_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_sparse_test)
