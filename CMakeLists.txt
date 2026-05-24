@@ -28,6 +28,17 @@ FetchContent_MakeAvailable(Corrosion)
 # 3. Import the Rust Core Resource Manager
 corrosion_import_crate(MANIFEST_PATH core/Cargo.toml)
 
+# 3a. Generate the C++ side of the cxx::bridge defined in
+#     core/src/bridge.rs. Corrosion installs a matching cxxbridge-cmd
+#     (cxx version pinned to 1.0.130 in core/Cargo.toml), runs it on
+#     bridge.rs to emit bridge.rs.h + bridge.rs.cc, and exposes the
+#     generated library via the cortex_core_cxx target with proper
+#     INTERFACE include paths.
+corrosion_add_cxxbridge(cortex_core_cxx
+    CRATE cortex_core
+    FILES bridge.rs  # path relative to <crate>/src/, auto-prefixed by Corrosion
+)
+
 # 4. Fetch foundational third-party deps (MTL5, Universal, yaml-cpp,
 #    Catch2, Tracy, stb_image). All permissive licenses; see docs/adr/0001.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/deps.cmake)

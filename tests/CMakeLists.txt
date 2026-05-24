@@ -23,3 +23,18 @@ target_link_libraries(deps_smoke_test PRIVATE
 target_compile_features(deps_smoke_test PRIVATE cxx_std_20)
 
 catch_discover_tests(deps_smoke_test)
+
+# C++↔Rust cxx::bridge integration test. Links against the Corrosion-
+# generated `cortex_core_cxx` target (which carries proper include
+# paths for the cxx-generated `cortex-core/src/bridge.rs.h` header)
+# plus `cortex_core` (the Rust staticlib).
+add_executable(cxx_bridge_test cxx_bridge_test.cpp)
+target_link_libraries(cxx_bridge_test PRIVATE
+    Catch2::Catch2WithMain
+    cortex_core_cxx
+    cortex_core
+    branes::test_support
+)
+target_compile_features(cxx_bridge_test PRIVATE cxx_std_20)
+
+catch_discover_tests(cxx_bridge_test)
