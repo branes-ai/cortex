@@ -204,3 +204,24 @@ TEST_CASE("solve rejects mismatched buffer sizes", "[math][sparse-direct]") {
     std::vector<double> x(N, 0.0);
     REQUIRE_THROWS_AS(chol.solve(std::span<const double>{b_short}, std::span<double>{x}), std::invalid_argument);
 }
+
+TEST_CASE("LDLT solve rejects mismatched buffer sizes", "[math][sparse-direct]") {
+    constexpr std::size_t g = 3;
+    constexpr std::size_t N = g * g;
+    const auto dense = laplacian_dense(g);
+    auto csr = dense_to_csr(dense, N);
+    branes::math::CsrView<double> A(N,
+                                    N,
+                                    std::span<double>{csr.values},
+                                    std::span<const Index>{csr.col_indices},
+                                    std::span<const Index>{csr.row_ptr});
+    branes::math::SparseLdlt<double> ldlt(A);
+
+    std::vector<double> b(N, 1.0);
+    std::vector<double> x_short(N - 1, 0.0);  // output too small
+    REQUIRE_THROWS_AS(ldlt.solve(std::span<const double>{b}, std::span<double>{x_short}), std::invalid_argument);
+
+    std::vector<double> b_short(N - 1, 1.0);  // rhs wrong length
+    std::vector<double> x(N, 0.0);
+    REQUIRE_THROWS_AS(ldlt.solve(std::span<const double>{b_short}, std::span<double>{x}), std::invalid_argument);
+}
