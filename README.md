@@ -1,5 +1,7 @@
 # cortex
 
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/branes-ai/cortex?utm_source=oss&utm_medium=github&utm_campaign=branes-ai%2Fcortex&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+
 Core Embodied AI Framework for perception
 
 Create the `branes-ai/cortex` repository and establish the root folder structure. This strictly enforces the boundaries between your Rust hardware layer, your math, your algorithms, and your middleware.
