@@ -130,3 +130,15 @@ target_link_libraries(math_nls_test PRIVATE
 target_compile_features(math_nls_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_nls_test)
+
+# Math layer — golden-data NLS suite + FD Jacobian + type matrix (#31).
+add_executable(math_nls_golden_test math_nls_golden_test.cpp)
+target_link_libraries(math_nls_golden_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_nls_golden_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_nls_golden_test)
