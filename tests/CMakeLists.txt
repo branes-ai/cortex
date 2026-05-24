@@ -189,3 +189,14 @@ target_link_libraries(math_cameras_test PRIVATE
 target_compile_features(math_cameras_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_cameras_test)
+
+# CV layer — FAST corner detector (issue #37).
+add_executable(cv_fast_test cv_fast_test.cpp)
+target_link_libraries(cv_fast_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::cv
+    branes::test_support
+)
+target_compile_features(cv_fast_test PRIVATE cxx_std_20)
+
+catch_discover_tests(cv_fast_test)
