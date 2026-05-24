@@ -166,3 +166,14 @@ target_link_libraries(cv_image_test PRIVATE
 target_compile_features(cv_image_test PRIVATE cxx_std_20)
 
 catch_discover_tests(cv_image_test)
+
+# CV layer — Gaussian image pyramid (issue #49).
+add_executable(cv_pyramid_test cv_pyramid_test.cpp)
+target_link_libraries(cv_pyramid_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::cv
+    branes::test_support
+)
+target_compile_features(cv_pyramid_test PRIVATE cxx_std_20)
+
+catch_discover_tests(cv_pyramid_test)
