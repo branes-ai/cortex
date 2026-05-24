@@ -79,7 +79,7 @@ template <PixelType T>
     // local maximum in the (2r+1)² window; ties broken by raster order so
     // exactly one survivor remains on a flat plateau.
     std::vector<KeyPoint> corners;
-    const int r = nms_radius;
+    const int r = std::max(0, nms_radius);  // negative radius ⇒ no suppression
     for (int y = border; y < h - border; ++y) {
         for (int x = border; x < w - border; ++x) {
             const double s = score[static_cast<std::size_t>(y) * w + x];
