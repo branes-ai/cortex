@@ -162,10 +162,14 @@ public:
             return I - W * T{0.5} + W2 * (T{1} / T{12});
         }
         const T theta = detail::sqrt_(theta2);
+        // c = 1/θ² − cot(θ/2)/(2θ). Computing cot(θ/2) as cos(θ/2)/sin(θ/2)
+        // is stable for all θ ∈ (0, π] (sin(θ/2) is nonzero there), unlike
+        // the algebraically-equal (1+cosθ)/(2θ·sinθ), whose denominator
+        // sinθ vanishes at a half-turn (θ=π) — a removable singularity
+        // that would otherwise produce NaN for 180° rotations.
         const T half = theta * T{0.5};
-        // c = 1/theta^2 - (1 + cos)/(2 theta sin) = 1/theta^2 (1 - (theta/2) cot(theta/2))
-        const T c = T{1} / theta2 - (T{1} + detail::cos_(theta)) / (T{2} * theta * detail::sin_(theta));
-        (void)half;
+        const T cot_half = detail::cos_(half) / detail::sin_(half);
+        const T c = T{1} / theta2 - cot_half / (T{2} * theta);
         return I - W * T{0.5} + W2 * c;
     }
 

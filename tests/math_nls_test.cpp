@@ -61,6 +61,41 @@ struct LinearLS {
     }
 };
 
+// Rank-deficient (underdetermined) least squares: a single residual in
+// two parameters, r = x0 + x1 - 2. JᵀJ is singular, so the Gauss-Newton
+// step is unavailable and Dogleg must fall back to the Cauchy direction.
+struct RankDeficient {
+    using Scalar = double;
+    std::size_t num_parameters() const {
+        return 2;
+    }
+    std::size_t num_residuals() const {
+        return 1;
+    }
+    void evaluate(std::span<const double> x, std::span<double> r, std::span<double> J) const {
+        r[0] = x[0] + x[1] - 2.0;
+        J[0] = 1.0;
+        J[1] = 1.0;
+    }
+};
+
+// Pathological model: residual is constant (cost can't change) but the
+// Jacobian is nonzero, so the gradient never vanishes and no step ever
+// reduces the cost. Used to drive the solver into its no-progress path.
+struct Stuck {
+    using Scalar = double;
+    std::size_t num_parameters() const {
+        return 1;
+    }
+    std::size_t num_residuals() const {
+        return 1;
+    }
+    void evaluate(std::span<const double>, std::span<double> r, std::span<double> J) const {
+        r[0] = 1.0;
+        J[0] = 1.0;
+    }
+};
+
 }  // namespace
 
 TEST_CASE("Gauss-Newton solves a linear least-squares system", "[math][nls]") {
@@ -103,4 +138,34 @@ TEST_CASE("solver reports the initial cost and reduces it", "[math][nls]") {
     auto s = nls::solve(model, std::span<double>{x}, nls::Options<double>{}, nls::Method::LevenbergMarquardt);
     REQUIRE(s.initial_cost > s.final_cost);
     REQUIRE(s.iterations > 0);
+}
+
+TEST_CASE("a too-small iteration cap reports MaxIterations, not Converged", "[math][nls]") {
+    Rosenbrock model;
+    double x[2] = {-1.2, 1.0};
+    nls::Options<double> opts;
+    opts.max_iterations = 2;  // nowhere near enough for the hard start
+    auto s = nls::solve(model, std::span<double>{x}, opts, nls::Method::LevenbergMarquardt);
+    REQUIRE(s.status == nls::Status::MaxIterations);
+}
+
+TEST_CASE("a stalled solve reports NoProgress, not Converged", "[math][nls]") {
+    // Regression: when no cost-reducing step exists but the gradient is
+    // not yet small, the solver must not claim Converged.
+    Stuck model;
+    double x[1] = {0.0};
+    auto s = nls::solve(model, std::span<double>{x}, nls::Options<double>{}, nls::Method::LevenbergMarquardt);
+    REQUIRE(s.status == nls::Status::NoProgress);
+}
+
+TEST_CASE("Dogleg handles a rank-deficient system without failing", "[math][nls]") {
+    // JᵀJ is singular here, so the Gauss-Newton step is unavailable and
+    // Dogleg must fall back to the Cauchy direction (regression for the
+    // premature gᵀHg<=0 / no-GN-step failure paths).
+    RankDeficient model;
+    double x[2] = {0.0, 0.0};
+    auto s = nls::solve(model, std::span<double>{x}, nls::Options<double>{}, nls::Method::Dogleg);
+    REQUIRE(s.status != nls::Status::Failed);
+    REQUIRE(s.final_cost < 1e-10);  // drives r = x0+x1-2 to ~0
+    REQUIRE(std::abs(x[0] + x[1] - 2.0) < 1e-5);
 }

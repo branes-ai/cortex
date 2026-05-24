@@ -46,6 +46,7 @@ enum class Method { GaussNewton, LevenbergMarquardt, Dogleg };
 enum class Status {
     Converged,      ///< a tolerance test was satisfied
     MaxIterations,  ///< hit the iteration cap
+    NoProgress,     ///< no cost-reducing step found, but gradient not yet small
     Failed,         ///< the step could not be computed (e.g. singular system)
 };
 
@@ -229,14 +230,22 @@ Summary<typename Model::Scalar> solve(const Model& model,
             const T gg = dot<T>(std::span<const T>{g}, std::span<const T>{g});
             const T gHg = dot<T>(std::span<const T>{g}, std::span<const T>{Hg});
             for (int tries = 0; tries < 50 && !accepted && !failed; ++tries) {
-                if (gHg <= T{0}) {
-                    failed = true;
-                    break;
-                }
-                const T t = gg / gHg;
+                // Cauchy point. With positive curvature along −g it is the
+                // unconstrained 1-D minimizer −(gᵀg/gᵀHg)·g; with
+                // non-positive curvature (semidefinite JᵀJ, g in the null
+                // space) there is no interior minimizer, so step to the
+                // trust-region boundary along −g instead of failing.
                 std::vector<T> pc(n);
-                for (std::size_t i = 0; i < n; ++i)
-                    pc[i] = -t * g[i];
+                if (gHg > T{0}) {
+                    const T t = gg / gHg;
+                    for (std::size_t i = 0; i < n; ++i)
+                        pc[i] = -t * g[i];
+                } else {
+                    const T gnorm = norm<T>(std::span<const T>{g});
+                    const T scale = (gnorm > T{0}) ? radius / gnorm : T{0};
+                    for (std::size_t i = 0; i < n; ++i)
+                        pc[i] = -scale * g[i];
+                }
                 const T norm_pc = norm<T>(std::span<const T>{pc});
                 // Choose dogleg step within the trust radius.
                 if (gn_ok && norm<T>(std::span<const T>{p_gn}) <= radius) {
@@ -296,8 +305,11 @@ Summary<typename Model::Scalar> solve(const Model& model,
             break;
         }
         if (!accepted) {
-            // No decrease found; treat as converged at a stationary point.
-            sum.status = Status::Converged;
+            // No cost-reducing step found, yet the gradient test above did
+            // not trigger (‖Jᵀr‖ still above tolerance) — the solver is
+            // stuck, not converged. Report it honestly rather than as a
+            // success the caller would trust.
+            sum.status = Status::NoProgress;
             break;
         }
 

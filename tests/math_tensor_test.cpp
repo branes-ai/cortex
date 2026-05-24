@@ -114,6 +114,12 @@ TEST_CASE("required_span_extent computes addressable footprint", "[math][tensor]
     REQUIRE(required_span_extent<2>({0, 4}, contiguous_strides<2>({0, 4}, Layout::RowMajor)) == 0);
     // Strided column footprint: 3 elements, stride 4 ⇒ 1 + 2*4 = 9.
     REQUIRE(required_span_extent<1>({3}, branes::math::Strides<1>{4}) == 9);
+    // Negative (reversed-axis) strides must report the same footprint as
+    // their positive mirror, not wrap to a huge value (regression).
+    REQUIRE(required_span_extent<1>({4}, branes::math::Strides<1>{-1}) == 4);
+    REQUIRE(required_span_extent<1>({3}, branes::math::Strides<1>{-4}) == 9);
+    // Mixed signs: rank-2 with one reversed axis spans both directions.
+    REQUIRE(required_span_extent<2>({3, 4}, branes::math::Strides<2>{4, -1}) == 12);
 }
 
 TEST_CASE("view works over a Universal posit buffer", "[math][tensor]") {

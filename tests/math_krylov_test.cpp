@@ -87,6 +87,64 @@ TEST_CASE("CG solves an SPD system", "[math][krylov]") {
     REQUIRE(max_abs_diff(x, x_true) < 1e-7);
 }
 
+TEST_CASE("CG converges to the right answer from a nonzero warm start", "[math][krylov]") {
+    // The controller is seeded with the true initial residual b - A*x0,
+    // so a nonzero initial guess still converges to x_true (the relative
+    // tolerance is measured against ‖r0‖, not ‖b‖).
+    constexpr std::size_t n = 24;
+    auto A = spd_tridiag<double>(n);
+    mtl::vec::dense_vector<double> x_true(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x_true(i) = 10.0 + double(i);
+    auto b = rhs_from(A, x_true);
+
+    mtl::vec::dense_vector<double> x(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x(i) = x_true(i) + 0.75;  // warm start
+    branes::math::KrylovControl<double> ctrl{};
+    auto r = branes::math::cg(A, x, b, ctrl);
+
+    REQUIRE(r.converged);
+    REQUIRE(max_abs_diff(x, x_true) < 1e-7);
+}
+
+TEST_CASE("BiCGSTAB converges from a nonzero warm start", "[math][krylov]") {
+    constexpr std::size_t n = 20;
+    auto A = nonsym<double>(n);
+    mtl::vec::dense_vector<double> x_true(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x_true(i) = 1.0 + 0.1 * double(i);
+    auto b = rhs_from(A, x_true);
+
+    mtl::vec::dense_vector<double> x(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x(i) = x_true(i) + 0.75;  // warm start
+    branes::math::KrylovControl<double> ctrl{};
+    auto r = branes::math::bicgstab(A, x, b, ctrl);
+
+    REQUIRE(r.converged);
+    REQUIRE(max_abs_diff(x, x_true) < 1e-6);
+}
+
+TEST_CASE("GMRES converges from a nonzero warm start", "[math][krylov]") {
+    constexpr std::size_t n = 20;
+    auto A = nonsym<double>(n);
+    mtl::vec::dense_vector<double> x_true(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x_true(i) = 1.0 + 0.1 * double(i);
+    auto b = rhs_from(A, x_true);
+
+    mtl::vec::dense_vector<double> x(n, 0.0);
+    for (std::size_t i = 0; i < n; ++i)
+        x(i) = x_true(i) + 0.75;  // warm start
+    branes::math::KrylovControl<double> ctrl{};
+    ctrl.restart = 20;
+    auto r = branes::math::gmres(A, x, b, ctrl);
+
+    REQUIRE(r.converged);
+    REQUIRE(max_abs_diff(x, x_true) < 1e-6);
+}
+
 TEST_CASE("CG with diagonal preconditioner converges", "[math][krylov]") {
     constexpr std::size_t n = 24;
     auto A = spd_tridiag<double>(n);
