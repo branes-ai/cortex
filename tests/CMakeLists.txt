@@ -106,3 +106,15 @@ target_link_libraries(math_krylov_test PRIVATE
 target_compile_features(math_krylov_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_krylov_test)
+
+# Math layer — direct sparse Cholesky/LDLT (issue #28).
+add_executable(math_sparse_direct_test math_sparse_direct_test.cpp)
+target_link_libraries(math_sparse_direct_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_sparse_direct_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_sparse_direct_test)
