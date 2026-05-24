@@ -7,6 +7,13 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## [0.5.1](https://github.com/branes-ai/cortex/compare/v0.5.0...v0.5.1) (2026-05-24)
+
+
+### Continuous Integration
+
+* gate Rust coverage at &gt;= 85% line coverage ([#135](https://github.com/branes-ai/cortex/issues/135)) ([739c12c](https://github.com/branes-ai/cortex/commit/739c12cc3ab85c05df9622c7d7130131eac084b8))
+
 ## [0.5.0](https://github.com/branes-ai/cortex/compare/v0.4.0...v0.5.0) (2026-05-24)
 
 
