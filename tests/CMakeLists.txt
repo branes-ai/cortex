@@ -38,3 +38,17 @@ target_link_libraries(cxx_bridge_test PRIVATE
 target_compile_features(cxx_bridge_test PRIVATE cxx_std_20)
 
 catch_discover_tests(cxx_bridge_test)
+
+# Math layer — TensorView round-trip + stride-math (issue #24). Links
+# branes::math (header-only) plus Universal for the posit element-type
+# coverage.
+add_executable(math_tensor_test math_tensor_test.cpp)
+target_link_libraries(math_tensor_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_tensor_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_tensor_test)
