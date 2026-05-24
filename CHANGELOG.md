@@ -7,6 +7,22 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+<!-- Manual milestone markers. release-please appends release sections
+     below this block, so these entries survive across releases. Keep
+     them brief — one line per phase closure; detailed narrative lives
+     in docs/sessions/. -->
+
+## Milestones
+
+- **2026-05-24 — Phase 1 MVP complete (v0.1.0 → v0.6.0).** Rust Resource
+  Manager + cxx bridge in place. All eight MVP sub-issues #13–#20 closed:
+  `MemoryProvider` trait, SITL provider (Linux shm + heap), KPU stub,
+  cxx::bridge + build.rs + lifecycle state machine, ≥85% coverage gate,
+  C++/Rust integration test. Critical path now unblocks Phase 2 (math)
+  and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
+- **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
+  flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+
 ## [0.5.1](https://github.com/branes-ai/cortex/compare/v0.5.0...v0.5.1) (2026-05-24)
 
 
