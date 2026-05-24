@@ -133,7 +133,17 @@ impl ResourceManager {
         let handle = self
             .provider
             .request(byte_size as usize, alignment as usize)?;
-        let (ptr, props) = self.provider.lock(handle)?;
+        // If lock fails after request succeeded, release the handle so
+        // the buffer isn't leaked. Ignore the release error: the lock
+        // error is the one we want to surface to the caller; a release
+        // failure on an already-suspect handle is secondary.
+        let (ptr, props) = match self.provider.lock(handle) {
+            Ok(v) => v,
+            Err(lock_err) => {
+                let _ = self.provider.release(handle);
+                return Err(lock_err);
+            }
+        };
         Ok(ffi::TensorMetadata {
             handle: handle.as_raw(),
             data_ptr: ptr as usize,
@@ -218,6 +228,31 @@ mod tests {
             .unwrap();
         rm.release_buffer(meta.handle).unwrap();
         assert!(rm.release_buffer(meta.handle).is_err());
+    }
+
+    #[test]
+    fn request_buffer_rejects_bad_alignment_without_leak() {
+        // If validation rejects the request, no handle is allocated to
+        // leak. The harder leak case (request succeeds, lock fails) is
+        // tricky to exercise without a fault-injecting provider, but
+        // the surrounding logic is now release-on-lock-failure (see
+        // request_buffer); confirmed by inspection. This test guards
+        // the simpler validation path against an accidental leak via
+        // a swallowed Err.
+        let rm = rm_for_test();
+        for _ in 0..100 {
+            assert!(rm
+                .request_buffer(64, 3, 1, 1, 1, ffi::DataType::Uint8)
+                .is_err());
+        }
+        // If a handle leaked per iteration, the underlying SitlProvider
+        // would have grown its handle table. We can't read the table
+        // directly, but a subsequent legitimate alloc + release should
+        // still succeed.
+        let meta = rm
+            .request_buffer(64, 8, 1, 1, 1, ffi::DataType::Uint8)
+            .unwrap();
+        rm.release_buffer(meta.handle).unwrap();
     }
 
     #[test]
