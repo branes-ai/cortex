@@ -153,3 +153,16 @@ target_link_libraries(sdk_vio_backend_test PRIVATE
 target_compile_features(sdk_vio_backend_test PRIVATE cxx_std_20)
 
 catch_discover_tests(sdk_vio_backend_test)
+
+# CV layer — Image container + I/O (issue #48). stb_image provides the
+# stb_image_write.h header used to encode PNG fixtures in the test.
+add_executable(cv_image_test cv_image_test.cpp)
+target_link_libraries(cv_image_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::cv
+    branes::stb_image
+    branes::test_support
+)
+target_compile_features(cv_image_test PRIVATE cxx_std_20)
+
+catch_discover_tests(cv_image_test)

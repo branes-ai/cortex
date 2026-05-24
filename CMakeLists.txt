@@ -51,5 +51,6 @@ endif()
 
 # 6. Project subdirectories
 add_subdirectory(math)
+add_subdirectory(cv)
 add_subdirectory(sdk)
 add_subdirectory(daemons)
