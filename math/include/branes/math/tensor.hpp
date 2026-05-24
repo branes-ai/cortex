@@ -94,13 +94,23 @@ template <std::size_t Rank>
             return 0;  // empty along some axis ⇒ addresses nothing.
         }
     }
-    // Highest reachable offset is the sum over axes of the last valid
-    // index times its (assumed non-negative, contiguous-case) stride.
-    std::ptrdiff_t last = 0;
+    // The addressable footprint spans from the lowest to the highest
+    // reachable offset. Strides are signed, so a negative stride pushes
+    // the extreme in the negative direction; accumulate each axis's
+    // contribution on the correct side rather than assuming it is
+    // non-negative (which previously made negative-stride views — which
+    // the descriptor explicitly supports — wrap to a huge value).
+    std::ptrdiff_t lo = 0;
+    std::ptrdiff_t hi = 0;
     for (std::size_t k = 0; k < Rank; ++k) {
-        last += static_cast<std::ptrdiff_t>(shape[k] - 1) * strides[k];
+        const std::ptrdiff_t ext = static_cast<std::ptrdiff_t>(shape[k] - 1) * strides[k];
+        if (ext < 0) {
+            lo += ext;
+        } else {
+            hi += ext;
+        }
     }
-    return static_cast<std::size_t>(last) + 1;
+    return static_cast<std::size_t>(hi - lo) + 1;
 }
 
 /// Non-owning, multi-dimensional view over a caller-owned buffer.
