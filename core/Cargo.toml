@@ -10,8 +10,12 @@ description = "Cortex Rust Resource Manager — KPU memory pools + cxx bridge to
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+cxx = "=1.0.130"
 thiserror = "1.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.29", features = ["mman", "fs"] }
 libc = "0.2"
+
+[build-dependencies]
+cxx-build = "=1.0.130"
