@@ -22,6 +22,15 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.13.0](https://github.com/branes-ai/cortex/compare/v0.12.3...v0.13.0) (2026-05-24)
+
+
+### Features
+
+* **cv:** image container + grayscale PGM/PNG I/O ([#169](https://github.com/branes-ai/cortex/issues/169)) ([6e5966b](https://github.com/branes-ai/cortex/commit/6e5966b85ebfa74904840920dbeea47e84b054c0))
+* **sdk:** vio backend interface separating front-end from estimator ([bb56e46](https://github.com/branes-ai/cortex/commit/bb56e4628339bb4c5fff1285f6af50bad6d0753c)), closes [#34](https://github.com/branes-ai/cortex/issues/34)
+* **sdk:** VioBackend interface separating front-end from estimator ([#167](https://github.com/branes-ai/cortex/issues/167)) ([bb56e46](https://github.com/branes-ai/cortex/commit/bb56e4628339bb4c5fff1285f6af50bad6d0753c))
+
 ## [0.12.3](https://github.com/branes-ai/cortex/compare/v0.12.2...v0.12.3) (2026-05-24)
 
 
