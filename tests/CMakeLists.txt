@@ -118,3 +118,15 @@ target_link_libraries(math_sparse_direct_test PRIVATE
 target_compile_features(math_sparse_direct_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_sparse_direct_test)
+
+# Math layer — NLS solvers GN/LM/Dogleg (issue #30).
+add_executable(math_nls_test math_nls_test.cpp)
+target_link_libraries(math_nls_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_nls_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_nls_test)
