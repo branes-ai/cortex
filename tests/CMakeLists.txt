@@ -81,3 +81,16 @@ target_link_libraries(math_sparse_test PRIVATE
 target_compile_features(math_sparse_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_sparse_test)
+
+# Math layer — Lie groups SO3/SE3/Sim3 (issue #29). Round-trip + FD
+# Jacobian checks.
+add_executable(math_lie_test math_lie_test.cpp)
+target_link_libraries(math_lie_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_lie_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_lie_test)
