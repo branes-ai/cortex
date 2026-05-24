@@ -94,3 +94,15 @@ target_link_libraries(math_lie_test PRIVATE
 target_compile_features(math_lie_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_lie_test)
+
+# Math layer — Krylov solver wrappers over MTL5 ITL (issue #27).
+add_executable(math_krylov_test math_krylov_test.cpp)
+target_link_libraries(math_krylov_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_krylov_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_krylov_test)
