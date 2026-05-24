@@ -21,6 +21,9 @@
 
 namespace branes::math::lie {
 
+/// SE(3) — the group of 3D rigid-body motions (rotation + translation).
+/// Provides exp/log, composition, inverse, point action, homogeneous
+/// matrix, 6×6 adjoint, and the full left/right exponential Jacobians.
 template <Scalar T>
 class SE3 {
 public:
