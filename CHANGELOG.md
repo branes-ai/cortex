@@ -7,6 +7,13 @@ This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) 
 the first release, [release-please](https://github.com/googleapis/release-please)
 generates entries automatically from Conventional Commits on `main`.
 
+## [0.5.2](https://github.com/branes-ai/cortex/compare/v0.5.1...v0.5.2) (2026-05-24)
+
+
+### Tests
+
+* **bridge:** add C++/Rust cxx::bridge integration test ([#137](https://github.com/branes-ai/cortex/issues/137)) ([50e3e3c](https://github.com/branes-ai/cortex/commit/50e3e3c15e89c47c710f20f67fd7b655f8657d79))
+
 ## [0.5.1](https://github.com/branes-ai/cortex/compare/v0.5.0...v0.5.1) (2026-05-24)
 
 
