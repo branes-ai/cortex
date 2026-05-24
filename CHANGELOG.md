@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.10.0](https://github.com/branes-ai/cortex/compare/v0.9.0...v0.10.0) (2026-05-24)
+
+
+### Features
+
+* **math:** Krylov solvers (CG, GMRES, BiCGSTAB) over MTL5 ITL ([#149](https://github.com/branes-ai/cortex/issues/149)) ([f27b47c](https://github.com/branes-ai/cortex/commit/f27b47c959f0e126c879a2431873fc09cc5d95d1))
+* **math:** thin Krylov solver wrappers (cg, gmres, bicgstab) over MTL5 ITL ([f27b47c](https://github.com/branes-ai/cortex/commit/f27b47c959f0e126c879a2431873fc09cc5d95d1)), closes [#27](https://github.com/branes-ai/cortex/issues/27)
+
 ## [0.9.0](https://github.com/branes-ai/cortex/compare/v0.8.0...v0.9.0) (2026-05-24)
 
 
