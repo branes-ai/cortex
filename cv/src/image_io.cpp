@@ -25,6 +25,10 @@ OwnedImage<std::uint8_t> read_png(const std::string& path) {
     if (pixels == nullptr) {
         throw std::runtime_error("read_png: failed to decode " + path + " (" + stbi_failure_reason() + ")");
     }
+    if (w <= 0 || h <= 0) {  // defensive: stb should never return non-positive
+        stbi_image_free(pixels);
+        throw std::runtime_error("read_png: non-positive dimensions for " + path);
+    }
     OwnedImage<std::uint8_t> img(static_cast<std::size_t>(w), static_cast<std::size_t>(h));
     std::memcpy(img.data(), pixels, static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
     stbi_image_free(pixels);

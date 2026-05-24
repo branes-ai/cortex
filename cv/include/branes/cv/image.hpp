@@ -17,9 +17,12 @@
 #ifndef BRANES_CV_IMAGE_HPP
 #define BRANES_CV_IMAGE_HPP
 
+#include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -43,7 +46,12 @@ public:
     constexpr Image() noexcept = default;
 
     constexpr Image(T* data, std::size_t width, std::size_t height, std::size_t stride) noexcept
-        : data_(data), width_(width), height_(height), stride_(stride) {}
+        : data_(data), width_(width), height_(height), stride_(stride) {
+        // Rows are addressed as row*stride + col, so stride < width would
+        // overlap rows and produce out-of-bounds offsets. Debug-only so
+        // the view stays zero-overhead in release.
+        assert(stride >= width && "Image stride must be >= width");
+    }
 
     /// Contiguous view (stride == width).
     constexpr Image(T* data, std::size_t width, std::size_t height) noexcept : Image(data, width, height, width) {}
@@ -95,7 +103,7 @@ public:
     OwnedImage() = default;
 
     OwnedImage(std::size_t width, std::size_t height, T fill = T{})
-        : buf_(width * height, fill), width_(width), height_(height) {}
+        : buf_(checked_area(width, height), fill), width_(width), height_(height) {}
 
     [[nodiscard]] std::size_t width() const noexcept {
         return width_;
@@ -113,6 +121,7 @@ public:
         return buf_.data();
     }
 
+    /// Pixel access by (row, col). No bounds checking (mirrors Image).
     [[nodiscard]] T& operator()(std::size_t row, std::size_t col) noexcept {
         return buf_[row * width_ + col];
     }
@@ -128,6 +137,15 @@ public:
     }
 
 private:
+    // Guard against size_t overflow in width*height before it silently
+    // undersizes the allocation.
+    static std::size_t checked_area(std::size_t width, std::size_t height) {
+        if (width != 0 && height > std::numeric_limits<std::size_t>::max() / width) {
+            throw std::length_error("OwnedImage: width*height overflows size_t");
+        }
+        return width * height;
+    }
+
     std::vector<T> buf_;
     std::size_t width_ = 0;
     std::size_t height_ = 0;

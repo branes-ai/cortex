@@ -60,9 +60,16 @@ inline OwnedImage<std::uint8_t> read_pgm(const std::string& path) {
     if (magic != "P5" && magic != "P2") {
         throw std::runtime_error("read_pgm: not a PGM (P2/P5): " + path);
     }
-    const std::size_t width = std::stoul(detail::next_pgm_token(in));
-    const std::size_t height = std::stoul(detail::next_pgm_token(in));
-    const long maxval = std::stol(detail::next_pgm_token(in));
+    std::size_t width = 0;
+    std::size_t height = 0;
+    long maxval = 0;
+    try {  // std::sto* throw std::invalid_argument / out_of_range on garbage
+        width = std::stoul(detail::next_pgm_token(in));
+        height = std::stoul(detail::next_pgm_token(in));
+        maxval = std::stol(detail::next_pgm_token(in));
+    } catch (const std::exception&) {
+        throw std::runtime_error("read_pgm: malformed header in " + path);
+    }
     if (maxval <= 0 || maxval > 255) {
         throw std::runtime_error("read_pgm: unsupported maxval (expect 1..255)");
     }
@@ -74,8 +81,12 @@ inline OwnedImage<std::uint8_t> read_pgm(const std::string& path) {
             throw std::runtime_error("read_pgm: truncated pixel data");
         }
     } else {  // P2 ASCII
-        for (std::size_t i = 0; i < width * height; ++i) {
-            img.data()[i] = static_cast<std::uint8_t>(std::stoi(detail::next_pgm_token(in)));
+        try {
+            for (std::size_t i = 0; i < width * height; ++i) {
+                img.data()[i] = static_cast<std::uint8_t>(std::stoi(detail::next_pgm_token(in)));
+            }
+        } catch (const std::exception&) {
+            throw std::runtime_error("read_pgm: malformed pixel data in " + path);
         }
     }
     return img;
