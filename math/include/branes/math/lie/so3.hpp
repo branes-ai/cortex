@@ -22,6 +22,9 @@
 
 namespace branes::math::lie {
 
+/// SO(3) — the group of 3D rotations, stored as a unit quaternion.
+/// Provides exp/log, composition, inverse, rotation matrix, adjoint, and
+/// the left/right Jacobians of the exponential (with inverses).
 template <Scalar T>
 class SO3 {
 public:

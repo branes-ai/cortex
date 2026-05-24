@@ -23,6 +23,9 @@
 
 namespace branes::math::lie {
 
+/// Sim(3) — 3D similarity transforms (scale · rotation · translation).
+/// Provides exp/log, composition, inverse, point action, homogeneous
+/// matrix, 7×7 adjoint, and the left/right exponential Jacobians.
 template <Scalar T>
 class Sim3 {
 public:
