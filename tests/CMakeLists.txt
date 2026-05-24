@@ -177,3 +177,15 @@ target_link_libraries(cv_pyramid_test PRIVATE
 target_compile_features(cv_pyramid_test PRIVATE cxx_std_20)
 
 catch_discover_tests(cv_pyramid_test)
+
+# Math layer — camera models (issue #39).
+add_executable(math_cameras_test math_cameras_test.cpp)
+target_link_libraries(math_cameras_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_cameras_test PRIVATE cxx_std_20)
+
+catch_discover_tests(math_cameras_test)
