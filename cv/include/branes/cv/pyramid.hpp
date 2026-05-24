@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace branes::cv {
@@ -142,6 +143,9 @@ public:
     /// σ = scale_factor/2) and resampled to round(size / scale_factor).
     /// Construction stops early if a level would collapse below 1 pixel.
     Pyramid(Image<const T> base, int num_levels, double scale_factor = 2.0) : scale_(scale_factor) {
+        if (!std::isfinite(scale_factor) || scale_factor < 1.0) {
+            throw std::invalid_argument("Pyramid: scale_factor must be finite and >= 1.0");
+        }
         if (num_levels < 1)
             num_levels = 1;
         levels_.emplace_back(base.width(), base.height());
@@ -181,17 +185,27 @@ public:
         return scale_;
     }
 
-    [[nodiscard]] Image<const T> level(int i) const noexcept {
-        return levels_[static_cast<std::size_t>(i)].view();
+    [[nodiscard]] Image<const T> level(int i) const {
+        return levels_[checked_index(i)].view();
     }
-    [[nodiscard]] std::size_t level_width(int i) const noexcept {
-        return levels_[static_cast<std::size_t>(i)].width();
+    [[nodiscard]] std::size_t level_width(int i) const {
+        return levels_[checked_index(i)].width();
     }
-    [[nodiscard]] std::size_t level_height(int i) const noexcept {
-        return levels_[static_cast<std::size_t>(i)].height();
+    [[nodiscard]] std::size_t level_height(int i) const {
+        return levels_[checked_index(i)].height();
     }
 
 private:
+    // Validate a requested level index. The built level count can be
+    // smaller than requested (construction stops early once a level would
+    // collapse below 1 pixel), so callers must be range-checked.
+    [[nodiscard]] std::size_t checked_index(int i) const {
+        if (i < 0 || i >= num_levels()) {
+            throw std::out_of_range("Pyramid: level index out of range");
+        }
+        return static_cast<std::size_t>(i);
+    }
+
     std::vector<OwnedImage<T>> levels_;
     double scale_ = 2.0;
 };

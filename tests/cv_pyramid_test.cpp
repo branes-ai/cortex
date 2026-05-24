@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 namespace {
 
@@ -102,6 +103,17 @@ TEST_CASE("a horizontal ramp stays monotonic after downsampling", "[cv][pyramid]
             REQUIRE(l1(y, x) >= l1(y, x - 1));  // non-decreasing in x
 }
 
+TEST_CASE("invalid scale factor and out-of-range level are rejected", "[cv][pyramid]") {
+    cv::OwnedImage<std::uint8_t> base(32, 32, 0);
+    REQUIRE_THROWS_AS(cv::Pyramid<std::uint8_t>(base.view(), 3, 0.5),
+                      std::invalid_argument);  // < 1.0
+    REQUIRE_THROWS_AS(cv::Pyramid<std::uint8_t>(base.view(), 3, 0.0), std::invalid_argument);
+    cv::Pyramid<std::uint8_t> pyr(base.view(), 3, 2.0);
+    REQUIRE_THROWS_AS(pyr.level(-1), std::out_of_range);
+    REQUIRE_THROWS_AS(pyr.level(pyr.num_levels()), std::out_of_range);
+    REQUIRE_THROWS_AS(pyr.level_width(99), std::out_of_range);
+}
+
 TEST_CASE("pyramid is deterministic and works for float", "[cv][pyramid]") {
     cv::OwnedImage<float> base(40, 30, 0.0f);
     for (std::size_t y = 0; y < 30; ++y)
@@ -112,6 +124,7 @@ TEST_CASE("pyramid is deterministic and works for float", "[cv][pyramid]") {
     auto la = a.level(2);
     auto lb = b.level(2);
     REQUIRE(la.width() == lb.width());
+    REQUIRE(la.height() == lb.height());
     for (std::size_t y = 0; y < la.height(); ++y)
         for (std::size_t x = 0; x < la.width(); ++x)
             REQUIRE(la(y, x) == lb(y, x));  // bit-exact reproducibility
