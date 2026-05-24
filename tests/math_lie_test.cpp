@@ -137,6 +137,22 @@ TEST_CASE("SO3 round-trip across arithmetic types", "[math][lie][so3]") {
     }
 }
 
+TEST_CASE("SO3 left Jacobian inverse is finite and correct near a half-turn", "[math][lie][so3]") {
+    // Regression: the inverse-left-Jacobian's closed form divides by
+    // sin(theta), which vanishes at theta = pi. It must stay finite (the
+    // singularity is removable) and remain a true inverse there.
+    using V = det::Vec<double, 3>;
+    for (double ang : {3.0, 3.1, 3.14159265358979}) {
+        const V phi{{0.0, 0.0, ang}};  // axis = +z, |phi| = ang ~ pi
+        auto Jli = lie::SO3<double>::left_jacobian_inverse(phi);
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                REQUIRE(std::isfinite(Jli(i, j)));
+        auto Jl = lie::SO3<double>::left_jacobian(phi);
+        require_mat_close(Jl * Jli, det::Mat<double, 3, 3>::identity(), 1e-9);
+    }
+}
+
 // ── SE3 ──────────────────────────────────────────────────────────────
 
 namespace {
@@ -220,6 +236,39 @@ TEST_CASE("SE3 round-trip across arithmetic types", "[math][lie][se3]") {
     det::Vec<posit32, 6> xi{{posit32{0.5}, posit32{-0.3}, posit32{0.2}, posit32{0.3}, posit32{-0.2}, posit32{0.4}}};
     auto Tp = lie::SE3<posit32>::exp(xi);
     require_vec_close(Tp.log(), xi, 1e-5);
+}
+
+TEST_CASE("SE3 right Jacobian is accurate at small rotation angles", "[math][lie][se3]") {
+    // Regression: the Q-block coefficients divide by theta^4/theta^5, so
+    // the closed form is garbage for small-but-nonzero theta (the old
+    // 1e-5 series threshold left theta in [1e-5, 1e-3] using it). The
+    // FD check below fails pre-fix at theta <= 1e-3.
+    const double eps = 1e-7;
+    for (double th : {1e-4, 1e-3, 5e-3, 1e-2, 5e-2}) {
+        // |phi| = th (0.6^2 + 0.8^2 = 1), with a nonzero translation so
+        // the Q block (rho-phi coupling) is exercised.
+        const auto xi = vec6(0.5, -0.3, 0.2, th * 0.6, th * 0.8, 0.0);
+        auto base = lie::SE3<double>::exp(xi);
+        auto Jr = lie::SE3<double>::right_jacobian(xi);
+        for (std::size_t j = 0; j < 6; ++j) {
+            auto dxi = xi;
+            dxi[j] += eps;
+            auto delta = (base.inverse() * lie::SE3<double>::exp(dxi)).log();
+            for (std::size_t i = 0; i < 6; ++i) {
+                REQUIRE(std::abs(Jr(i, j) - delta[i] / eps) < 1e-4);
+            }
+        }
+    }
+}
+
+TEST_CASE("SE3 log is finite for a half-turn rotation", "[math][lie][se3]") {
+    // Exercises the SO3 inverse-left-Jacobian (used by SE3::log) at theta
+    // = pi, which previously produced NaN translation components.
+    const auto xi = vec6(0.4, -0.2, 0.1, 3.14159265358979, 0.0, 0.0);
+    auto Tr = lie::SE3<double>::exp(xi);
+    auto lg = Tr.log();
+    for (std::size_t i = 0; i < 6; ++i)
+        REQUIRE(std::isfinite(lg[i]));
 }
 
 // ── Sim3 ─────────────────────────────────────────────────────────────

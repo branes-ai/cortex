@@ -29,6 +29,9 @@
 #include <mtl/itl/krylov/gmres.hpp>
 #include <mtl/itl/pc/diagonal.hpp>
 #include <mtl/itl/pc/identity.hpp>
+#include <mtl/vec/dense_vector.hpp>
+
+#include <cstddef>
 
 namespace branes::math {
 
@@ -59,6 +62,22 @@ using DefaultPc = mtl::itl::pc::identity<LinearOp>;
 template <class VecX>
 using value_t = typename VecX::value_type;
 
+/// Build the iteration controller seeded with the *true* initial
+/// residual r0 = b − A·x, so the relative-tolerance reference is ‖r0‖
+/// (as documented) rather than ‖b‖ — these differ whenever the initial
+/// guess x is nonzero (e.g. a warm start).
+template <class LinearOp, class VecX, class VecB>
+mtl::itl::basic_iteration<value_t<VecX>>
+make_iteration(const LinearOp& A, const VecX& x, const VecB& b, const KrylovControl<value_t<VecX>>& ctrl) {
+    using Real = value_t<VecX>;
+    auto Ax = A * x;
+    mtl::vec::dense_vector<Real> r0(b.size());
+    for (std::size_t i = 0; i < static_cast<std::size_t>(b.size()); ++i) {
+        r0[i] = b[i] - Ax[i];
+    }
+    return mtl::itl::basic_iteration<Real>(r0, ctrl.max_iterations, ctrl.rel_tol, ctrl.abs_tol);
+}
+
 }  // namespace detail
 
 // ── Conjugate Gradient (symmetric positive definite) ────────────────
@@ -68,8 +87,7 @@ template <class LinearOp, class VecX, class VecB, class PC>
     requires LinearAlgebraScalar<detail::value_t<VecX>>
 KrylovResult
 cg(const LinearOp& A, VecX& x, const VecB& b, const PC& M, const KrylovControl<detail::value_t<VecX>>& ctrl) {
-    using Real = detail::value_t<VecX>;
-    mtl::itl::basic_iteration<Real> iter(b, ctrl.max_iterations, ctrl.rel_tol, ctrl.abs_tol);
+    auto iter = detail::make_iteration(A, x, b, ctrl);
     const int err = mtl::itl::cg(A, x, b, M, iter);
     return KrylovResult{err == 0, iter.iterations()};
 }
@@ -87,8 +105,7 @@ template <class LinearOp, class VecX, class VecB, class PC>
     requires LinearAlgebraScalar<detail::value_t<VecX>>
 KrylovResult
 bicgstab(const LinearOp& A, VecX& x, const VecB& b, const PC& M, const KrylovControl<detail::value_t<VecX>>& ctrl) {
-    using Real = detail::value_t<VecX>;
-    mtl::itl::basic_iteration<Real> iter(b, ctrl.max_iterations, ctrl.rel_tol, ctrl.abs_tol);
+    auto iter = detail::make_iteration(A, x, b, ctrl);
     const int err = mtl::itl::bicgstab(A, x, b, M, iter);
     return KrylovResult{err == 0, iter.iterations()};
 }
@@ -105,8 +122,7 @@ template <class LinearOp, class VecX, class VecB, class PC>
     requires LinearAlgebraScalar<detail::value_t<VecX>>
 KrylovResult
 gmres(const LinearOp& A, VecX& x, const VecB& b, const PC& M, const KrylovControl<detail::value_t<VecX>>& ctrl) {
-    using Real = detail::value_t<VecX>;
-    mtl::itl::basic_iteration<Real> iter(b, ctrl.max_iterations, ctrl.rel_tol, ctrl.abs_tol);
+    auto iter = detail::make_iteration(A, x, b, ctrl);
     const int err = mtl::itl::gmres(A, x, b, M, iter, ctrl.restart);
     return KrylovResult{err == 0, iter.iterations()};
 }

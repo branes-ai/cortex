@@ -139,7 +139,9 @@ public:
     }
 
 private:
-    static constexpr T kSmall = T{1} / T{100000};  // 1e-5
+    // Threshold (≈1e-2) below which the Q-block coefficients switch to
+    // their Taylor series; above it the closed forms are accurate.
+    static constexpr T kQSeries = T{1} / T{100};
 
     static Tangent neg(const Tangent& xi) {
         Tangent r;
@@ -160,11 +162,16 @@ private:
         const Matrix3 W = detail::hat(phi);
         const T theta2 = detail::dot(phi, phi);
 
+        // The closed forms divide near-zero numerators by θ⁴ and θ⁵, so
+        // they lose all precision well before θ reaches the old 1e-5
+        // guard (e.g. at θ=1e-4, c2 collapses to 0 and c3 to garbage).
+        // Use second-order Taylor expansions below θ≈1e-2, where the
+        // closed form is still accurate to ~1e-7 — a smooth hand-off.
         T c1, c2, c3;
-        if (theta2 < kSmall * kSmall) {
-            c1 = T{1} / T{6};
-            c2 = T{1} / T{24};
-            c3 = T{1} / T{120};
+        if (theta2 < kQSeries * kQSeries) {
+            c1 = T{1} / T{6} - theta2 / T{120};
+            c2 = T{1} / T{24} - theta2 / T{720};
+            c3 = T{1} / T{120} - theta2 / T{2520};
         } else {
             const T theta = detail::sqrt_(theta2);
             const T s = detail::sin_(theta);

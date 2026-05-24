@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 
 namespace branes::math {
 
@@ -59,6 +60,10 @@ mtl::vec::dense_vector<T> to_dense_vector(std::span<const T> b) {
 /// Direct Cholesky (LLᵀ) solver for a symmetric positive-definite system.
 /// Factors once at construction; `solve` reuses the factor for many
 /// right-hand sides.
+///
+/// Precondition: the CsrView must store the FULL symmetric matrix (both
+/// triangles), not a single triangle — the underlying factorization reads
+/// the stored pattern as-is and does not mirror a half-stored matrix.
 template <Scalar T>
 class SparseCholesky {
 public:
@@ -69,6 +74,10 @@ public:
     /// Solve A x = b. `b` and `x` are length-`dimension()` buffers.
     void solve(std::span<const T> b, std::span<T> x) const {
         const std::size_t n = num_.num_rows();
+        if (b.size() != n || x.size() < n) {
+            throw std::invalid_argument("SparseDirect::solve: b must have length dimension() and x "
+                                        "must be at least dimension()");
+        }
         auto bv = detail::to_dense_vector(b);
         mtl::vec::dense_vector<T> xv(n);
         num_.solve(xv, bv);
@@ -97,6 +106,9 @@ private:
 
 /// Direct LDLᵀ solver for a symmetric (possibly indefinite) system.
 /// Same factor-once / solve-many interface as SparseCholesky.
+///
+/// Precondition: the CsrView must store the FULL symmetric matrix (both
+/// triangles), as for SparseCholesky.
 template <Scalar T>
 class SparseLdlt {
 public:
@@ -105,6 +117,10 @@ public:
 
     void solve(std::span<const T> b, std::span<T> x) const {
         const std::size_t n = num_.num_rows();
+        if (b.size() != n || x.size() < n) {
+            throw std::invalid_argument("SparseDirect::solve: b must have length dimension() and x "
+                                        "must be at least dimension()");
+        }
         auto bv = detail::to_dense_vector(b);
         mtl::vec::dense_vector<T> xv(n);
         num_.solve(xv, bv);
