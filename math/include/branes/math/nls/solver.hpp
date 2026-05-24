@@ -53,11 +53,13 @@ enum class Status {
 template <Scalar T>
 struct Options {
     int max_iterations = 100;
-    T gradient_tolerance = T{1} / T{10000000000};     ///< ‖Jᵀr‖_∞  (1e-10)
-    T function_tolerance = T{1} / T{1000000000000};   ///< rel. cost drop (1e-12)
-    T parameter_tolerance = T{1} / T{1000000000000};  ///< rel. step size (1e-12)
-    T initial_trust_radius = T{1};                    ///< Dogleg
-    T initial_lambda = T{1} / T{1000};                ///< LM (1e-3)
+    T gradient_tolerance = T{1} / T{10000000000};  ///< ‖Jᵀr‖_∞  (1e-10)
+    // 1e-12 written via parenthesized construction: 1e12 is not exactly
+    // representable in float, so a braced T{...} would narrow-error.
+    T function_tolerance = T(1e-12);    ///< relative cost drop
+    T parameter_tolerance = T(1e-12);   ///< relative step size
+    T initial_trust_radius = T{1};      ///< Dogleg
+    T initial_lambda = T{1} / T{1000};  ///< LM (1e-3)
 };
 
 /// Outcome of a solve.
