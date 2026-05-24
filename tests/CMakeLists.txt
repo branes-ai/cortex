@@ -52,3 +52,19 @@ target_link_libraries(math_tensor_test PRIVATE
 target_compile_features(math_tensor_test PRIVATE cxx_std_20)
 
 catch_discover_tests(math_tensor_test)
+
+# Math layer — arithmetic-type plumbing (issue #25). Instantiates an
+# MTL5 expression (y = A*x + b) against IEEE + Universal scalar types to
+# prove type-genericity. Registered as `math_type_smoke`.
+add_executable(math_type_smoke math_type_smoke_test.cpp)
+target_link_libraries(math_type_smoke PRIVATE
+    Catch2::Catch2WithMain
+    branes::math
+    universal
+    branes::test_support
+)
+target_compile_features(math_type_smoke PRIVATE cxx_std_20)
+
+# Prefix the discovered ctest names so `ctest -R math_type_smoke`
+# (the issue #25 acceptance command) selects this suite.
+catch_discover_tests(math_type_smoke TEST_PREFIX "math_type_smoke.")
