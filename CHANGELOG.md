@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.12.2](https://github.com/branes-ai/cortex/compare/v0.12.1...v0.12.2) (2026-05-24)
+
+
+### Documentation
+
+* **math:** Doxygen API docs + concepts reference page ([#157](https://github.com/branes-ai/cortex/issues/157)) ([fdc9aed](https://github.com/branes-ai/cortex/commit/fdc9aed23fd3b6ec3c4a0f1cd33c5f9c9e87d629))
+* **math:** doxygen API docs and a concepts reference page ([fdc9aed](https://github.com/branes-ai/cortex/commit/fdc9aed23fd3b6ec3c4a0f1cd33c5f9c9e87d629)), closes [#32](https://github.com/branes-ai/cortex/issues/32)
+
 ## [0.12.1](https://github.com/branes-ai/cortex/compare/v0.12.0...v0.12.1) (2026-05-24)
 
 
