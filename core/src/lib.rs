@@ -5,12 +5,16 @@
 //! the `cxx::bridge` land in subsequent Phase 1 issues — see
 //! `docs/arch/phase1-design/README.md`.
 
+mod bridge;
 mod error;
 mod kpu_provider;
+mod lifecycle;
 mod memory_provider;
 mod sitl_provider;
 
+pub use bridge::{ffi, make_resource_manager, ResourceManager};
 pub use error::MemErr;
 pub use kpu_provider::KpuMemoryProvider;
+pub use lifecycle::{Lifecycle, LifecycleErr, LifecycleState};
 pub use memory_provider::{BufferHandle, BufferProps, MemoryProvider};
 pub use sitl_provider::SitlMemoryProvider;
