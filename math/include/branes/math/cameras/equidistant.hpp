@@ -36,7 +36,7 @@ public:
     /// Fisheye distortion of a normalized point.
     [[nodiscard]] Vec2<T> distort(const Vec2<T>& n) const {
         const T r = detail::sqrt_(n[0] * n[0] + n[1] * n[1]);
-        if (r < kEps)
+        if (r < detail::solver_eps<T>())
             return n;  // limit: scale → 1 at the optical axis
         const T theta = detail::atan_(r);
         const T td = theta_d(theta);
@@ -47,15 +47,17 @@ public:
     /// Inverse fisheye distortion (Newton solve for θ).
     [[nodiscard]] Vec2<T> undistort(const Vec2<T>& d) const {
         const T rd = detail::sqrt_(d[0] * d[0] + d[1] * d[1]);
-        if (rd < kEps)
+        if (rd < detail::solver_eps<T>())
             return d;
         T theta = rd;  // initial guess
         for (int i = 0; i < 20; ++i) {
             const T f = theta_d(theta) - rd;
             const T fp = dtheta_d_dtheta(theta);
+            if (detail::abs_(fp) < detail::solver_eps<T>())
+                break;  // flat derivative: avoid divide-by-near-zero
             const T step = f / fp;
             theta -= step;
-            if (detail::abs_(step) < kEps)
+            if (detail::abs_(step) < detail::solver_eps<T>())
                 break;
         }
         const T r = detail::tan_(theta);
@@ -78,8 +80,6 @@ public:
     }
 
 private:
-    static constexpr T kEps = T{1} / T{1000000000};
-
     [[nodiscard]] T theta_d(T theta) const {
         const T t2 = theta * theta;
         return theta * (T{1} + t2 * (k1_ + t2 * (k2_ + t2 * (k3_ + t2 * k4_))));
@@ -95,7 +95,7 @@ private:
     [[nodiscard]] Mat22<T> distort_jacobian(const Vec2<T>& n) const {
         const T a = n[0], b = n[1];
         const T r = detail::sqrt_(a * a + b * b);
-        if (r < kEps)
+        if (r < detail::solver_eps<T>())
             return {T{1}, T{0}, T{0}, T{1}};
         const T theta = detail::atan_(r);
         const T td = theta_d(theta);

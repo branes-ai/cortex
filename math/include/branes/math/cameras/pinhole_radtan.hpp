@@ -21,8 +21,10 @@ public:
     PinholeRadtanCamera(T fx, T fy, T cx, T cy, T k1, T k2, T p1, T p2, T k3 = T{0})
         : fx_(fx), fy_(fy), cx_(cx), cy_(cy), dist_{k1, k2, p1, p2, k3} {}
 
-    /// Project a 3D camera-frame point to a pixel.
+    /// Project a 3D camera-frame point to a pixel. Precondition: the
+    /// point is in front of the camera (Z > 0); a zero depth is undefined.
     [[nodiscard]] Vec2<T> project(const Vec3<T>& p) const {
+        assert(p[2] != T{0} && "PinholeRadtanCamera::project: Z must be non-zero");
         const Vec2<T> n{p[0] / p[2], p[1] / p[2]};
         const Vec2<T> d = dist_.distort(n);
         return {fx_ * d[0] + cx_, fy_ * d[1] + cy_};
@@ -47,6 +49,7 @@ public:
     /// Analytical d(pixel)/d(point), 2x3 row-major.
     [[nodiscard]] Mat23<T> project_jacobian(const Vec3<T>& p) const {
         const T X = p[0], Y = p[1], Z = p[2];
+        assert(Z != T{0} && "PinholeRadtanCamera::project_jacobian: Z must be non-zero");
         const T iz = T{1} / Z;
         const Vec2<T> n{X * iz, Y * iz};
         // d(normalized)/d(point): [[1/Z, 0, -X/Z^2], [0, 1/Z, -Y/Z^2]].

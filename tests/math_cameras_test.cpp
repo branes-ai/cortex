@@ -13,6 +13,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+// clang-format off
+#include <universal/number/posit/posit.hpp>
+#include <universal/number/posit/mathlib.hpp>
+// clang-format on
+
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -23,7 +28,8 @@ namespace cam = branes::math::cameras;
 
 template <class T>
 cam::Vec3<T> normalize3(cam::Vec3<T> v) {
-    const T n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    using std::sqrt;  // ADL: std for floats, sw::universal for posit
+    const T n = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     return {v[0] / n, v[1] / n, v[2] / n};
 }
 
@@ -109,6 +115,11 @@ TEST_CASE("unified omnidirectional round-trip and Jacobian", "[math][cameras]") 
         REQUIRE(std::abs(bearing[2] - ray[2]) < 1e-8);
         check_jacobian(c, ray, 1e-6, 1e-4);
     }
+    // The omni model embeds radtan: distort/undistort must invert too.
+    const cam::Vec2<double> n{0.18, -0.11};
+    const auto rt = c.undistort(c.distort(n));
+    REQUIRE(std::abs(rt[0] - n[0]) < 1e-10);
+    REQUIRE(std::abs(rt[1] - n[1]) < 1e-10);
 }
 
 TEST_CASE("pixel round-trip project(unproject(px)) == px", "[math][cameras]") {
@@ -119,6 +130,25 @@ TEST_CASE("pixel round-trip project(unproject(px)) == px", "[math][cameras]") {
     const auto px2 = c.project(ray);
     REQUIRE(std::abs(px2[0] - px[0]) < 1e-6);
     REQUIRE(std::abs(px2[1] - px[1]) < 1e-6);
+}
+
+TEST_CASE("camera models round-trip for a Universal posit type", "[math][cameras]") {
+    using posit32 = sw::universal::posit<32, 2>;
+    cam::PinholeRadtanCamera<posit32> c(posit32(458.654),
+                                        posit32(457.296),
+                                        posit32(367.215),
+                                        posit32(248.375),
+                                        posit32(-0.283408),
+                                        posit32(0.0739591),
+                                        posit32(0.00019359),
+                                        posit32(1.76187e-5));
+    const auto ray = normalize3<posit32>({posit32(0.2), posit32(-0.1), posit32(1)});
+    const auto px = c.project(ray);
+    const auto bearing = c.unproject(px);
+    REQUIRE(std::abs(double(bearing[0]) - double(ray[0])) < 1e-4);
+    REQUIRE(std::abs(double(bearing[1]) - double(ray[1])) < 1e-4);
+    REQUIRE(std::abs(double(bearing[2]) - double(ray[2])) < 1e-4);
+    check_jacobian(c, ray, posit32(1e-3), 1e-1);
 }
 
 TEST_CASE("camera models instantiate and round-trip for float", "[math][cameras]") {

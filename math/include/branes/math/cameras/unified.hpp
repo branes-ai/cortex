@@ -21,9 +21,11 @@ public:
     OmnidirectionalCamera(T fx, T fy, T cx, T cy, T xi, T k1 = T{0}, T k2 = T{0}, T p1 = T{0}, T p2 = T{0})
         : fx_(fx), fy_(fy), cx_(cx), cy_(cy), xi_(xi), dist_{k1, k2, p1, p2, T{0}} {}
 
+    /// Precondition: the point projects in front of the mirror (Z + ξ‖p‖ > 0).
     [[nodiscard]] Vec2<T> project(const Vec3<T>& p) const {
         const T d = detail::sqrt_(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
         const T w = p[2] + xi_ * d;
+        assert(w != T{0} && "OmnidirectionalCamera::project: degenerate Z + xi*|p|");
         const Vec2<T> n{p[0] / w, p[1] / w};
         const Vec2<T> dd = dist_.distort(n);
         return {fx_ * dd[0] + cx_, fy_ * dd[1] + cy_};
@@ -34,7 +36,11 @@ public:
         const Vec2<T> n = dist_.undistort(nd);
         // Lift normalized coords to the unit sphere (UCM inverse).
         const T rho2 = n[0] * n[0] + n[1] * n[1];
-        const T factor = (xi_ + detail::sqrt_(T{1} + (T{1} - xi_ * xi_) * rho2)) / (rho2 + T{1});
+        // Clamp the radicand: for ξ > 1 and large ρ² it can go negative
+        // (out of the model's domain); avoid a silent NaN.
+        const T radicand = T{1} + (T{1} - xi_ * xi_) * rho2;
+        const T root = detail::sqrt_(radicand > T{0} ? radicand : T{0});
+        const T factor = (xi_ + root) / (rho2 + T{1});
         return {factor * n[0], factor * n[1], factor - xi_};
     }
 
@@ -50,6 +56,7 @@ public:
         const T X = p[0], Y = p[1], Z = p[2];
         const T d = detail::sqrt_(X * X + Y * Y + Z * Z);
         const T w = Z + xi_ * d;
+        assert(w != T{0} && "OmnidirectionalCamera::project_jacobian: degenerate w");
         const T iw2 = T{1} / (w * w);
         // d(sphere-projected normalized)/d(point).
         const Mat23<T> Js{(w - xi_ * X * X / d) * iw2,

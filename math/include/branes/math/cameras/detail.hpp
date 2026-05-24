@@ -14,8 +14,10 @@
 #include <branes/math/arithmetic.hpp>
 
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace branes::math::cameras {
 
@@ -66,6 +68,15 @@ template <Scalar T>
 [[nodiscard]] T abs_(const T& x) {
     using std::abs;
     return abs(x);
+}
+
+/// Type-relative tolerance for the iterative solvers (undistort). Scales
+/// to the scalar's precision (numeric_limits is specialized for the
+/// Universal types as well as the built-in floats), so float / posit
+/// backends converge sensibly instead of against a baked-in double scale.
+template <Scalar T>
+[[nodiscard]] T solver_eps() {
+    return static_cast<T>(100) * std::numeric_limits<T>::epsilon();
 }
 
 /// Multiply a 2x2 (row-major) by a 2x3 (row-major) → 2x3 (row-major).
@@ -119,6 +130,7 @@ struct RadTan {
     /// standard OpenCV-style undistort iteration), recovering normalized
     /// coords from distorted ones.
     [[nodiscard]] Vec2<T> undistort(const Vec2<T>& d) const {
+        const T eps = solver_eps<T>();
         Vec2<T> n = d;  // initial guess
         for (int iter = 0; iter < 20; ++iter) {
             const Vec2<T> f = distort(n);
@@ -126,15 +138,15 @@ struct RadTan {
             const T rx = f[0] - d[0];
             const T ry = f[1] - d[1];
             const T det = J[0] * J[3] - J[1] * J[2];
-            if (abs_(det) < T(1e-12))
-                break;  // parens: 1e12 not float-exact
+            if (abs_(det) < eps)
+                break;  // near-singular: stop
             const T inv = T{1} / det;
             // Newton step: n -= J^{-1} r.
             const T dx = inv * (J[3] * rx - J[1] * ry);
             const T dy = inv * (-J[2] * rx + J[0] * ry);
             n[0] = n[0] - dx;
             n[1] = n[1] - dy;
-            if (abs_(dx) + abs_(dy) < T(1e-11))
+            if (abs_(dx) + abs_(dy) < eps)
                 break;
         }
         return n;
