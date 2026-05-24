@@ -56,6 +56,13 @@ public:
     /// Contiguous view (stride == width).
     constexpr Image(T* data, std::size_t width, std::size_t height) noexcept : Image(data, width, height, width) {}
 
+    /// Implicit mutable→const view conversion, like std::span<U> →
+    /// std::span<const U>. Enabled only when T is `const U`.
+    template <class U>
+        requires(std::same_as<T, const U>)
+    constexpr Image(const Image<U>& other) noexcept
+        : data_(other.data()), width_(other.width()), height_(other.height()), stride_(other.stride()) {}
+
     [[nodiscard]] constexpr std::size_t width() const noexcept {
         return width_;
     }
