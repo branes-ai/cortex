@@ -81,7 +81,7 @@ jobs:
         run: sccache --show-stats
 
   coverage:
-    name: Coverage (cargo-llvm-cov, measure-only)
+    name: Coverage (cargo-llvm-cov, gated >= 85%)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -99,16 +99,22 @@ jobs:
       - name: Run sccache-action
         # Workflow-level RUSTC_WRAPPER=sccache requires sccache installed.
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
-      - name: Coverage (core/)
+      - name: Coverage (core/) — generate lcov + print summary + gate
         working-directory: core
-        # No --fail-under-lines floor yet — Phase 0 has no real tests in
-        # core/. Phase 1 (#13-#20) lands the MemoryProvider trait, lifecycle
-        # state machine, and bridge tests; that's where we tighten this
-        # into a real gate (target: >= 85%).
+        # Phase 1 (#19) flips on --fail-under-lines 85. The bar is set to
+        # the lowest credible floor that the current test suite clears
+        # comfortably; tighten over time as test coverage grows.
         run: |
-          cargo llvm-cov --workspace --all-features --summary-only --lcov --output-path coverage.lcov
+          # First pass: generate lcov + run tests, no gate yet so we
+          # always reach the summary print.
+          cargo llvm-cov --workspace --all-features --no-report
+          cargo llvm-cov report --lcov --output-path coverage.lcov
           echo ""
-          echo "Coverage summary above; floor enforcement lands with first real tests (Phase 1)."
+          echo "=== Coverage summary ==="
+          cargo llvm-cov report --summary-only
+          echo ""
+          echo "=== Enforcing line-coverage floor (>= 85%) ==="
+          cargo llvm-cov report --fail-under-lines 85
       - name: Upload coverage artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
