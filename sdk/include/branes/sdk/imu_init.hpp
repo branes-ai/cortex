@@ -37,8 +37,9 @@ namespace branes::sdk {
 
 // The dynamic alignment reuses the SDK's small dense linear-algebra
 // facility (the only runtime-sized SPD solver in the SDK).
+using msckf::cholesky;
+using msckf::cholesky_solve;
 using msckf::DynMat;
-using msckf::is_positive_definite;
 using msckf::spd_solve;
 
 /// Knobs for the initializer. Defaults target a consumer MEMS IMU.
@@ -154,9 +155,22 @@ public:
         r.gyro_bias = estimate_gyro_bias(kfs);
         if (!estimate_gravity_and_velocities(kfs, r))
             return r;
-        // Build the gravity-aligned attitude at the first keyframe, with
-        // its yaw taken from the vision pose (which fixes the gauge).
-        r.R_world_imu = kfs[0].R_world_imu;
+
+        // The alignment recovers gravity in the (arbitrary) vision world
+        // frame. Rotate the whole result into a gravity-aligned world —
+        // gravity along −z — so that R_world_imu and gravity_world are
+        // mutually consistent, exactly as on the static path. The rotation
+        // is about a horizontal axis, so it only corrects roll/pitch and
+        // preserves the vision yaw gauge.
+        const T g_norm = math::lie::detail::norm(r.gravity_world);
+        if (!(g_norm > T{0}))
+            return r;                                              // degenerate gravity ⇒ leave success = false
+        const Vec3 up_world = r.gravity_world * (-T{1} / g_norm);  // "up" = −gravity
+        const SO3 R_align = align_to_world_up(up_world);           // vision → gravity world
+        for (auto& vel : r.velocities_world)
+            vel = R_align * vel;
+        r.gravity_world = R_align * r.gravity_world;  // now (0,0,−g_norm)
+        r.R_world_imu = R_align * kfs[0].R_world_imu;
         r.accel_bias = Vec3{};
         r.success = true;
         return r;
@@ -295,12 +309,14 @@ private:
         }
 
         // Gravity is well-determined; the velocities need motion to be
-        // observable. A small ridge regularizes the rest.
+        // observable. A small ridge regularizes the rest. Factor once and
+        // reuse the factor for the solve (return false if not PD).
         for (std::size_t i = 0; i < dim; ++i)
             H(i, i) += T(1e-9);
-        if (!is_positive_definite(H))
+        DynMat<T> L;
+        if (!cholesky(H, L))
             return false;
-        const DynMat<T> x = spd_solve(H, b);
+        const DynMat<T> x = cholesky_solve(L, b);
 
         r.velocities_world.resize(n);
         for (std::size_t i = 0; i < n; ++i)

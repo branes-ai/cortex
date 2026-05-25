@@ -130,6 +130,59 @@ TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu
             REQUIRE_THAT(r.velocities_world[i][j], Catch::Matchers::WithinAbs(v[i][j], 1e-3));
 }
 
+TEST_CASE("dynamic init recovers the gyro bias with a non-identity dR_dbg", "[sdk][imu_init]") {
+    using KF = bs::DynInitKeyframe<T>;
+    using Mat3 = bs::ImuInitializer<T>::Mat3;
+
+    const Vec3 g_world{{0.0, 0.0, -9.81}};
+    const Vec3 bg_true{{0.003, -0.004, 0.005}};
+    const T dt = 0.1;
+    const std::size_t n = 5;
+
+    // A non-trivial bias Jacobian, varied per keyframe, exercises the JᵀJ
+    // normal-equations accumulation (not the J = I shortcut).
+    auto jac = [](std::size_t i) {
+        Mat3 J{};
+        J(0, 0) = 2.0 - 0.1 * static_cast<T>(i);
+        J(1, 1) = 0.5 + 0.05 * static_cast<T>(i);
+        J(2, 2) = 1.5;
+        J(0, 1) = 0.2;  // off-diagonal coupling
+        return J;
+    };
+
+    std::vector<SO3> R(n);
+    std::vector<Vec3> p(n), v(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const T s = static_cast<T>(i);
+        R[i] = SO3::exp(Vec3{{0.04 * s, -0.02 * s, 0.03 * s}});
+        p[i] = Vec3{{0.3 * s, 0.05 * s * s, 0.1 * s}};
+        v[i] = Vec3{{0.3, 0.1 * s, -0.05}};
+    }
+
+    std::vector<KF> kfs(n);
+    kfs[0].R_world_imu = R[0];
+    kfs[0].p_world_imu = p[0];
+    for (std::size_t i = 1; i < n; ++i) {
+        const Mat3 Rit = R[i - 1].inverse().matrix();
+        const Mat3 J = jac(i);
+        kfs[i].R_world_imu = R[i];
+        kfs[i].p_world_imu = p[i];
+        kfs[i].dt = dt;
+        kfs[i].dR_dbg = J;
+        // ΔR = (Rᵢᵀ Rⱼ)·Exp(−J·bg) ⇒ residual Log(ΔRᵀ Rᵢᵀ Rⱼ) = J·bg,
+        // so the GN step solves (Σ JᵀJ) δ = (Σ JᵀJ) bg ⇒ δ = bg_true.
+        kfs[i].dR = (R[i - 1].inverse() * R[i]) * SO3::exp(J * bg_true * (-T{1}));
+        kfs[i].dv = Rit * (v[i] - v[i - 1] + g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt + g_world * (T{0.5} * dt * dt));
+    }
+
+    bs::ImuInitializer<T> init;
+    const auto r = init.try_dynamic(kfs);
+    REQUIRE(r.success);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE_THAT(r.gyro_bias[i], Catch::Matchers::WithinAbs(bg_true[i], 1e-6));
+}
+
 TEST_CASE("dynamic init fails with too few keyframes", "[sdk][imu_init]") {
     std::vector<bs::DynInitKeyframe<T>> one(1);
     bs::ImuInitializer<T> init;

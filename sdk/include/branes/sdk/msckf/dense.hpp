@@ -132,19 +132,13 @@ template <math::Scalar T>
     return cholesky(b, L);
 }
 
-/// Solve the SPD system A X = B (A n×n, B n×k) via the Cholesky factor.
-/// Precondition: A is positive-definite.
+/// Solve A X = B given a precomputed lower Cholesky factor L (A = L Lᵀ).
+/// Lets a caller that already factored A (e.g. to test definiteness) reuse
+/// the factor instead of re-factoring inside `spd_solve`.
 template <math::Scalar T>
-[[nodiscard]] DynMat<T> spd_solve(const DynMat<T>& a, const DynMat<T>& b) {
-    assert(a.rows == a.cols && a.rows == b.rows && "spd_solve: shape mismatch");
-    DynMat<T> L;
-    if (!cholesky(a, L)) {
-        // Precondition violated (A not PD). Fail loudly in debug; in
-        // release return zeros so a degenerate update is a no-op, not UB.
-        assert(false && "spd_solve: A is not positive-definite");
-        return DynMat<T>(a.rows, b.cols);
-    }
-    const std::size_t n = a.rows;
+[[nodiscard]] DynMat<T> cholesky_solve(const DynMat<T>& L, const DynMat<T>& b) {
+    assert(L.rows == L.cols && L.rows == b.rows && "cholesky_solve: shape mismatch");
+    const std::size_t n = L.rows;
     const std::size_t k = b.cols;
     DynMat<T> x(n, k);
     // Forward (L y = b) then back (Lᵀ x = y), per RHS column.
@@ -163,6 +157,21 @@ template <math::Scalar T>
         }
     }
     return x;
+}
+
+/// Solve the SPD system A X = B (A n×n, B n×k) via the Cholesky factor.
+/// Precondition: A is positive-definite.
+template <math::Scalar T>
+[[nodiscard]] DynMat<T> spd_solve(const DynMat<T>& a, const DynMat<T>& b) {
+    assert(a.rows == a.cols && a.rows == b.rows && "spd_solve: shape mismatch");
+    DynMat<T> L;
+    if (!cholesky(a, L)) {
+        // Precondition violated (A not PD). Fail loudly in debug; in
+        // release return zeros so a degenerate update is a no-op, not UB.
+        assert(false && "spd_solve: A is not positive-definite");
+        return DynMat<T>(a.rows, b.cols);
+    }
+    return cholesky_solve(L, b);
 }
 
 }  // namespace branes::sdk::msckf
