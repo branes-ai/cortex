@@ -91,6 +91,7 @@ void symmetrize(DynMat<T>& a) {
 /// positive-definite to working precision.
 template <math::Scalar T>
 [[nodiscard]] bool cholesky(const DynMat<T>& a, DynMat<T>& L) {
+    assert(a.rows == a.cols && "DynMat::cholesky: matrix must be square");
     const std::size_t n = a.rows;
     L = DynMat<T>(n, n);
     for (std::size_t j = 0; j < n; ++j) {
