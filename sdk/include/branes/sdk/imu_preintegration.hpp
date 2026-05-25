@@ -35,7 +35,11 @@ public:
         : bg_(gyro_bias), ba_(accel_bias) {}
 
     /// Fold one IMU sample (gyro rad/s, accel m/s²) over interval `dt`.
+    /// A non-positive or non-finite `dt` (e.g. out-of-order or duplicate
+    /// timestamps) is ignored rather than corrupting the accumulators.
     void integrate(const Vec3& gyro, const Vec3& accel, T dt) {
+        if (!(dt > T{0}))
+            return;  // also rejects NaN
         const Vec3 w = gyro - bg_;
         const Vec3 a = accel - ba_;
         const SO3 dRi = SO3::exp(w * dt);

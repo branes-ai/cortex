@@ -89,6 +89,17 @@ TEST_CASE("zero motion gives identity preintegration", "[sdk][imu]") {
     REQUIRE(std::abs(pre.delta_time() - 0.5) < 1e-9);
 }
 
+TEST_CASE("integrate ignores non-positive dt", "[sdk][imu]") {
+    branes::sdk::ImuPreintegrator<T> pre;
+    pre.integrate(Vec3{{0.1, 0.2, 0.3}}, Vec3{{1, 2, 3}}, 0.0);    // no-op
+    pre.integrate(Vec3{{0.1, 0.2, 0.3}}, Vec3{{1, 2, 3}}, -0.01);  // no-op
+    REQUIRE(pre.delta_time() == 0.0);
+    require_vec3_close(pre.delta_rotation().log(), Vec3{{0, 0, 0}}, 1e-12);
+    require_vec3_close(pre.delta_velocity(), Vec3{{0, 0, 0}}, 1e-12);
+    pre.integrate(Vec3{{0.1, 0.2, 0.3}}, Vec3{{1, 2, 3}}, 0.01);  // applied
+    REQUIRE(std::abs(pre.delta_time() - 0.01) < 1e-12);
+}
+
 TEST_CASE("bias-correction Jacobians match finite differences", "[sdk][imu]") {
     const T dt = 0.005;
     const int n = 120;
