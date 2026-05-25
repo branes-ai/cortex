@@ -70,8 +70,8 @@ TEST_CASE("KLT reports OutOfBounds when the window leaves the frame", "[cv][klt]
     constexpr int W = 200, H = 200;
     const auto a = render(W, H, 0.0, 0.0);
     const cv::Pyramid<float> p(a.view(), 3, 2.0);
-    // A point within 5px of the right edge: the half-5 window exceeds the
-    // image, so the tracked result is flagged OutOfBounds.
+    // A point within hw+1 px of the right edge: its support window leaves
+    // a pyramid level, so the result is flagged OutOfBounds.
     std::vector<cv::KeyPoint> pts = {{196, 100, 0}};
     const auto tracked = cv::track_klt_pyramidal(p, p, pts);
     REQUIRE(tracked[0].status == cv::TrackStatus::OutOfBounds);

@@ -69,6 +69,12 @@ template <PixelType T>
     return (v00 * (1 - ax) + v01 * ax) * (1 - ay) + (v10 * (1 - ax) + v11 * ax) * ay;
 }
 
+/// True if a window of half-size `margin` centered at (cx, cy) lies fully
+/// inside a `w`×`h` level (so sampling never falls back on clamped border).
+[[nodiscard]] inline bool window_in_bounds(int w, int h, double cx, double cy, double margin) {
+    return cx - margin >= 0.0 && cy - margin >= 0.0 && cx + margin <= w - 1.0 && cy + margin <= h - 1.0;
+}
+
 }  // namespace detail
 
 /// Track `points` from the `prev` pyramid into the `next` pyramid.
@@ -87,17 +93,33 @@ template <PixelType T>
     results.reserve(points.size());
 
     for (const auto& pt : points) {
+        // Guard degenerate (empty) pyramids: nothing to track against.
+        if (levels < 1) {
+            results.push_back({pt.x, pt.y, TrackStatus::Lost});
+            continue;
+        }
+
         double flow_x = 0.0, flow_y = 0.0;  // displacement in finest pixels
         TrackStatus status = TrackStatus::Tracked;
 
-        for (int l = levels - 1; l >= 0; --l) {
+        for (int l = levels - 1; l >= 0 && status == TrackStatus::Tracked; --l) {
             const double scale = std::pow(sf, l);
             const auto tmpl = prev.level(l);
             const auto img = next.level(l);
+            const int tw = static_cast<int>(tmpl.width());
+            const int th = static_cast<int>(tmpl.height());
             const double cx = pt.x / scale;  // template center at this level
             const double cy = pt.y / scale;
             double gx = flow_x / scale;  // displacement guess at this level
             double gy = flow_y / scale;
+
+            // The template-gradient pass samples sx±1 / sy±1, so the
+            // template needs an hw+1 margin; if it doesn't fit, the point
+            // is too close to the edge to track here.
+            if (!detail::window_in_bounds(tw, th, cx, cy, hw + 1.0)) {
+                status = TrackStatus::OutOfBounds;
+                break;
+            }
 
             // Precompute template intensities, gradients, and Hessian
             // (inverse-compositional: constant across iterations).
@@ -146,23 +168,20 @@ template <PixelType T>
                     break;
             }
 
+            // If the support window left this level, the solve ran against
+            // clamped border pixels — report OutOfBounds rather than a
+            // bogus result.
+            if (!detail::window_in_bounds(
+                    static_cast<int>(img.width()), static_cast<int>(img.height()), cx + gx, cy + gy, hw)) {
+                status = TrackStatus::OutOfBounds;
+                break;
+            }
+
             flow_x = gx * scale;
             flow_y = gy * scale;
         }
 
-        KltResult r;
-        r.x = static_cast<float>(pt.x + flow_x);
-        r.y = static_cast<float>(pt.y + flow_y);
-        if (status == TrackStatus::Tracked) {
-            // Bounds check against the finest level.
-            const auto fine = next.level(0);
-            if (r.x - hw < 0 || r.y - hw < 0 || r.x + hw >= static_cast<double>(fine.width()) ||
-                r.y + hw >= static_cast<double>(fine.height())) {
-                status = TrackStatus::OutOfBounds;
-            }
-        }
-        r.status = status;
-        results.push_back(r);
+        results.push_back({static_cast<float>(pt.x + flow_x), static_cast<float>(pt.y + flow_y), status});
     }
     return results;
 }
