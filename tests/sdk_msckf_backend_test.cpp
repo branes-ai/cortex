@@ -14,9 +14,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -67,7 +70,7 @@ TEST_CASE("the backend initializes attitude from a stationary window", "[sdk][ms
     const DVec3 g_body_est = ns.T_world_imu.rotation().inverse() * g_world;
     const T cosang = branes::math::lie::detail::dot(g_body_true, g_body_est) /
                      (branes::math::lie::detail::norm(g_body_true) * branes::math::lie::detail::norm(g_body_est));
-    const T deg = std::acos(std::min(T{1}, std::max(T{-1}, cosang))) * 180.0 / M_PI;
+    const T deg = std::acos(std::min(T{1}, std::max(T{-1}, cosang))) * T{180} / std::numbers::pi_v<T>;
     REQUIRE(deg < 1.0);
 }
 
@@ -138,11 +141,24 @@ TEST_CASE("the backend runs end-to-end and stays stable under motion", "[sdk][ms
     REQUIRE(std::isfinite(backend.current_state().velocity_world[0]));
 }
 
-TEST_CASE("the square-root covariance flag is a distinct (unimplemented) type", "[sdk][msckf][backend]") {
-    // Documents the template knob: the full-covariance backend is the
-    // default; the sqrt path is a separate instantiation (static_assert
-    // guards it), so this is purely a compile-time contract check.
-    Backend full;
-    full.initialize(default_config());
-    REQUIRE_FALSE(full.initialized());  // no samples yet
+TEST_CASE("the backend rejects an empty calibration and out-of-range cameras", "[sdk][msckf][backend]") {
+    REQUIRE_THROWS_AS(Backend(std::vector<Backend::CameraCalibration>{}), std::invalid_argument);
+
+    // An observation from an unknown camera is dropped (not aliased to 0),
+    // so it neither corrupts the state nor reads out of bounds.
+    Backend backend;  // one default camera (id 0)
+    backend.initialize(default_config());
+    double t = 0.0;
+    for (int k = 0; k < 80; ++k, t += 0.005)
+        backend.process_imu(imu_sample(t, DVec3{{0, 0, 0}}, DVec3{{0, 0, 9.81}}));
+    REQUIRE(backend.initialized());
+
+    bs::FrontendObservation<T> o;
+    o.feature_id = 0;
+    o.camera_id = 7;  // out of range
+    o.u = 0.1;
+    o.v = 0.0;
+    std::vector<bs::FrontendObservation<T>> obs{o};
+    backend.process_camera(t + 0.01, obs);  // must not crash
+    REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().P));
 }

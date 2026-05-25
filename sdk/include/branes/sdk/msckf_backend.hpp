@@ -14,14 +14,16 @@
 // ends (it is no longer observed) or when the oldest clone it touches is
 // about to be marginalized to keep the window at `max_clones`.
 //
-// The `UseSqrtCovariance` template parameter selects a square-root
-// covariance backend; only the full-covariance path is implemented today
-// (the square-root path is tracked as a follow-up), so instantiating with
-// `true` is a compile-time error.
+// This is the full-covariance backend. A square-root covariance variant
+// is a separate, larger effort tracked as a follow-up to issue #35.
 //
-// Observations are processed in normalized image coordinates: each camera
-// carries a model (intrinsics) used only to unproject pixels to bearings,
-// keeping the estimator core intrinsics-agnostic. Header-only, C++20.
+// `process_camera` propagates the state to the frame timestamp (zero-order
+// hold on the last IMU sample) before cloning, so each clone is anchored
+// at exactly the image time even on an asynchronous IMU/camera feed.
+//
+// Observations are pixel coordinates per the VioBackend contract; each
+// camera's model unprojects them to bearings, keeping the estimator core
+// intrinsics-agnostic. Header-only, C++20.
 
 #ifndef BRANES_SDK_MSCKF_BACKEND_HPP
 #define BRANES_SDK_MSCKF_BACKEND_HPP
@@ -33,6 +35,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -40,12 +43,8 @@
 
 namespace branes::sdk {
 
-template <math::Scalar T, bool UseSqrtCovariance = false>
+template <math::Scalar T>
 class MsckfBackend final : public VioBackend<T> {
-    static_assert(!UseSqrtCovariance,
-                  "MsckfBackend: the square-root covariance path is not yet implemented; "
-                  "instantiate with UseSqrtCovariance = false (the full-covariance backend).");
-
 public:
     using Scalar = T;
     using Camera = math::cameras::PinholeRadtanCamera<T>;
@@ -60,12 +59,18 @@ public:
         Extrinsics extrinsics{};
     };
 
-    /// Default: a single identity-pinhole camera coincident with the IMU,
-    /// so that pixel coordinates are already normalized.
+    /// Default: a single identity-pinhole camera coincident with the IMU.
+    /// This is only correct when the observations are already normalized /
+    /// rectified (tests, or a front end that pre-normalizes); production
+    /// code must construct with the real per-camera `CameraCalibration`.
     MsckfBackend() : MsckfBackend(std::vector<CameraCalibration>{CameraCalibration{}}) {}
 
+    /// Precondition: `cameras` is non-empty.
     explicit MsckfBackend(std::vector<CameraCalibration> cameras)
-        : cameras_(std::move(cameras)), updater_(extrinsics_of(cameras_)) {}
+        : cameras_(std::move(cameras)), updater_(extrinsics_of(cameras_)) {
+        if (cameras_.empty())
+            throw std::invalid_argument("MsckfBackend: at least one camera calibration is required");
+    }
 
     void initialize(const VioConfig& config) override {
         config_ = config;
@@ -100,24 +105,42 @@ public:
             return;
         }
         if (have_last_time_) {
-            const T dt = static_cast<T>(imu.timestamp_s - last_imu_time_);
-            prop_.propagate(state_, gyro, accel, dt);  // ignores dt ≤ 0
+            const double dt = imu.timestamp_s - last_imu_time_;
+            if (!(dt > 0.0))
+                return;  // drop out-of-order / duplicate samples — don't touch filter time
+            prop_.propagate(state_, gyro, accel, static_cast<T>(dt));
         }
         last_imu_time_ = imu.timestamp_s;
         have_last_time_ = true;
         state_.timestamp = imu.timestamp_s;
+        last_gyro_ = gyro;  // held over to the next frame's image time
+        last_accel_ = accel;
     }
 
     void process_camera(double timestamp_s, std::span<const FrontendObservation<T>> obs) override {
         if (!initialized_)
             return;
 
+        // Propagate to the image time (zero-order hold on the last IMU
+        // sample) so the clone is anchored at exactly `timestamp_s`, even
+        // when the frame falls between IMU samples. Out-of-order frames are
+        // ignored.
+        if (have_last_time_) {
+            const double dt = timestamp_s - last_imu_time_;
+            if (dt < 0.0)
+                return;
+            if (dt > 0.0) {
+                prop_.propagate(state_, last_gyro_, last_accel_, static_cast<T>(dt));
+                last_imu_time_ = timestamp_s;
+            }
+        }
+
         // Keep the window bounded: marginalize (after updating) the oldest
         // clone(s) before adding the new one.
         while (state_.clones.size() >= max_clones_)
             marginalize_oldest();
 
-        // Augment a clone at the current pose, tagged with this frame time.
+        // Augment a clone at the (now frame-time) pose.
         state_.timestamp = timestamp_s;
         msckf::StateHelper<T>::augment_clone(state_);
 
@@ -225,8 +248,9 @@ private:
     }
 
     bool to_normalized(std::uint32_t cam_id, T u, T v, DVec2& out) const {
-        const std::size_t idx = cam_id < cameras_.size() ? cam_id : 0;
-        const auto bearing = cameras_[idx].intrinsics.unproject(math::cameras::Vec2<T>{{u, v}});
+        if (cam_id >= cameras_.size())
+            return false;  // unknown camera — reject rather than alias to camera 0
+        const auto bearing = cameras_[cam_id].intrinsics.unproject(math::cameras::Vec2<T>{{u, v}});
         // unproject returns a +Z-forward unit bearing; normalize to the
         // image plane. A non-positive Z means the ray is not in front.
         if (!(bearing[2] > T{0}))
@@ -304,6 +328,8 @@ private:
     bool initialized_ = false;
     bool have_last_time_ = false;
     double last_imu_time_ = 0.0;
+    DVec3 last_gyro_{};  ///< most recent IMU sample, held over to the image time
+    DVec3 last_accel_{};
     std::vector<DVec3> init_gyro_;
     std::vector<DVec3> init_accel_;
     std::unordered_map<std::uint64_t, std::vector<ObsRec>> tracks_;
