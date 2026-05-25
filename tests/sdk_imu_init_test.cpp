@@ -12,8 +12,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <vector>
 
 namespace {
@@ -59,7 +61,7 @@ TEST_CASE("static init recovers gravity within 0.5 deg and the gyro bias", "[sdk
     // Gravity-in-body from the estimate vs. truth.
     const Vec3 g_body_true = R_true.inverse() * g_world;
     const Vec3 g_body_est = r.R_world_imu.inverse() * r.gravity_world;
-    const T deg = angle_between(g_body_true, g_body_est) * 180.0 / M_PI;
+    const T deg = angle_between(g_body_true, g_body_est) * T(180) / std::numbers::pi_v<T>;
     REQUIRE(deg < 0.5);
 
     for (std::size_t i = 0; i < 3; ++i)
@@ -117,7 +119,7 @@ TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu
     const auto r = init.try_dynamic(kfs);
     REQUIRE(r.success);
 
-    REQUIRE(angle_between(r.gravity_world, g_world) * 180.0 / M_PI < 0.5);
+    REQUIRE(angle_between(r.gravity_world, g_world) * T(180) / std::numbers::pi_v<T> < 0.5);
     REQUIRE_THAT(branes::math::lie::detail::norm(r.gravity_world), Catch::Matchers::WithinAbs(9.81, 1e-3));
     for (std::size_t i = 0; i < 3; ++i)
         REQUIRE_THAT(r.gyro_bias[i], Catch::Matchers::WithinAbs(bg_true[i], 1e-6));
