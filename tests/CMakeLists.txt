@@ -200,3 +200,14 @@ target_link_libraries(cv_fast_test PRIVATE
 target_compile_features(cv_fast_test PRIVATE cxx_std_20)
 
 catch_discover_tests(cv_fast_test)
+
+# CV layer — KLT pyramidal tracker (issue #38).
+add_executable(cv_klt_test cv_klt_test.cpp)
+target_link_libraries(cv_klt_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::cv
+    branes::test_support
+)
+target_compile_features(cv_klt_test PRIVATE cxx_std_20)
+
+catch_discover_tests(cv_klt_test)
