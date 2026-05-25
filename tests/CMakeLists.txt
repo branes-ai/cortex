@@ -198,6 +198,17 @@ target_compile_features(sdk_imu_init_test PRIVATE cxx_std_20)
 
 catch_discover_tests(sdk_imu_init_test)
 
+# SDK layer — MSCKF camera updater (mono/stereo null-space) (issue #44).
+add_executable(sdk_msckf_camera_test sdk_msckf_camera_test.cpp)
+target_link_libraries(sdk_msckf_camera_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::sdk
+    branes::test_support
+)
+target_compile_features(sdk_msckf_camera_test PRIVATE cxx_std_20)
+
+catch_discover_tests(sdk_msckf_camera_test)
+
 # CV layer — Image container + I/O (issue #48). stb_image provides the
 # stb_image_write.h header used to encode PNG fixtures in the test.
 add_executable(cv_image_test cv_image_test.cpp)
