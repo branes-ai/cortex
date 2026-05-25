@@ -49,8 +49,12 @@ public:
         DynMat<T> F = DynMat<T>::identity(d);
         const Mat3 negR_dt = R * (-dt);
         const Mat3 negRahat_dt = (R * math::lie::detail::hat(a)) * (-dt);
-        // δθ̇ = −R δbg  ⇒  F[θ, bg] = −R dt
-        place3(F, State<T>::kTheta, State<T>::kBg, negR_dt);
+        const Mat3 negwhat_dt = math::lie::detail::hat(w) * (-dt);
+        // Body-frame right-perturbation error model (R ← R·Exp(δθ)):
+        //   δθ̇ = −[ω]ₓ δθ − δbg  ⇒  F[θ,θ] += −[ω]ₓ dt, F[θ,bg] = −I dt
+        place3(F, State<T>::kTheta, State<T>::kTheta, negwhat_dt);
+        for (std::size_t i = 0; i < 3; ++i)
+            F(State<T>::kTheta + i, State<T>::kBg + i) += -dt;
         // δṗ = δv       ⇒  F[p, v] = I·dt
         for (std::size_t i = 0; i < 3; ++i)
             F(State<T>::kPos + i, State<T>::kVel + i) += dt;

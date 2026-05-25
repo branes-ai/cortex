@@ -11,6 +11,7 @@
 
 #include <branes/math/lie/detail.hpp>  // scalar sqrt_
 
+#include <cassert>
 #include <cstddef>
 #include <vector>
 
@@ -42,6 +43,7 @@ struct DynMat {
 
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> mul(const DynMat<T>& a, const DynMat<T>& b) {
+    assert(a.cols == b.rows && "DynMat::mul: inner dimensions must match");
     DynMat<T> r(a.rows, b.cols);
     for (std::size_t i = 0; i < a.rows; ++i)
         for (std::size_t k = 0; k < a.cols; ++k) {
@@ -65,6 +67,7 @@ template <math::Scalar T>
 
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> add(const DynMat<T>& a, const DynMat<T>& b) {
+    assert(a.rows == b.rows && a.cols == b.cols && "DynMat::add: shape mismatch");
     DynMat<T> r(a.rows, a.cols);
     for (std::size_t i = 0; i < a.d.size(); ++i)
         r.d[i] = a.d[i] + b.d[i];
@@ -75,6 +78,7 @@ template <math::Scalar T>
 /// otherwise creep into the covariance over many updates.
 template <math::Scalar T>
 void symmetrize(DynMat<T>& a) {
+    assert(a.rows == a.cols && "DynMat::symmetrize: matrix must be square");
     for (std::size_t i = 0; i < a.rows; ++i)
         for (std::size_t j = i + 1; j < a.cols; ++j) {
             const T avg = (a(i, j) + a(j, i)) / T{2};
@@ -131,9 +135,14 @@ template <math::Scalar T>
 /// Precondition: A is positive-definite.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> spd_solve(const DynMat<T>& a, const DynMat<T>& b) {
+    assert(a.rows == a.cols && a.rows == b.rows && "spd_solve: shape mismatch");
     DynMat<T> L;
-    if (!cholesky(a, L))
-        return DynMat<T>(a.rows, b.cols);  // not PD
+    if (!cholesky(a, L)) {
+        // Precondition violated (A not PD). Fail loudly in debug; in
+        // release return zeros so a degenerate update is a no-op, not UB.
+        assert(false && "spd_solve: A is not positive-definite");
+        return DynMat<T>(a.rows, b.cols);
+    }
     const std::size_t n = a.rows;
     const std::size_t k = b.cols;
     DynMat<T> x(n, k);

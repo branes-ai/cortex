@@ -11,6 +11,7 @@
 
 #include <branes/sdk/msckf/state.hpp>
 
+#include <cassert>
 #include <cstddef>
 #include <span>
 
@@ -57,6 +58,7 @@ struct StateHelper {
     /// Drop clone `idx`: delete its 6 error-state rows/cols (a principal
     /// submatrix of a PD matrix stays PD) and remove it from the window.
     static void marginalize_clone(State<T>& s, std::size_t idx) {
+        assert(idx < s.clones.size() && "marginalize_clone: index out of range");
         const std::size_t d = s.dim();
         const std::size_t off = s.clone_offset(idx);
         std::vector<std::size_t> keep;
@@ -80,6 +82,12 @@ struct StateHelper {
     static void ekf_update(State<T>& s, const DynMat<T>& H, std::span<const T> r, std::span<const T> R_diag) {
         const std::size_t d = s.dim();
         const std::size_t k = H.rows;
+        assert(H.cols == d && "ekf_update: H must be k×dim");
+        assert(r.size() == k && R_diag.size() == k && "ekf_update: r / R_diag length must be H.rows");
+#ifndef NDEBUG
+        for (std::size_t i = 0; i < k; ++i)
+            assert(R_diag[i] > T{0} && "ekf_update: measurement noise must be positive");
+#endif
         const DynMat<T> Ht = transpose(H);
         const DynMat<T> PHt = mul(s.P, Ht);  // d×k
         DynMat<T> S = mul(H, PHt);           // k×k

@@ -38,6 +38,8 @@ struct State {
     static constexpr std::size_t kCloneDim = 6;
 
     /// A cloned IMU pose (taken at an image time), kept in the window.
+    /// Timestamps are wall-clock seconds — intentionally `double` (not the
+    /// state scalar T), matching VioBackend / ImuMeasurement.
     struct Clone {
         SO3 R{};
         Vec3 p{};
