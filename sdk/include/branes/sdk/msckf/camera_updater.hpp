@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -65,7 +66,7 @@ struct FeatureTrack {
 
 template <math::Scalar T>
 struct CameraUpdaterOptions {
-    T pixel_sigma = T{1} / T{100};  ///< normalized-coordinate measurement σ
+    T normalized_sigma = T{1} / T{100};  ///< measurement σ in normalized image coords
     /// Reject the track if the gated Mahalanobis distance exceeds
     /// `chi2_per_dof · (#projected rows)`. A loose default; the daemon can
     /// substitute a proper χ² quantile per residual dimension.
@@ -85,7 +86,16 @@ public:
     using Extrinsics = CameraExtrinsics<T>;
 
     CameraUpdater(std::vector<Extrinsics> cameras, const Options& opts = {})
-        : cameras_(std::move(cameras)), opts_(opts) {}
+        : cameras_(std::move(cameras)), opts_(opts) {
+        // Reject misconfiguration at the SDK boundary: a non-positive σ
+        // would feed zero/negative noise into ekf_update (which requires
+        // strictly positive noise), and a non-positive gate would reject
+        // or admit everything.
+        if (!(opts_.normalized_sigma > T{0}))
+            throw std::invalid_argument("CameraUpdater: normalized_sigma must be positive");
+        if (opts_.enable_gating && !(opts_.chi2_per_dof > T{0}))
+            throw std::invalid_argument("CameraUpdater: chi2_per_dof must be positive when gating");
+    }
 
     /// Triangulate, marginalize, gate, and (if accepted) apply the EKF
     /// update for one feature track. Returns true iff the state was
@@ -140,7 +150,7 @@ public:
         for (std::size_t i = 0; i < proj.rows; ++i)
             for (std::size_t j = 0; j < n; ++j)
                 H(i, j) = proj.H_x[i * n + j];
-        const T r2 = opts_.pixel_sigma * opts_.pixel_sigma;
+        const T r2 = opts_.normalized_sigma * opts_.normalized_sigma;
         std::vector<T> R_diag(proj.rows, r2);
 
         if (opts_.enable_gating && !passes_gate(s, H, proj.r, r2))

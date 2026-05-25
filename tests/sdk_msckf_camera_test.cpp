@@ -133,7 +133,7 @@ TEST_CASE("the filter stays stable over 1000 updates", "[sdk][msckf][camera]") {
     // A handful of features spread across the field of view.
     const std::vector<Vec3> feats = {{{0.4, 0.2, 3.0}}, {{0.9, -0.3, 5.0}}, {{1.3, 0.4, 4.0}}, {{0.7, -0.1, 6.0}}};
 
-    const T tr0 = trace(s.P);
+    T tr_prev = trace(s.P);
     std::size_t applied = 0;
     for (int step = 0; step < 1000; ++step) {
         const Vec3& f = feats[static_cast<std::size_t>(step) % feats.size()];
@@ -141,12 +141,15 @@ TEST_CASE("the filter stays stable over 1000 updates", "[sdk][msckf][camera]") {
         if (upd.update(s, track))
             ++applied;
         // Innovation stays well-conditioned ⇒ covariance never goes
-        // indefinite and never blows up.
+        // indefinite and never blows up. With no propagation between
+        // updates, every step only removes information, so the trace is
+        // monotonically non-increasing — assert that per step.
         REQUIRE(ms::is_positive_semidefinite(s.P));
         const T tr = trace(s.P);
         REQUIRE(std::isfinite(tr));
-        REQUIRE(tr <= tr0 + 1e-6);  // updates only ever remove information
+        REQUIRE(tr <= tr_prev + 1e-9);
         REQUIRE(tr > 0.0);
+        tr_prev = tr;
     }
     // The consistent (zero-residual) measurements should keep being
     // accepted by the Mahalanobis gate throughout.
