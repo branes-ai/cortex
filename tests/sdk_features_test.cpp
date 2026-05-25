@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -69,6 +70,14 @@ TEST_CASE("MSCKF null-space projection annihilates the feature Jacobian", "[sdk]
     REQUIRE(proj.cols == 3);
     for (T v : proj.H_x)
         REQUIRE(std::abs(v) < 1e-9);
+}
+
+TEST_CASE("MSCKF projection rejects mismatched span sizes", "[sdk][features]") {
+    constexpr std::size_t m = 6, n = 4;
+    std::vector<T> Hf(m * 3, 1.0), Hx_short((m - 1) * n, 1.0), r(m, 0.0);
+    REQUIRE_THROWS_AS(ft::msckf_left_nullspace_project<T>(
+                          std::span<const T>{Hf}, std::span<const T>{Hx_short}, std::span<const T>{r}, m, n),
+                      std::invalid_argument);
 }
 
 TEST_CASE("MSCKF projection removes the feature term from a measurement", "[sdk][features]") {

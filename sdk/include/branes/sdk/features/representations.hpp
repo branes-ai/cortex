@@ -18,6 +18,8 @@
 
 #include <branes/math/lie/se3.hpp>
 
+#include <cassert>
+
 namespace branes::sdk::features {
 
 template <math::Scalar T>
@@ -45,14 +47,19 @@ struct AnchoredInverseDepthFeature {
     T beta{0};
     T rho{1};
 
+    /// Precondition: ρ ≠ 0 (a zero inverse depth is a point at infinity).
     [[nodiscard]] Vec3<T> world_point() const {
+        assert(rho != T{0} && "AnchoredInverseDepthFeature: rho must be non-zero");
         const T inv = T{1} / rho;
         return anchor * Vec3<T>{{alpha * inv, beta * inv, inv}};
     }
 
-    /// Build from a world point and an anchor pose.
+    /// Build from a world point and an anchor pose. Precondition: the
+    /// point's depth in the anchor frame is non-zero (not on the anchor's
+    /// z = 0 plane).
     [[nodiscard]] static AnchoredInverseDepthFeature from_world(const SE3<T>& anchor, const Vec3<T>& p_world) {
         const Vec3<T> p_a = anchor.inverse() * p_world;
+        assert(p_a[2] != T{0} && "AnchoredInverseDepthFeature: anchor-frame depth must be non-zero");
         return {anchor, p_a[0] / p_a[2], p_a[1] / p_a[2], T{1} / p_a[2]};
     }
 };

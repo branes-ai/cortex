@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace branes::sdk::features {
@@ -45,6 +46,10 @@ template <math::Scalar T>
     NullspaceProjection<T> out;
     if (m <= 3)
         return out;
+    // The spans must hold the declared shapes before we index them.
+    if (H_f.size() < m * 3 || H_x.size() < m * n || r.size() < m) {
+        throw std::invalid_argument("msckf_left_nullspace_project: span smaller than m*3 / m*n / m");
+    }
 
     // Augmented matrix M = [H_f | H_x | r], row-major, m × (3 + n + 1).
     const std::size_t cols = 3 + n + 1;
