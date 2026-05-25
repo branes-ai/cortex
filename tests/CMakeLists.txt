@@ -165,6 +165,17 @@ target_compile_features(sdk_imu_preintegration_test PRIVATE cxx_std_20)
 
 catch_discover_tests(sdk_imu_preintegration_test)
 
+# SDK layer — feature representations + MSCKF null-space (issue #41).
+add_executable(sdk_features_test sdk_features_test.cpp)
+target_link_libraries(sdk_features_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::sdk
+    branes::test_support
+)
+target_compile_features(sdk_features_test PRIVATE cxx_std_20)
+
+catch_discover_tests(sdk_features_test)
+
 # CV layer — Image container + I/O (issue #48). stb_image provides the
 # stb_image_write.h header used to encode PNG fixtures in the test.
 add_executable(cv_image_test cv_image_test.cpp)
