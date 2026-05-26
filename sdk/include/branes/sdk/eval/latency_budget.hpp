@@ -56,6 +56,10 @@ struct FrameLatencyBudget<float> {
 [[nodiscard]] inline double percentile(std::vector<double> samples, double p) {
     if (samples.empty())
         throw std::invalid_argument("percentile: empty sample set");
+    // NaN slips through the p<=0 / p>=1 guards below, and casting ceil(NaN)
+    // to size_t is undefined behavior — reject it up front.
+    if (std::isnan(p))
+        throw std::invalid_argument("percentile: p is NaN");
     std::sort(samples.begin(), samples.end());
     const auto n = samples.size();
     if (p <= 0.0)
