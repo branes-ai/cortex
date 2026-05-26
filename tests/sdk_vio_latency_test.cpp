@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -74,10 +75,12 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
 
 TEST_CASE("percentile picks nearest-rank order statistics", "[sdk][vio][latency]") {
     std::vector<double> v = {5, 1, 3, 2, 4};  // sorts to 1..5
+    // Nearest-rank (⌈p·n⌉): p=0→min, p=1→max, p=0.5→⌈2.5⌉=3rd=3, p=0.99→5th=5.
     REQUIRE_THAT(ev::percentile(v, 0.0), Catch::Matchers::WithinAbs(1.0, 1e-12));
     REQUIRE_THAT(ev::percentile(v, 1.0), Catch::Matchers::WithinAbs(5.0, 1e-12));
-    REQUIRE(ev::percentile(v, 0.5) >= 2.0);
-    REQUIRE(ev::percentile(v, 0.5) <= 4.0);
+    REQUIRE_THAT(ev::percentile(v, 0.5), Catch::Matchers::WithinAbs(3.0, 1e-12));
+    REQUIRE_THAT(ev::percentile(v, 0.99), Catch::Matchers::WithinAbs(5.0, 1e-12));
+    REQUIRE_THROWS_AS(ev::percentile(std::vector<double>{}, 0.5), std::invalid_argument);
 }
 
 TEST_CASE("feed_image stays within the per-frame latency budget", "[sdk][vio][latency]") {
@@ -158,6 +161,10 @@ TEST_CASE("V1_01_easy feed_image latency is within budget", "[sdk][vio][latency]
             imu_idx = end;
         }
         const auto img = branes::cv::read_png(f.path);
+        // An empty image makes feed_image return early (~0 ms), which would
+        // falsely satisfy the budget — don't time it.
+        if (img.view().empty())
+            continue;
         const auto t0 = std::chrono::steady_clock::now();
         est.feed_image(f.t_s, img.view());
         if (frame > 5)  // skip warm-up frames

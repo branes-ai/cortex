@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace branes::sdk::eval {
@@ -49,19 +50,24 @@ struct FrameLatencyBudget<float> {
 };
 
 /// Nearest-rank percentile of `samples` (p in [0, 1]); e.g. p = 0.5 is the
-/// median, p = 0.99 the 99th percentile. Copies and sorts; samples must be
-/// non-empty.
+/// median, p = 0.99 the 99th percentile. Uses the nearest-rank definition
+/// rank = ⌈p·n⌉ (so the tail isn't underestimated: p99 of 60 samples picks
+/// the 60th, not the 59th). Copies and sorts. Throws if `samples` is empty.
 [[nodiscard]] inline double percentile(std::vector<double> samples, double p) {
+    if (samples.empty())
+        throw std::invalid_argument("percentile: empty sample set");
     std::sort(samples.begin(), samples.end());
-    if (p < 0.0)
-        p = 0.0;
-    if (p > 1.0)
-        p = 1.0;
     const auto n = samples.size();
-    auto idx = static_cast<std::size_t>(std::llround(p * static_cast<double>(n - 1)));
-    if (idx >= n)
-        idx = n - 1;
-    return samples[idx];
+    if (p <= 0.0)
+        return samples.front();
+    if (p >= 1.0)
+        return samples.back();
+    auto rank = static_cast<std::size_t>(std::ceil(p * static_cast<double>(n)));
+    if (rank < 1)
+        rank = 1;
+    if (rank > n)
+        rank = n;
+    return samples[rank - 1];
 }
 
 }  // namespace branes::sdk::eval
