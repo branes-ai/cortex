@@ -160,7 +160,9 @@ private:
     // Track existing features into `image`, replenish with new FAST
     // detections, and return one observation per surviving track.
     std::vector<FrontendObservation<T>> track_frame(cv::Image<const Pixel> image) {
-        cv::Pyramid<Pixel> next(image, fe_.pyramid_levels);
+        // At least one level, so level(0) is always valid even if a caller
+        // sets a non-positive pyramid_levels.
+        cv::Pyramid<Pixel> next(image, std::max(1, fe_.pyramid_levels));
 
         if (have_prev_ && !tracks_.empty()) {
             std::vector<cv::KeyPoint> pts;
