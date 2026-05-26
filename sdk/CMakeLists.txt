@@ -12,4 +12,6 @@ add_library(branes::sdk ALIAS branes_sdk)
 target_include_directories(branes_sdk INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(branes_sdk INTERFACE cxx_std_20)
-target_link_libraries(branes_sdk INTERFACE branes::math)
+# branes::math for the estimator/operator math; branes::cv for the VIO
+# front end (FAST + KLT + pyramid) that VioEstimator (#45) owns.
+target_link_libraries(branes_sdk INTERFACE branes::math branes::cv)
