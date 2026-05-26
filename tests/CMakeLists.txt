@@ -244,6 +244,18 @@ target_compile_features(sdk_sliding_window_backend_test PRIVATE cxx_std_20)
 
 catch_discover_tests(sdk_sliding_window_backend_test)
 
+# SDK layer — EuRoC replay harness + ATE/RPE metrics (issue #46).
+add_executable(sdk_vio_euroc_test sdk_vio_euroc_test.cpp)
+target_link_libraries(sdk_vio_euroc_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::sdk
+    branes::cv
+    branes::test_support
+)
+target_compile_features(sdk_vio_euroc_test PRIVATE cxx_std_20)
+
+catch_discover_tests(sdk_vio_euroc_test TEST_PREFIX "vio_euroc.")
+
 # CV layer — Image container + I/O (issue #48). stb_image provides the
 # stb_image_write.h header used to encode PNG fixtures in the test.
 add_executable(cv_image_test cv_image_test.cpp)
