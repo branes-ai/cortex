@@ -21,6 +21,7 @@
 #include <branes/sdk/vio_backend.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -72,6 +73,16 @@ inline double ns_to_s(const std::string& ns) {
     return static_cast<double>(std::stoll(ns)) * 1e-9;
 }
 
+/// Parse a finite floating-point field; reject NaN/Inf so malformed CSV
+/// values can't propagate into the estimator's integration or the
+/// trajectory alignment.
+inline double parse_finite(const std::string& field) {
+    const double v = std::stod(field);
+    if (!std::isfinite(v))
+        throw std::runtime_error("asl_replay: non-finite value '" + field + "'");
+    return v;
+}
+
 }  // namespace detail
 
 /// Parse imu0/data.csv → ascending IMU samples (gyro rad/s, accel m/s²).
@@ -84,10 +95,12 @@ template <math::Scalar T>
             continue;
         ImuMeasurement<T> m;
         m.timestamp_s = detail::ns_to_s(f[0]);
-        m.angular_velocity = Vec3<T>{
-            {static_cast<T>(std::stod(f[1])), static_cast<T>(std::stod(f[2])), static_cast<T>(std::stod(f[3]))}};
-        m.linear_acceleration = Vec3<T>{
-            {static_cast<T>(std::stod(f[4])), static_cast<T>(std::stod(f[5])), static_cast<T>(std::stod(f[6]))}};
+        m.angular_velocity = Vec3<T>{{static_cast<T>(detail::parse_finite(f[1])),
+                                      static_cast<T>(detail::parse_finite(f[2])),
+                                      static_cast<T>(detail::parse_finite(f[3]))}};
+        m.linear_acceleration = Vec3<T>{{static_cast<T>(detail::parse_finite(f[4])),
+                                         static_cast<T>(detail::parse_finite(f[5])),
+                                         static_cast<T>(detail::parse_finite(f[6]))}};
         out.push_back(m);
     }
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.timestamp_s < b.timestamp_s; });
@@ -115,13 +128,16 @@ template <math::Scalar T>
         const auto f = detail::split_csv(ln);
         if (f.size() < 8)
             continue;
-        const math::lie::detail::Vec<T, 3> p{
-            {static_cast<T>(std::stod(f[1])), static_cast<T>(std::stod(f[2])), static_cast<T>(std::stod(f[3]))}};
+        const math::lie::detail::Vec<T, 3> p{{static_cast<T>(detail::parse_finite(f[1])),
+                                              static_cast<T>(detail::parse_finite(f[2])),
+                                              static_cast<T>(detail::parse_finite(f[3]))}};
         // ASL quaternion order is (w, x, y, z).
-        const typename math::lie::SO3<T>::Quaternion q{{static_cast<T>(std::stod(f[4])),
-                                                        static_cast<T>(std::stod(f[5])),
-                                                        static_cast<T>(std::stod(f[6])),
-                                                        static_cast<T>(std::stod(f[7]))}};
+        const double qw = detail::parse_finite(f[4]), qx = detail::parse_finite(f[5]);
+        const double qy = detail::parse_finite(f[6]), qz = detail::parse_finite(f[7]);
+        if (!(qw * qw + qx * qx + qy * qy + qz * qz > 0.0))
+            throw std::runtime_error("asl_replay: zero-norm ground-truth quaternion");
+        const typename math::lie::SO3<T>::Quaternion q{
+            {static_cast<T>(qw), static_cast<T>(qx), static_cast<T>(qy), static_cast<T>(qz)}};
         eval::StampedPose<T> sp;
         sp.t_s = detail::ns_to_s(f[0]);
         sp.pose = math::lie::SE3<T>(math::lie::SO3<T>(q), p);
@@ -156,8 +172,15 @@ replay(const std::string& dataset_root, Estimator& est, const VioConfig& config)
             est.feed_imu(std::span<const ImuMeasurement<T>>{imu.data() + imu_idx, end - imu_idx});
             imu_idx = end;
         }
-        const cv::OwnedImage<std::uint8_t> img = cv::read_png(frame.path);
-        est.feed_image(frame.t_s, img.view());
+        // A single unreadable/corrupt frame shouldn't abort the whole
+        // sequence — skip it (IMU has already advanced) and continue.
+        cv::OwnedImage<std::uint8_t> img;
+        try {
+            img = cv::read_png(frame.path);
+        } catch (const std::exception&) {
+            continue;
+        }
+        est.feed_image(frame.t_s, std::as_const(img).view());
 
         eval::StampedPose<T> sp;
         sp.t_s = frame.t_s;
