@@ -52,6 +52,10 @@ public:
     using DVec3 = math::lie::detail::Vec<T, 3>;
     using DVec2 = math::lie::detail::Vec<T, 2>;
 
+    /// Advertises that this backend performs real estimation (contrast
+    /// with the SlidingWindowBackend skeleton, which is false).
+    static constexpr bool kImplemented = true;
+
     /// A camera's calibration: its projection model (for pixel→bearing
     /// unprojection) and its pose in the IMU frame.
     struct CameraCalibration {

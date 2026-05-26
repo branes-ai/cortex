@@ -45,7 +45,8 @@ TEST_CASE("the skeleton reports itself unimplemented", "[sdk][swopt]") {
     bs::SlidingWindowBackend<T> sw;
     REQUIRE_FALSE(sw.implemented());
     STATIC_REQUIRE(bs::SlidingWindowBackend<T>::kImplemented == false);
-    // The functional backend, by contrast, estimates.
+    // The functional backend, by contrast, estimates and is also a VioBackend.
+    STATIC_REQUIRE(bs::MsckfBackend<T>::kImplemented == true);
     STATIC_REQUIRE(std::is_base_of_v<bs::VioBackend<T>, bs::MsckfBackend<T>>);
 }
 
