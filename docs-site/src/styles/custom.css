@@ -1,0 +1,37 @@
+/* Cortex docs theme — cool slate with a perception-blue accent. */
+
+:root {
+  --sl-color-accent-low: #14233a;
+  --sl-color-accent: #2f80ed;
+  --sl-color-accent-high: #9ec5fe;
+
+  --sl-color-bg: #0d1521;
+  --sl-color-bg-nav: #14202f;
+  --sl-color-bg-sidebar: #14202f;
+
+  --sl-color-white: #f7fafc;
+  --sl-color-gray-1: #e3e9f0;
+  --sl-color-gray-2: #c4cedd;
+  --sl-color-gray-3: #92a1b6;
+  --sl-color-gray-4: #5f7088;
+  --sl-color-gray-5: #2f3e52;
+  --sl-color-gray-6: #1a2738;
+  --sl-color-text: var(--sl-color-gray-1);
+  --sl-color-text-accent: var(--sl-color-accent-high);
+}
+
+/* Light mode keeps the same accent. */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #c8dcfb;
+  --sl-color-accent: #1d63d8;
+  --sl-color-accent-high: #11305f;
+}
+
+.hero {
+  padding-block: 3rem;
+}
+
+/* Tighten dense reference tables (benchmark numbers, citation tables). */
+table {
+  font-variant-numeric: tabular-nums;
+}

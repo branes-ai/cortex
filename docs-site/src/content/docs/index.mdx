@@ -1,0 +1,75 @@
+---
+title: Cortex
+description: Core Embodied AI Framework for perception — a layered Rust + C++20 visual-inertial odometry and SLAM stack for spatial-dataflow accelerators.
+template: splash
+hero:
+  tagline: A layered Rust + C++20 perception stack where algorithms never see middleware and middleware never sees hardware.
+  image:
+    file: ../../assets/hero.svg
+  actions:
+    - text: Get Started
+      link: ./getting-started/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/branes-ai/cortex
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What Cortex is
+
+**Cortex** is the perception core of the Branes Embodied AI framework: a real-time
+visual-inertial odometry (VIO) and SLAM stack designed to run on a **KPU** — a
+spatial-dataflow accelerator — with a host CPU acting as a thin resource broker.
+
+The defining constraint is **strict layering**: a Rust Resource Manager owns the
+hardware, header-only C++20 math sits on top, the operator SDK builds algorithms
+from that math, and middleware (Zenoh/ROS) lives only in the daemons. Algorithms
+never see middleware; middleware never sees hardware.
+
+<CardGrid>
+	<Card title="Type-generic math" icon="setting">
+		Header-only C++20 numerics — Lie groups, non-linear least squares, camera
+		models — templated over the scalar type, so the same code runs in `double`,
+		`float`, or Universal posits for mixed-precision study.
+	</Card>
+	<Card title="MSCKF visual-inertial odometry" icon="rocket">
+		A complete Multi-State Constraint Kalman Filter: IMU preintegration and
+		initialization, a sliding window of cloned poses, and null-space camera
+		updates — clean-room from the papers, no GPL source contact.
+	</Card>
+	<Card title="Hardware behind a HAL" icon="laptop">
+		A Rust `MemoryProvider` trait abstracts the KPU. The same binary carries a
+		SITL (host-emulated) and a KPU backend, selected at construction by build
+		target — the C++ above never branches on hardware.
+	</Card>
+	<Card title="Validated, not just built" icon="approve-check">
+		ATE/RPE accuracy metrics, a per-frame latency budget, an EuRoC replay
+		harness, and ≥85% Rust coverage gates — efficiency is a functional
+		requirement, enforced in CI.
+	</Card>
+</CardGrid>
+
+## The stack at a glance
+
+| Layer | Path | Language | May depend on |
+|---|---|---|---|
+| Resource Manager | `core/` | Rust | OS, kernel drivers, `cxx` |
+| Math | `math/` | header-only C++20 | Universal, MTL5 |
+| Operator SDK | `sdk/` | C++20 | `math/`, `core/` via cxx, `cv/` |
+| CV front end | `cv/` | C++20 | (image / FAST / KLT / pyramid) |
+| Daemons | `daemons/` | C++ executables | `sdk/`, Zenoh, yaml-cpp |
+
+## Where to go next
+
+- **[Introduction](./getting-started/introduction/)** — the problem, the topology, and the design philosophy.
+- **[Architecture](./architecture/overview/)** — the Host-Broker / Thin-Client topology and the layering invariants.
+- **[Visual-Inertial Odometry](./vio/overview/)** — the MSCKF pipeline, end to end.
+- **[Benchmarks & Validation](./benchmarks/accuracy/)** — what was measured, and how.
+- **[Algorithms & Provenance](./algorithms/citations/)** — the clean-room citation table.
+
+> Status: Phases 0–3 complete (foundation, Rust core, math layer, VIO). This site
+> is the consolidated record of what was built, the algorithms used, and the
+> performance measured.

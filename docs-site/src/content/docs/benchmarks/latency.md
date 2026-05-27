@@ -1,0 +1,54 @@
+---
+title: Latency Budget
+description: The per-frame latency budget on feed_image — how it's measured, the current numbers, and how it's enforced.
+---
+
+Because latency is a functional requirement, the per-frame cost of `feed_image`
+(front-end tracking + one backend update step) has a **budget enforced as a test**
+(#47).
+
+## The budget (a tunable knob)
+
+`branes::sdk::eval::FrameLatencyBudget<T>` records the per-frame budget, keyed by the
+estimator scalar:
+
+| Scalar | `per_frame_ms` (current gate) | Real-time target |
+|---|---|---|
+| `double` | **75 ms** | ~30 ms (≈33 Hz) |
+| `float` | **50 ms** | tighter than double |
+
+Both the **median** and the **99th percentile** of measured frame latencies must stay
+at or under the gate. The numbers are a **ratchet**: the real-time target is ~30 ms,
+but the MVP front end re-runs full-frame FAST detection every frame, which on a
+reference x86 host at `-O2` measures **~38 ms median / ~40 ms p99** at EuRoC's
+752×480. So the recorded gate starts loose (with headroom for slower hosts) and is
+meant to be tightened toward 30 ms as the front end gains incremental detection / SIMD
+and the backend is optimized.
+
+## How it's measured
+
+A microbenchmark times `VioEstimator::feed_image` over a stable stream and computes
+order statistics with a nearest-rank `percentile()` helper (`rank = ⌈p·n⌉`, so the
+tail isn't underestimated; it rejects empty input and NaN probabilities). Warm-up
+frames are excluded.
+
+- **CI guard** — runs on a stable **synthetic** 752×480 stream (so it needs no
+  dataset).
+- **Dataset bench** — the real V1_01_easy `feed_image` latency, gated on
+  `CORTEX_EUROC_V101`.
+
+## Why it's enforced only in optimized builds
+
+A real-time budget is **meaningless under `-O0`** (the same synthetic frame measures
+~270 ms unoptimized). The assertion is therefore gated on `NDEBUG`: in a Debug build
+the test reports the measured numbers and **skips** the assertion. Since CI builds the
+`sitl-debug` preset, the budget is exercised when you run an optimized
+(`sitl-release`) build — `ctest` stays green either way.
+
+## Reproducing locally
+
+```bash
+cmake --preset sitl-release
+cmake --build --preset sitl-release
+ctest --preset sitl-release -R sdk_vio_latency --output-on-failure
+```
