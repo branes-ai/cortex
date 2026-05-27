@@ -107,7 +107,7 @@ template <math::Scalar T>
     return out;
 }
 
-/// Parse cam0/data.csv → ascending image entries (path = cam0/data/<file>).
+/// Parse cam0/data.csv into ascending image entries (path = cam0/data/ + filename).
 [[nodiscard]] inline std::vector<ImageEntry> parse_images(const std::string& dataset_root) {
     std::vector<ImageEntry> out;
     for (const auto& ln : detail::data_lines(dataset_root + "/cam0/data.csv")) {

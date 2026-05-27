@@ -1,0 +1,7 @@
+# Astro / Node
+node_modules/
+dist/
+.astro/
+
+# Generated Doxygen C++ API reference (built in CI / by `npm run api`)
+public/api/

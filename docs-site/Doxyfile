@@ -1,0 +1,34 @@
+# Doxygen config for the Cortex C++ API reference.
+#
+# Run from docs-site/ (the deploy workflow and `npm run api` do this); the
+# HTML lands in public/api/, which Astro serves at <base>api/ alongside the
+# Starlight site. Only the C++ headers are documented here; the Rust core's
+# API is summarized in the Architecture → Resource Manager page.
+
+PROJECT_NAME           = "Cortex C++ API"
+PROJECT_BRIEF          = "branes::math / branes::sdk / branes::cv — header-only perception primitives"
+OUTPUT_DIRECTORY       = public
+HTML_OUTPUT            = api
+GENERATE_LATEX         = NO
+
+INPUT                  = ../math/include ../sdk/include ../cv/include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.h
+
+# The headers use /// + @param Doxygen comments; surface everything.
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+# Navigation / presentation.
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+SOURCE_BROWSER         = YES
+ALPHABETICAL_INDEX     = YES
+SORT_MEMBER_DOCS       = YES
+
+# C++20: let Doxygen see concepts/templates cleanly.
+BUILTIN_STL_SUPPORT    = YES

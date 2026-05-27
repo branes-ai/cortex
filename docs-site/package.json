@@ -1,0 +1,21 @@
+{
+  "name": "cortex-docs-site",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "api": "doxygen Doxyfile",
+    "build": "astro build",
+    "build:full": "npm run api && astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.37.3",
+    "astro": "^5.6.1",
+    "rehype-rewrite": "^4.0.4",
+    "sharp": "^0.34.2"
+  }
+}
