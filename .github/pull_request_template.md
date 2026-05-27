@@ -1,7 +1,11 @@
+<!-- markdownlint-disable-file MD041 -->
 <!--
 PR title MUST be a Conventional Commits message — type(scope): subject —
 with the subject starting lowercase (commitlint enforces this). e.g.
   feat(sdk): camera updaters with MSCKF null-space projection
+
+(A PR template intentionally opens with author guidance, not a top-level
+heading — hence the markdownlint MD041 exemption above.)
 -->
 
 ## Summary
