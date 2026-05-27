@@ -3,6 +3,8 @@ title: Coverage & CI Gates
 description: The continuous-integration gates that enforce correctness, portability, and efficiency on every PR.
 ---
 
+import bench from '../../../data/benchmarks.json';
+
 Every change lands through a PR with **green CI** before merge (PR-only, even solo).
 The gates below run on each push and pull request.
 
@@ -12,10 +14,13 @@ The gates below run on each push and pull request.
 |---|---|
 | **Build and Test (SITL · x86)** | Configures + builds the `sitl-debug` preset (gcc) and runs the full `ctest` suite. |
 | **Cross-Compile (KPU · aarch64)** | Cross-compiles for the KPU silicon target via `cross-toolchain.cmake`, proving portability. |
-| **Coverage (cargo-llvm-cov)** | Gates the Rust core at **≥ 85% line coverage**. |
+| **Coverage (cargo-llvm-cov)** | Gates the Rust core at **≥ {bench.coverage_floor_pct}% line coverage**. |
 | **Lint** | clippy + `cargo fmt` + `clang-format` — style is enforced, not debated in review. |
 | **Conventional Commits lint** | commitlint on the PR title (drives release-please). |
 | **CodeRabbit** | Automated code review on every ready PR. |
+
+(The coverage floor above is pinned to the `--fail-under-lines` value in the CI
+config — this page is generated from source.)
 
 ## Test suite shape
 

@@ -4,11 +4,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "gen:benchmarks": "node scripts/gen-benchmarks.mjs",
+    "predev": "npm run gen:benchmarks",
     "dev": "astro dev",
     "start": "astro dev",
     "api": "doxygen Doxyfile",
+    "prebuild": "npm run gen:benchmarks",
     "build": "astro build",
-    "build:full": "npm run api && astro build",
+    "build:full": "npm run api && npm run build",
     "preview": "astro preview",
     "astro": "astro"
   },
