@@ -13,8 +13,10 @@ const site = isGitHubPages
 const base = isGitHubPages ? '/cortex/' : '/';
 
 // The Doxygen C++ API reference is generated into public/api/ and served
-// at <base>api/ (so /cortex/api/ on Pages, /api/ in local dev).
-const apiHref = base + 'api/';
+// at <base>api/ (so /cortex/api/ on Pages, /api/ in local dev). Starlight
+// prepends the site `base` to internal sidebar links, so this must be
+// base-relative — prefixing it here too would double it (/cortex/cortex/api/).
+const apiHref = '/api/';
 
 // Rehype plugin to rewrite absolute internal links with the base path so
 // authored `/architecture/...` links resolve under /cortex/ on Pages. The
