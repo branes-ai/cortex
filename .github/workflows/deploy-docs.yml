@@ -18,10 +18,9 @@ on:
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
+# Least privilege globally; the deploy job opts into the Pages write scopes.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -33,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -68,6 +69,10 @@ jobs:
           path: docs-site/dist
 
   deploy:
+    # Only the deploy job needs the Pages write scopes.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

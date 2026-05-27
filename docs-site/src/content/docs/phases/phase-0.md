@@ -45,7 +45,7 @@ These are the project-wide rules still in force:
 ## Explicitly deferred
 
 No algorithm code, no real cxx bridge (the stub was deleted — the real one is Phase
-1), no SoC broker/IPC, no live release tag, no docs site (that's Phase 11 — this
+1), no KPU broker/IPC, no live release tag, no docs site (that's Phase 11 — this
 site). Phase 0 only set conventions and stub interfaces.
 
 Companion: `docs/arch/phase0-foundation/README.md`.

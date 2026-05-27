@@ -23,9 +23,9 @@ Each phase is an epic of single-issue PRs, landed on green CI.
 | 10 | Deployment (OCI + Yocto) | planned |
 | 11 | Documentation | in progress (this site) |
 
-Plus a parked SoC track (`phase-soc-deferred`, issues #21–#23): the IPC broker,
-crash-only recovery, and the KPU allocation arbiter — deferred until the silicon path
-is active.
+Plus a parked hardware track (the `phase-soc-deferred` label, issues #21–#23): the IPC
+broker, crash-only recovery, and the KPU allocation arbiter — deferred until the
+silicon path is active.
 
 ## How a phase runs
 

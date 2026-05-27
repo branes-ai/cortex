@@ -16,8 +16,8 @@ implements:
 - **`SitlMemoryProvider`** — host emulation using POSIX shared memory + `mmap`, with
   a heap fallback. This is what the default `BUILD_TARGET_KPU=OFF` build uses.
 - **`KpuMemoryProvider`** — the real kernel-driver backend. In the current phase it
-  is a **stub** that returns `Err(NotYetImplemented)` for every call; the SoC driver
-  work is deferred.
+  is a **stub** that returns `Err(NotYetImplemented)` for every call; the KPU
+  kernel-driver work is deferred.
 
 Both implementations compile into the binary; the active one is chosen **at
 construction time** from `RUST_HAL_TARGET` (`SITL` or `KPU`), which the CMake preset
@@ -54,7 +54,7 @@ lifecycle is consistent from the Rust broker up to the estimator façade.
 
 ## What's deferred
 
-The SoC-facing pieces are parked behind a `phase-soc-deferred` label: the IPC broker
+The KPU-facing pieces are parked behind the `phase-soc-deferred` label: the IPC broker
 over UDS + POSIX shm, the crash-only recovery / client-replay protocol, and the KPU
 resource-allocation arbiter (live tile/memory map + conflict detection). The Phase 1
 RM is SITL-complete and unblocks the math and VIO layers above it.

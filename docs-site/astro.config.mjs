@@ -17,16 +17,21 @@ const base = isGitHubPages ? '/cortex/' : '/';
 const apiHref = base + 'api/';
 
 // Rehype plugin to rewrite absolute internal links with the base path so
-// authored `/architecture/...` links resolve under /cortex/ on Pages.
+// authored `/architecture/...` links resolve under /cortex/ on Pages. The
+// prefix is derived from `base` (no hard-coded '/cortex'); protocol-relative
+// `//host` links and already-prefixed links are left untouched.
+const basePrefix = base.replace(/\/$/, ''); // '/cortex'
 const rehypeBaseLinks = isGitHubPages ? [
   [
     rehypeRewrite,
     {
       rewrite: (node) => {
-        if (node.type === 'element' && node.tagName === 'a' && node.properties?.href) {
+        if (node.type === 'element' && node.tagName === 'a' && typeof node.properties?.href === 'string') {
           const href = node.properties.href;
-          if (typeof href === 'string' && href.startsWith('/') && !href.startsWith('/cortex')) {
-            node.properties.href = '/cortex' + href;
+          const isRootRelative = href.startsWith('/') && !href.startsWith('//');
+          const alreadyPrefixed = href === basePrefix || href.startsWith(basePrefix + '/');
+          if (isRootRelative && !alreadyPrefixed) {
+            node.properties.href = basePrefix + href;
           }
         }
       },

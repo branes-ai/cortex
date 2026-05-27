@@ -3,8 +3,8 @@ title: Phase 1 — Rust Resource Manager + cxx Bridge
 description: The MemoryProvider HAL, the cxx FFI, and the lifecycle state machine (the MVP Rust core).
 ---
 
-> Status: **complete** (2026-05-24). MVP issues #13–#20 closed; SoC pieces #21–#23
-> deferred behind `phase-soc-deferred`.
+> Status: **complete** (2026-05-24). MVP issues #13–#20 closed; KPU pieces #21–#23
+> deferred behind the `phase-soc-deferred` label.
 
 Phase 1 delivered a SITL-only **Rust Resource Manager** exposing a strictly typed
 memory-allocation surface to C++ via the cxx bridge, plus a lifecycle state machine.
@@ -39,7 +39,7 @@ The Rust core is gated at **≥85% line coverage** (cargo-llvm-cov) and verified
 C++/Rust integration test exercising the bridge end-to-end. This phase unblocked the
 math (Phase 2) and VIO (Phase 3) work above it.
 
-## Deferred (SoC track)
+## Deferred (KPU hardware track)
 
 The IPC broker over UDS + POSIX shm (#21), crash-only recovery / client replay (#22),
 and the KPU resource-allocation arbiter (#23) are parked until the silicon path is
