@@ -5,3 +5,7 @@ dist/
 
 # Generated Doxygen C++ API reference (built in CI / by `npm run api`)
 public/api/
+
+# Generated benchmark gate data (built by `npm run gen:benchmarks`, via the
+# prebuild/predev hooks); pinned to the C++ test gates + CI config.
+src/data/benchmarks.json

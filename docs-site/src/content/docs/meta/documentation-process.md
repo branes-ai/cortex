@@ -20,14 +20,17 @@ the discipline that keeps it from rotting.
 ```bash
 cd docs-site
 npm install            # first time
+npm run gen:benchmarks # extract benchmark gates into src/data/benchmarks.json
 npm run api            # generate the Doxygen API into public/api/
-npm run dev            # live-reloading Starlight at http://localhost:4321/
-npm run build          # production build into dist/ (what CI deploys)
-npm run build:full     # api + build, the full local equivalent of CI
+npm run dev            # live-reloading Starlight (runs gen:benchmarks first)
+npm run build          # production build into dist/ (runs gen:benchmarks first)
+npm run build:full     # gen + api + build, the full local equivalent of CI
 ```
 
-The Doxygen output (`public/api/`), `node_modules/`, `dist/`, and `.astro/` are
-gitignored — the API reference is generated, never committed.
+`gen:benchmarks` runs automatically before `dev` and `build` (via the `predev` /
+`prebuild` hooks). The Doxygen output (`public/api/`), the generated
+`src/data/benchmarks.json`, `node_modules/`, `dist/`, and `.astro/` are gitignored —
+all generated, never committed.
 
 ## Publishing
 
@@ -50,11 +53,15 @@ separate chore:
    (algorithm description, and any benchmark number it moves). The PR template carries
    a checkbox for it. This is the single most important habit — it's why the site
    reflects the code instead of drifting from it.
-2. **Single source of truth for numbers.** Benchmark thresholds (ATE gate, latency
-   budget) live in the test headers (`FrameLatencyBudget`, the EuRoC ATE gate); the
-   docs *cite* them. When a gate is ratcheted in code, the citing page is updated in
-   the same PR. (A future enhancement: have CI emit a JSON artifact the page reads, so
-   the numbers can't drift at all.)
+2. **Single source of truth for numbers — pinned, not copied.** The benchmark
+   *gates* (latency budget, EuRoC ATE gate, coverage floor) live in the code
+   (`FrameLatencyBudget`, the EuRoC test threshold, the CI `--fail-under-lines`
+   value). `docs-site/scripts/gen-benchmarks.mjs` **extracts** them into
+   `src/data/benchmarks.json` on every build (via the `prebuild`/`predev` hooks), and
+   the Benchmarks pages (`.mdx`) render from that JSON — so the gate numbers on the
+   site **cannot drift** from the code, and the generator *hard-fails the build* if a
+   constant is renamed. (Observed measurements like "~38 ms median" are reference
+   numbers, not gates, and stay as labeled prose.)
 3. **Per-phase retrospective.** At each epic's close, add or finalize its
    `phases/phase-N` page (paired with the `docs/sessions/` log and the project-memory
    entry). Phases 0–3 are done; Phase 4 (SLAM) gets a page when it closes.

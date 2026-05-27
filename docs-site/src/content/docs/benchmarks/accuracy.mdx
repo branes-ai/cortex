@@ -3,6 +3,8 @@ title: Trajectory Accuracy (ATE / RPE)
 description: How trajectory accuracy is measured — the EuRoC replay harness and the clean-room ATE/RPE metrics.
 ---
 
+import bench from '../../../data/benchmarks.json';
+
 Accuracy is measured with the two standard VIO/SLAM trajectory metrics, computed
 clean-room from their definitions (no `ov_eval`/`evo` source contact), and driven by
 an EuRoC replay harness (#46).
@@ -52,9 +54,12 @@ replay + ATE-threshold assertion is dataset-gated** — set
 
 ## The accuracy gate
 
+The gate below is **pinned to the test threshold** (regenerated from the source on
+every build):
+
 | Sequence | Gate (ATE) | Reference (published, keyframe) |
 |---|---|---|
-| EuRoC V1_01_easy | **< 0.50 m** | OpenVINS ~0.05–0.06 m · VINS-Fusion ~0.08 m |
+| EuRoC V1_01_easy | **< {bench.euroc_v101_ate_gate_m} m** | OpenVINS ~0.05–0.06 m · VINS-Fusion ~0.08 m |
 
 The gate is deliberately generous relative to tuned SOTA: this MVP MSCKF has no online
 intrinsics/extrinsics refinement and no loop closure, so the bar is set to **catch a

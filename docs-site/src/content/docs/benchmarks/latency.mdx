@@ -3,6 +3,8 @@ title: Latency Budget
 description: The per-frame latency budget on feed_image — how it's measured, the current numbers, and how it's enforced.
 ---
 
+import bench from '../../../data/benchmarks.json';
+
 Because latency is a functional requirement, the per-frame cost of `feed_image`
 (front-end tracking + one backend update step) has a **budget enforced as a test**
 (#47).
@@ -10,20 +12,21 @@ Because latency is a functional requirement, the per-frame cost of `feed_image`
 ## The budget (a tunable knob)
 
 `branes::sdk::eval::FrameLatencyBudget<T>` records the per-frame budget, keyed by the
-estimator scalar:
+estimator scalar. The numbers below are **pinned to that source constant** — this
+page is generated from the code, so it can't drift:
 
 | Scalar | `per_frame_ms` (current gate) | Real-time target |
 |---|---|---|
-| `double` | **75 ms** | ~30 ms (≈33 Hz) |
-| `float` | **50 ms** | tighter than double |
+| `double` | **{bench.latency_budget_ms.double} ms** | ~30 ms (≈33 Hz) |
+| `float` | **{bench.latency_budget_ms.float} ms** | tighter than double |
 
 Both the **median** and the **99th percentile** of measured frame latencies must stay
 at or under the gate. The numbers are a **ratchet**: the real-time target is ~30 ms,
 but the MVP front end re-runs full-frame FAST detection every frame, which on a
-reference x86 host at `-O2` measures **~38 ms median / ~40 ms p99** at EuRoC's
-752×480. So the recorded gate starts loose (with headroom for slower hosts) and is
-meant to be tightened toward 30 ms as the front end gains incremental detection / SIMD
-and the backend is optimized.
+reference x86 host at `-O2` measures **≈38 ms median / ≈40 ms p99** at EuRoC's
+752×480 (a *reference measurement*, not a gate). So the recorded gate starts loose
+(with headroom for slower hosts) and is meant to be tightened toward 30 ms as the
+front end gains incremental detection / SIMD and the backend is optimized.
 
 ## How it's measured
 
