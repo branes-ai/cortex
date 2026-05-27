@@ -39,9 +39,14 @@ function extract(text, re, what) {
   return m[1];
 }
 
-function inRange(v, lo, hi, what) {
-  if (!Number.isFinite(v) || !(v > lo && v <= hi)) {
-    throw new Error(`gen-benchmarks: ${what} = ${v} is outside the sane range (${lo}, ${hi}] — likely a typo or unit change.`);
+// Validate v ∈ (lo, hi] by default, or [lo, hi] when inclusiveLo is set.
+// Latency/ATE gates must be strictly positive (a zero gate is meaningless);
+// the coverage floor may legitimately be 0 (no gate), so it uses [0, 100].
+function inRange(v, lo, hi, what, inclusiveLo = false) {
+  const okLo = inclusiveLo ? v >= lo : v > lo;
+  if (!Number.isFinite(v) || !okLo || !(v <= hi)) {
+    const lb = inclusiveLo ? '[' : '(';
+    throw new Error(`gen-benchmarks: ${what} = ${v} is outside the sane range ${lb}${lo}, ${hi}] — likely a typo or unit change.`);
   }
   return v;
 }
@@ -74,6 +79,7 @@ const coverageFloor = inRange(
   0,
   100,
   'coverage floor (%)',
+  true, // inclusiveLo: a 0% floor (no gate) is valid, per the 0–100 contract
 );
 
 const data = {
