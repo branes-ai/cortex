@@ -22,6 +22,24 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.20.0](https://github.com/branes-ai/cortex/compare/v0.19.0...v0.20.0) (2026-05-26)
+
+
+### Features
+
+* **sdk:** camera updaters with MSCKF null-space projection ([#185](https://github.com/branes-ai/cortex/issues/185)) ([191c4e7](https://github.com/branes-ai/cortex/commit/191c4e71448a5374716ede832374c0eeec33e934))
+* **sdk:** IMU initialization (static + dynamic) ([#184](https://github.com/branes-ai/cortex/issues/184)) ([b638566](https://github.com/branes-ai/cortex/commit/b638566edd6d023a0c508d4f1bd5a1713bbc2588))
+* **sdk:** MSCKF backend implementation ([#186](https://github.com/branes-ai/cortex/issues/186)) ([02f3948](https://github.com/branes-ai/cortex/commit/02f3948300ad3365497ea329d3e8ef1d9fc4ab97))
+* **sdk:** sliding-window optimization backend skeleton ([#189](https://github.com/branes-ai/cortex/issues/189)) ([456a373](https://github.com/branes-ai/cortex/commit/456a373d1e8d803f641a3fbfbecae96e1eb4ac98))
+* **sdk:** state vector + propagator + state-helper (MSCKF core) ([#182](https://github.com/branes-ai/cortex/issues/182)) ([0e78154](https://github.com/branes-ai/cortex/commit/0e78154e8d284d1649a35eedf69fe34af5b92798))
+* **sdk:** top-level vio estimator API ([#188](https://github.com/branes-ai/cortex/issues/188)) ([c068bd9](https://github.com/branes-ai/cortex/commit/c068bd9b76be2ae356d79413266dc907286038ed))
+
+
+### Tests
+
+* **sdk:** euroc replay harness + ATE/RPE benchmark ([#190](https://github.com/branes-ai/cortex/issues/190)) ([577e201](https://github.com/branes-ai/cortex/commit/577e201af31dcdad55ba00577880aa25940c9da7))
+* **sdk:** latency budget enforcement (per-frame upper bound) ([#191](https://github.com/branes-ai/cortex/issues/191)) ([8dadc96](https://github.com/branes-ai/cortex/commit/8dadc9646bf6eccba940d02a2eb2c002edc2ad18))
+
 ## [0.19.0](https://github.com/branes-ai/cortex/compare/v0.18.0...v0.19.0) (2026-05-25)
 
 
