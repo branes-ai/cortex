@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.20.3](https://github.com/branes-ai/cortex/compare/v0.20.2...v0.20.3) (2026-05-27)
+
+
+### Documentation
+
+* add PR template with the per-PR docs-update rule ([#196](https://github.com/branes-ai/cortex/issues/196)) ([d2a669c](https://github.com/branes-ai/cortex/commit/d2a669c5be03787654f16a8fb027e9b5047e924d))
+* pin benchmark gate numbers to their source ([#197](https://github.com/branes-ai/cortex/issues/197)) ([01d43da](https://github.com/branes-ai/cortex/commit/01d43da4e851ca4f9bf2a33b474ddae9d4666ac5))
+
 ## [0.20.2](https://github.com/branes-ai/cortex/compare/v0.20.1...v0.20.2) (2026-05-27)
 
 
