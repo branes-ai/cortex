@@ -1,0 +1,50 @@
+---
+title: Coverage & CI Gates
+description: The continuous-integration gates that enforce correctness, portability, and efficiency on every PR.
+---
+
+Every change lands through a PR with **green CI** before merge (PR-only, even solo).
+The gates below run on each push and pull request.
+
+## The CI jobs
+
+| Job | What it enforces |
+|---|---|
+| **Build and Test (SITL · x86)** | Configures + builds the `sitl-debug` preset (gcc) and runs the full `ctest` suite. |
+| **Cross-Compile (KPU · aarch64)** | Cross-compiles for the KPU silicon target via `cross-toolchain.cmake`, proving portability. |
+| **Coverage (cargo-llvm-cov)** | Gates the Rust core at **≥ 85% line coverage**. |
+| **Lint** | clippy + `cargo fmt` + `clang-format` — style is enforced, not debated in review. |
+| **Conventional Commits lint** | commitlint on the PR title (drives release-please). |
+| **CodeRabbit** | Automated code review on every ready PR. |
+
+## Test suite shape
+
+Tests are [Catch2](https://github.com/catchorg/Catch2)-based, registered with
+`catch_discover_tests`, and built for **both gcc and clang** locally (clang catches
+different issues). The VIO suites include:
+
+- `sdk_msckf_state_test` — propagation / augmentation / marginalization / update PD/PSD invariants;
+- `sdk_msckf_camera_test` — the **1000-step** filter-stability benchmark;
+- `sdk_imu_init_test`, `sdk_msckf_backend_test`, `sdk_vio_estimator_test`;
+- `sdk_vio_euroc_test` (`ctest -R vio_euroc`) — ATE/RPE metrics + ASL parsers;
+- `sdk_vio_latency_test` — the per-frame [latency budget](/benchmarks/latency/).
+
+## Dataset- and build-gating
+
+Two kinds of gating keep CI green without external data or optimized builds:
+
+- **Dataset-gated** — the EuRoC ATE bench and the real latency bench run only when
+  `CORTEX_EUROC_V101` points at a sequence; otherwise they `SKIP`.
+- **Build-gated** — the latency budget asserts only under `NDEBUG`; CI builds Debug,
+  so it reports-and-skips there and is enforced in `sitl-release`.
+
+This is deliberate: CI verifies the *metric implementations and the pipeline* on
+synthetic fixtures every run, while the dataset-/hardware-sensitive *numbers* are
+reproducible on demand.
+
+## Release flow
+
+`main` uses Conventional Commits + [release-please](https://github.com/googleapis/release-please)
+for dynamic SemVer: merged `feat:`/`fix:` commits accrue into an automated release PR.
+Compiler caching (sccache) keeps CI build time down (warm-cache hit rates were
+~73% SITL / ~50% KPU-cross at Phase 0).
