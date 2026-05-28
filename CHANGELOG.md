@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.21.0](https://github.com/branes-ai/cortex/compare/v0.20.3...v0.21.0) (2026-05-28)
+
+
+### Features
+
+* **bench:** vio_bench — euroc accuracy + latency + rapl energy report ([#201](https://github.com/branes-ai/cortex/issues/201)) ([a5abbcb](https://github.com/branes-ai/cortex/commit/a5abbcb448cfa93a629396e74f7709a5a53fc9d3))
+
 ## [0.20.3](https://github.com/branes-ai/cortex/compare/v0.20.2...v0.20.3) (2026-05-27)
 
 
