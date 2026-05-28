@@ -94,7 +94,7 @@ TEST_CASE("RPE drift is zero for an identical trajectory, positive under error",
 
 TEST_CASE("report JSON serialization emits the expected keys", "[bench][report]") {
     bb::BenchReport r;
-    r.sequence = "test/mav0";
+    r.sequence = "test/mav0";  // plain path
     r.ate_m = 0.12;
     r.ate_gate_m = 0.5;
     r.real_time_factor = 1.5;
@@ -114,4 +114,12 @@ TEST_CASE("report JSON serialization emits the expected keys", "[bench][report]"
     REQUIRE(j.find("\"rapl_available\": true") != std::string::npos);
     REQUIRE(j.find("\"operator_profile\"") != std::string::npos);
     REQUIRE(j.find("\"name\": \"fast\"") != std::string::npos);
+
+    // A path with a quote/backslash must be escaped to stay valid JSON.
+    bb::BenchReport r2;
+    r2.sequence = R"(a"b\c)";
+    std::ostringstream os2;
+    bb::to_json(os2, r2);
+    const std::string j2 = os2.str();
+    REQUIRE(j2.find(R"("sequence": "a\"b\\c")") != std::string::npos);
 }

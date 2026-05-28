@@ -48,14 +48,19 @@ int main(int argc, char** argv) {
     int max_clones = 11;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
-        if (a == "--out" && i + 1 < argc)
-            out_prefix = argv[++i];
-        else if (a == "--ate-gate" && i + 1 < argc)
-            ate_gate = std::stod(argv[++i]);
-        else if (a == "--max-clones" && i + 1 < argc)
-            max_clones = std::stoi(argv[++i]);
-        else if (a.rfind("--", 0) != 0 && root.empty())
-            root = a;
+        try {
+            if (a == "--out" && i + 1 < argc)
+                out_prefix = argv[++i];
+            else if (a == "--ate-gate" && i + 1 < argc)
+                ate_gate = std::stod(argv[++i]);
+            else if (a == "--max-clones" && i + 1 < argc)
+                max_clones = std::stoi(argv[++i]);
+            else if (a.rfind("--", 0) != 0 && root.empty())
+                root = a;
+        } catch (const std::exception&) {
+            std::cerr << "vio_bench: invalid value for " << a << "\n";
+            return 2;
+        }
     }
     if (root.empty()) {
         std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N]\n";
@@ -137,7 +142,14 @@ int main(int argc, char** argv) {
     const std::size_t nframes = traj.size();
     const double seq_duration = images.back().t_s - images.front().t_s;
 
-    const auto gt = bs::euroc::parse_groundtruth<T>(root);
+    // Ground truth is optional: a sequence without it (or a malformed file)
+    // still yields the performance/energy report — accuracy is left at 0.
+    std::vector<ev::StampedPose<T>> gt;
+    try {
+        gt = bs::euroc::parse_groundtruth<T>(root);
+    } catch (const std::exception& e) {
+        std::cerr << "vio_bench: warning — no usable ground truth (" << e.what() << "); accuracy left at 0\n";
+    }
     const auto matched = ev::associate(traj, gt, 0.01);
     if (matched.estimated.size() >= 2) {
         r.ate_m = ev::ate_rmse(matched.estimated, matched.reference);
@@ -187,11 +199,28 @@ int main(int argc, char** argv) {
     // ── Output ───────────────────────────────────────────────────────────
     bb::to_markdown(std::cout, r);
     if (!out_prefix.empty()) {
-        std::ofstream js(out_prefix + ".json");
-        bb::to_json(js, r);
-        std::ofstream md(out_prefix + ".md");
-        bb::to_markdown(md, r);
-        std::cerr << "vio_bench: wrote " << out_prefix << ".json and " << out_prefix << ".md\n";
+        bool ok = true;
+        const std::string jpath = out_prefix + ".json", mpath = out_prefix + ".md";
+        {
+            std::ofstream js(jpath);
+            bb::to_json(js, r);
+            if (!js) {
+                std::cerr << "vio_bench: failed to write " << jpath << "\n";
+                ok = false;
+            }
+        }
+        {
+            std::ofstream md(mpath);
+            bb::to_markdown(md, r);
+            if (!md) {
+                std::cerr << "vio_bench: failed to write " << mpath << "\n";
+                ok = false;
+            }
+        }
+        if (ok)
+            std::cerr << "vio_bench: wrote " << jpath << " and " << mpath << "\n";
+        else
+            return 1;
     }
     return 0;
 }

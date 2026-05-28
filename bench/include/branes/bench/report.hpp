@@ -12,6 +12,7 @@
 
 #include <branes/bench/operator_profile.hpp>
 
+#include <cstdio>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -53,11 +54,44 @@ namespace detail {
 inline void json_kv(std::ostream& os, const char* k, double v, bool comma = true) {
     os << "    \"" << k << "\": " << v << (comma ? ",\n" : "\n");
 }
+/// Escape a string for inclusion in a JSON double-quoted value.
+inline std::string json_escape(const std::string& s) {
+    std::string o;
+    o.reserve(s.size() + 8);
+    for (const char c : s) {
+        switch (c) {
+        case '"':
+            o += "\\\"";
+            break;
+        case '\\':
+            o += "\\\\";
+            break;
+        case '\n':
+            o += "\\n";
+            break;
+        case '\r':
+            o += "\\r";
+            break;
+        case '\t':
+            o += "\\t";
+            break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[7];
+                std::snprintf(buf, sizeof buf, "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                o += buf;
+            } else {
+                o += c;
+            }
+        }
+    }
+    return o;
+}
 }  // namespace detail
 
 inline void to_json(std::ostream& os, const BenchReport& r) {
     os << "{\n";
-    os << "  \"sequence\": \"" << r.sequence << "\",\n";
+    os << "  \"sequence\": \"" << detail::json_escape(r.sequence) << "\",\n";
 
     os << "  \"accuracy\": {\n";
     detail::json_kv(os, "ate_m", r.ate_m);
@@ -93,8 +127,8 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
     os << "  \"operator_profile\": [\n";
     for (std::size_t i = 0; i < r.profile.size(); ++i) {
         const auto& s = r.profile[i];
-        os << "    { \"name\": \"" << s.name << "\", \"flops\": " << s.flops << ", \"bytes\": " << s.bytes << " }"
-           << (i + 1 < r.profile.size() ? ",\n" : "\n");
+        os << "    { \"name\": \"" << detail::json_escape(s.name) << "\", \"flops\": " << s.flops
+           << ", \"bytes\": " << s.bytes << " }" << (i + 1 < r.profile.size() ? ",\n" : "\n");
     }
     os << "  ],\n";
 
