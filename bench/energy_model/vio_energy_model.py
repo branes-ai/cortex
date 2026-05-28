@@ -106,9 +106,18 @@ def make_analyzer(sku):
 def estimate_sku(specs, sku):
     analyzer, precision = make_analyzer(sku)
     report = analyzer.analyze(build_subgraphs(specs))
+    descriptors = list(getattr(report, "energy_descriptors", []))
+    # graphs returns one descriptor per subgraph; a divergence would make the
+    # positional per-stage mapping wrong, so fail fast rather than silently
+    # truncate (plain zip would).
+    if len(descriptors) != len(specs):
+        raise RuntimeError(
+            f"graphs returned {len(descriptors)} energy descriptors for {len(specs)} "
+            f"VIO stages (sku={sku}); per-stage mapping would be wrong"
+        )
     per_stage = [
         {"name": s["name"], "energy_j": float(getattr(d, "total_energy_j", 0.0))}
-        for s, d in zip(specs, getattr(report, "energy_descriptors", []))
+        for s, d in zip(specs, descriptors, strict=True)
     ]
     return {
         "sku": sku,
