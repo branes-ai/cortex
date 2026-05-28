@@ -25,6 +25,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <stdexcept>
 #include <vector>
 
@@ -255,6 +256,54 @@ template <math::Scalar T>
         ++count;
     }
     return std::sqrt(sum / static_cast<T>(count));
+}
+
+/// KITTI-style relative drift over a fixed index step `delta`: the
+/// translational error as a percentage of the ground-truth segment length,
+/// and the rotational error in degrees per metre, averaged over all pairs.
+/// Segments with ~zero ground-truth motion are skipped.
+template <math::Scalar T>
+struct RpeDrift {
+    T translation_pct = T{0};     ///< mean ‖trans error‖ / segment length, ×100
+    T rotation_deg_per_m = T{0};  ///< mean rotation error (deg) / segment length
+};
+
+template <math::Scalar T>
+[[nodiscard]] RpeDrift<T> rpe_drift(const std::vector<StampedPose<T>>& estimated,
+                                    const std::vector<StampedPose<T>>& reference,
+                                    std::size_t delta = 1) {
+    const std::size_t n = estimated.size();
+    if (n == 0 || reference.size() != n)
+        throw std::invalid_argument("rpe_drift: empty or mismatched trajectories");
+    if (delta == 0 || delta >= n)
+        throw std::invalid_argument("rpe_drift: delta must be in [1, n)");
+
+    const T rad2deg = static_cast<T>(180) / std::numbers::pi_v<T>;
+    T trans_frac_sum = T{0};
+    T rot_per_m_sum = T{0};
+    std::size_t count = 0;
+    for (std::size_t i = 0; i + delta < n; ++i) {
+        const auto rel_e = estimated[i].pose.inverse() * estimated[i + delta].pose;
+        const auto rel_r = reference[i].pose.inverse() * reference[i + delta].pose;
+        const auto rt = rel_r.translation();
+        const T seg = std::sqrt(math::lie::detail::dot(rt, rt));
+        if (!(seg > T(1e-6)))
+            continue;  // no ground-truth motion over this segment
+        const auto err = rel_r.inverse() * rel_e;
+        const auto te = err.translation();
+        const T trans_err = std::sqrt(math::lie::detail::dot(te, te));
+        const auto axis = err.rotation().log();
+        const T rot_err_deg = std::sqrt(math::lie::detail::dot(axis, axis)) * rad2deg;
+        trans_frac_sum += trans_err / seg;
+        rot_per_m_sum += rot_err_deg / seg;
+        ++count;
+    }
+    RpeDrift<T> d;
+    if (count > 0) {
+        d.translation_pct = (trans_frac_sum / static_cast<T>(count)) * static_cast<T>(100);
+        d.rotation_deg_per_m = rot_per_m_sum / static_cast<T>(count);
+    }
+    return d;
 }
 
 }  // namespace branes::sdk::eval
