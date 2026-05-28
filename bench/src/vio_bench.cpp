@@ -10,9 +10,10 @@
 //
 //   vio_bench <V1_01_easy/mav0> [--out report] [--ate-gate 0.5] [--max-clones 11]
 
+#include <branes/bench/energy_backend.hpp>
 #include <branes/bench/operator_profile.hpp>
-#include <branes/bench/rapl.hpp>
 #include <branes/bench/report.hpp>
+#include <branes/bench/tegrastats.hpp>
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/latency_budget.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
@@ -24,6 +25,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -62,27 +64,67 @@ int parse_int_strict(const std::string& v) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string root, out_prefix;
+    std::string root, out_prefix, energy_kind_str = "rapl", energy_source;
     double ate_gate = 0.5;  // EuRoC V1_01_easy gate (see benchmarks/accuracy)
     int max_clones = 11;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
+        auto take = [&](std::string& dst) -> bool {
+            // A value is missing if argv ends, or if the next token is itself
+            // a flag (e.g. `--out --energy`) — which would otherwise be
+            // silently swallowed as the value.
+            if (i + 1 >= argc || std::string(argv[i + 1]).rfind("--", 0) == 0) {
+                std::cerr << "vio_bench: missing value for " << a << "\n";
+                return false;
+            }
+            dst = argv[++i];
+            return true;
+        };
+        std::string v;
         try {
-            if (a == "--out" && i + 1 < argc)
-                out_prefix = argv[++i];
-            else if (a == "--ate-gate" && i + 1 < argc)
-                ate_gate = parse_double_strict(argv[++i]);
-            else if (a == "--max-clones" && i + 1 < argc)
-                max_clones = parse_int_strict(argv[++i]);
-            else if (a.rfind("--", 0) != 0 && root.empty())
+            if (a == "--out") {
+                if (!take(out_prefix))
+                    return 2;
+            } else if (a == "--ate-gate") {
+                if (!take(v))
+                    return 2;
+                ate_gate = parse_double_strict(v);
+            } else if (a == "--max-clones") {
+                if (!take(v))
+                    return 2;
+                max_clones = parse_int_strict(v);
+            } else if (a == "--energy") {
+                if (!take(energy_kind_str))
+                    return 2;
+            } else if (a == "--energy-source") {
+                if (!take(energy_source))
+                    return 2;
+            } else if (a.rfind("--", 0) == 0) {
+                std::cerr << "vio_bench: unknown flag " << a << "\n";
+                return 2;
+            } else if (root.empty()) {
                 root = a;
+            } else {
+                std::cerr << "vio_bench: unexpected argument " << a << "\n";
+                return 2;
+            }
         } catch (const std::exception&) {
             std::cerr << "vio_bench: invalid value for " << a << "\n";
             return 2;
         }
     }
     if (root.empty()) {
-        std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N]\n";
+        std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N]\n"
+                  << "                 [--energy rapl|tegrastats|external] [--energy-source <path|interval-ms>]\n";
+        return 2;
+    }
+    bb::EnergyKind energy_kind{};
+    if (!bb::energy_kind_from_string(energy_kind_str, energy_kind)) {
+        std::cerr << "vio_bench: unknown --energy '" << energy_kind_str << "' (rapl|tegrastats|external)\n";
+        return 2;
+    }
+    if (energy_kind == bb::EnergyKind::External && energy_source.empty()) {
+        std::cerr << "vio_bench: --energy external requires --energy-source <cumulative-uJ counter file>\n";
         return 2;
     }
 
@@ -119,7 +161,29 @@ int main(int argc, char** argv) {
     std::size_t width = 0, height = 0;
     std::size_t imu_idx = 0;
 
-    const bb::rapl::EnergyMeter meter;
+    // Start the selected energy backend before the run (counter semantics).
+    std::unique_ptr<bb::EnergyBackend> meter;
+    switch (energy_kind) {
+    case bb::EnergyKind::Rapl:
+        meter = std::make_unique<bb::RaplBackend>();
+        break;
+    case bb::EnergyKind::Tegrastats: {
+        int interval_ms = 100;
+        if (!energy_source.empty()) {
+            try {
+                interval_ms = std::max(1, parse_int_strict(energy_source));
+            } catch (const std::exception&) {
+                std::cerr << "vio_bench: --energy-source must be an integer interval (ms) for tegrastats\n";
+                return 2;
+            }
+        }
+        meter = std::make_unique<bb::tegrastats::TegrastatsBackend>(interval_ms);
+        break;
+    }
+    case bb::EnergyKind::External:
+        meter = std::make_unique<bb::CounterFileBackend>(energy_source);
+        break;
+    }
     const auto wall0 = std::chrono::steady_clock::now();
 
     for (const auto& frame : images) {
@@ -152,8 +216,8 @@ int main(int argc, char** argv) {
     }
 
     const double processing_s = ms_since(wall0) / 1000.0;
-    const double energy_j = meter.joules();
-    const bool rapl_ok = meter.available();
+    const double energy_j = meter->joules();
+    const bool rapl_ok = meter->available();
 
     // ── Metrics ──────────────────────────────────────────────────────────
     bb::BenchReport r;
@@ -191,6 +255,7 @@ int main(int argc, char** argv) {
         r.latency_p99_ms = ev::percentile(latencies_ms, 0.99);
     }
 
+    r.energy_backend = meter->name();
     r.rapl_available = rapl_ok;
     if (rapl_ok && nframes > 0) {
         r.energy_j = energy_j;
