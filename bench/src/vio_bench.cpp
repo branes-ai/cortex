@@ -20,10 +20,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -40,6 +42,23 @@ double ms_since(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
 
+// Strict full-token numeric parse: reject trailing characters (std::stod
+// /std::stoi otherwise silently accept "0.5foo" / "11x").
+double parse_double_strict(const std::string& v) {
+    std::size_t pos = 0;
+    const double d = std::stod(v, &pos);
+    if (pos != v.size())
+        throw std::invalid_argument("trailing characters in number");
+    return d;
+}
+int parse_int_strict(const std::string& v) {
+    std::size_t pos = 0;
+    const int n = std::stoi(v, &pos);
+    if (pos != v.size())
+        throw std::invalid_argument("trailing characters in number");
+    return n;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -52,9 +71,9 @@ int main(int argc, char** argv) {
             if (a == "--out" && i + 1 < argc)
                 out_prefix = argv[++i];
             else if (a == "--ate-gate" && i + 1 < argc)
-                ate_gate = std::stod(argv[++i]);
+                ate_gate = parse_double_strict(argv[++i]);
             else if (a == "--max-clones" && i + 1 < argc)
-                max_clones = std::stoi(argv[++i]);
+                max_clones = parse_int_strict(argv[++i]);
             else if (a.rfind("--", 0) != 0 && root.empty())
                 root = a;
         } catch (const std::exception&) {
