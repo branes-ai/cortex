@@ -70,7 +70,10 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto take = [&](std::string& dst) -> bool {
-            if (i + 1 >= argc) {
+            // A value is missing if argv ends, or if the next token is itself
+            // a flag (e.g. `--out --energy`) — which would otherwise be
+            // silently swallowed as the value.
+            if (i + 1 >= argc || std::string(argv[i + 1]).rfind("--", 0) == 0) {
                 std::cerr << "vio_bench: missing value for " << a << "\n";
                 return false;
             }
