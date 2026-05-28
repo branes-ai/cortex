@@ -69,19 +69,42 @@ int main(int argc, char** argv) {
     int max_clones = 11;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
+        auto take = [&](std::string& dst) -> bool {
+            if (i + 1 >= argc) {
+                std::cerr << "vio_bench: missing value for " << a << "\n";
+                return false;
+            }
+            dst = argv[++i];
+            return true;
+        };
+        std::string v;
         try {
-            if (a == "--out" && i + 1 < argc)
-                out_prefix = argv[++i];
-            else if (a == "--ate-gate" && i + 1 < argc)
-                ate_gate = parse_double_strict(argv[++i]);
-            else if (a == "--max-clones" && i + 1 < argc)
-                max_clones = parse_int_strict(argv[++i]);
-            else if (a == "--energy" && i + 1 < argc)
-                energy_kind_str = argv[++i];
-            else if (a == "--energy-source" && i + 1 < argc)
-                energy_source = argv[++i];
-            else if (a.rfind("--", 0) != 0 && root.empty())
+            if (a == "--out") {
+                if (!take(out_prefix))
+                    return 2;
+            } else if (a == "--ate-gate") {
+                if (!take(v))
+                    return 2;
+                ate_gate = parse_double_strict(v);
+            } else if (a == "--max-clones") {
+                if (!take(v))
+                    return 2;
+                max_clones = parse_int_strict(v);
+            } else if (a == "--energy") {
+                if (!take(energy_kind_str))
+                    return 2;
+            } else if (a == "--energy-source") {
+                if (!take(energy_source))
+                    return 2;
+            } else if (a.rfind("--", 0) == 0) {
+                std::cerr << "vio_bench: unknown flag " << a << "\n";
+                return 2;
+            } else if (root.empty()) {
                 root = a;
+            } else {
+                std::cerr << "vio_bench: unexpected argument " << a << "\n";
+                return 2;
+            }
         } catch (const std::exception&) {
             std::cerr << "vio_bench: invalid value for " << a << "\n";
             return 2;

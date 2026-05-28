@@ -64,8 +64,10 @@ public:
     }
     [[nodiscard]] double joules() const override {
         std::uint64_t now = 0;
-        if (!ok_ || !rapl::detail::read_u64(path_, now))
+        if (!ok_ || !rapl::detail::read_u64(path_, now)) {
+            ok_ = false;  // a counter that became unreadable is no longer available
             return 0.0;
+        }
         return now >= start_uj_ ? static_cast<double>(now - start_uj_) * 1e-6 : 0.0;
     }
     [[nodiscard]] const char* name() const override {
@@ -75,7 +77,7 @@ public:
 private:
     std::string path_;
     std::uint64_t start_uj_ = 0;
-    bool ok_ = false;
+    mutable bool ok_ = false;
 };
 
 /// Selectable backend kinds (parsed from `--energy`).

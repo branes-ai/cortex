@@ -67,7 +67,7 @@ permissions) to get J/W; otherwise the report degrades gracefully and marks ener
 |---|---|---|
 | **RAPL / powercap** (x86 host) | ✅ Phase 1 | Measured CPU package + DRAM energy → J/frame, avg W |
 | **`graphs` model estimation** | ✅ Phase 2 | Modeled energy/power/latency for CPU, GPU, **and KPU (T64)** SKUs from the per-operator profile; CPU **validated against the RAPL measurement** |
-| **Jetson `tegrastats` + external meter** | ✅ Phase 3 | On-device empirical measurement on the edge target, via `--energy tegrastats|external` (see above) |
+| **Jetson `tegrastats` + external meter** | ✅ Phase 3 | On-device empirical measurement on the edge target, via `--energy tegrastats` / `--energy external` (see above) |
 
 The bridge to model-based estimation is the **per-operator profile** `vio_bench`
 emits in its JSON (`operator_profile`: first-order FLOPs/bytes per stage — pyramid,
