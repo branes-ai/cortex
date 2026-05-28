@@ -44,15 +44,32 @@ permissions) to get J/W; otherwise the report degrades gracefully and marks ener
 | Backend | Status | What it gives |
 |---|---|---|
 | **RAPL / powercap** (x86 host) | ✅ Phase 1 | Measured CPU package + DRAM energy → J/frame, avg W |
-| **`graphs` model estimation** | ⏳ Phase 2 | Modeled energy/power for CPU/GPU SKUs from the per-operator profile; **validated against the RAPL measurement** |
-| **KPU model (`graphs`)** + Jetson `tegrastats` | ⏳ Phase 3 | Projected intelligence/W on the KPU target; on-device measurement |
+| **`graphs` model estimation** | ✅ Phase 2 | Modeled energy/power/latency for CPU, GPU, **and KPU (T64)** SKUs from the per-operator profile; CPU **validated against the RAPL measurement** |
+| Jetson `tegrastats` + external meter | ⏳ Phase 3 | On-device empirical measurement on the edge / KPU target |
 
 The bridge to model-based estimation is the **per-operator profile** `vio_bench`
 emits in its JSON (`operator_profile`: first-order FLOPs/bytes per stage — pyramid,
-FAST, KLT, MSCKF propagate/update — from the observed runtime counts). The Phase-2
-harness maps each stage to a [`graphs`](https://github.com/branes-ai/graphs)
-`SubgraphDescriptor` and runs its `EnergyAnalyzer`; comparing **modeled-CPU vs
-measured-RAPL** validates the models before their **KPU** projections are trusted.
+FAST, KLT, MSCKF propagate/update — from the observed runtime counts).
+
+### Modeled energy across SKUs (Phase 2)
+
+`bench/energy_model/vio_energy_model.py` reads that JSON, maps each stage to a
+[`graphs`](https://github.com/branes-ai/graphs) `SubgraphDescriptor`, and runs its
+`EnergyAnalyzer` for each SKU:
+
+```bash
+python bench/energy_model/vio_energy_model.py v101.json --skus cpu,gpu,kpu_t64 --out v101_energy
+```
+
+It reports modeled energy / power / latency per SKU (CPU `i7-12700k`, GPU
+`Jetson Orin AGX`, KPU `T64`), and compares **modeled-CPU vs measured-RAPL** so the
+model is validated on hardware we can measure before its **KPU** projection is
+trusted. The harness needs `graphs` importable, so it's a local tool, not a CI gate
+(see `bench/energy_model/README.md`).
+
+> The RAPL measurement is the **whole CPU package** over the run; the model estimates
+> only the **VIO compute**, so `modeled ≤ measured` is expected — the ratio is a
+> sanity check, not a strict equality.
 
 ## What's first-order today
 
