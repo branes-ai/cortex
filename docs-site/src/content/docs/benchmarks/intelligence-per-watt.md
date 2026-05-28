@@ -34,6 +34,28 @@ cmake --preset sitl-release && cmake --build --preset sitl-release --target vio_
 # v101.json (machine-readable) + v101.md (human-readable) are written.
 ```
 
+### Energy backend (`--energy`)
+
+The empirical energy source is pluggable, so the same benchmark runs on the host
+and on the edge/KPU target:
+
+| `--energy` | Where | How |
+|---|---|---|
+| `rapl` (default) | x86 host | Linux RAPL/powercap counter delta |
+| `tegrastats` | Jetson | spawns `tegrastats --interval <ms>` (`--energy-source <ms>`) and integrates total board power over the run |
+| `external` | instrumented rig | a cumulative-µJ counter file (`--energy-source <path>`) from an INA/Joulescope exporter or a board rail |
+
+```bash
+# Jetson: sample power every 50 ms while replaying
+vio_bench .../mav0 --energy tegrastats --energy-source 50 --out v101
+
+# External meter exposing cumulative micro-joules at a path
+vio_bench .../mav0 --energy external --energy-source /run/power/energy_uj --out v101
+```
+
+Each backend degrades gracefully (energy marked *unavailable*) when its source can't
+be read, so accuracy/latency/RTF are always reported.
+
 **Energy access:** RAPL's `energy_uj` is often **root-readable only** (since
 CVE-2020-8694). Run with energy-read access (e.g. `sudo`, or relax the powercap
 permissions) to get J/W; otherwise the report degrades gracefully and marks energy
@@ -45,7 +67,7 @@ permissions) to get J/W; otherwise the report degrades gracefully and marks ener
 |---|---|---|
 | **RAPL / powercap** (x86 host) | ✅ Phase 1 | Measured CPU package + DRAM energy → J/frame, avg W |
 | **`graphs` model estimation** | ✅ Phase 2 | Modeled energy/power/latency for CPU, GPU, **and KPU (T64)** SKUs from the per-operator profile; CPU **validated against the RAPL measurement** |
-| Jetson `tegrastats` + external meter | ⏳ Phase 3 | On-device empirical measurement on the edge / KPU target |
+| **Jetson `tegrastats` + external meter** | ✅ Phase 3 | On-device empirical measurement on the edge target, via `--energy tegrastats|external` (see above) |
 
 The bridge to model-based estimation is the **per-operator profile** `vio_bench`
 emits in its JSON (`operator_profile`: first-order FLOPs/bytes per stage — pyramid,

@@ -39,8 +39,9 @@ struct BenchReport {
     double latency_p99_ms = 0.0;
     double fps = 0.0;
 
-    // Energy (empirical, RAPL)
-    bool rapl_available = false;
+    // Energy (empirical)
+    std::string energy_backend = "rapl";  ///< rapl | tegrastats | external
+    bool rapl_available = false;          ///< empirical energy was readable
     double energy_j = 0.0;
     double energy_per_frame_mj = 0.0;
     double avg_power_w = 0.0;
@@ -112,6 +113,7 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
     os << "  },\n";
 
     os << "  \"energy\": {\n";
+    os << "    \"backend\": \"" << detail::json_escape(r.energy_backend) << "\",\n";
     os << "    \"rapl_available\": " << (r.rapl_available ? "true" : "false") << ",\n";
     detail::json_kv(os, "energy_j", r.energy_j);
     detail::json_kv(os, "energy_per_frame_mj", r.energy_per_frame_mj);
