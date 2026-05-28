@@ -104,6 +104,7 @@ export default defineConfig({
           items: [
             { label: 'Trajectory Accuracy (ATE/RPE)', slug: 'benchmarks/accuracy' },
             { label: 'Latency Budget', slug: 'benchmarks/latency' },
+            { label: 'Intelligence per Watt (vio_bench)', slug: 'benchmarks/intelligence-per-watt' },
             { label: 'Coverage & CI Gates', slug: 'benchmarks/ci' },
           ],
         },

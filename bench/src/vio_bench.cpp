@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: MIT
+//
+// vio_bench — run one EuRoC sequence through the VIO estimator and report
+// the industry accuracy/performance metrics plus empirical (RAPL) energy:
+// ATE, RPE (RMSE, % and deg/m), per-frame latency p50/p99, real-time
+// factor, energy/frame, average power, and accuracy-bounded fps/W. Also
+// emits a first-order per-operator profile (the Phase-2 graphs energy-model
+// input). Accuracy on real data is dataset-driven, so this is a local tool,
+// not a CI gate.
+//
+//   vio_bench <V1_01_easy/mav0> [--out report] [--ate-gate 0.5] [--max-clones 11]
+
+#include <branes/bench/operator_profile.hpp>
+#include <branes/bench/rapl.hpp>
+#include <branes/bench/report.hpp>
+#include <branes/sdk/euroc/asl_replay.hpp>
+#include <branes/sdk/eval/latency_budget.hpp>
+#include <branes/sdk/eval/trajectory_metrics.hpp>
+#include <branes/sdk/vio_estimator.hpp>
+
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace {
+
+namespace bs = branes::sdk;
+namespace ev = branes::sdk::eval;
+namespace bb = branes::bench;
+using T = double;
+using Backend = bs::MsckfBackend<T>;
+using Estimator = bs::VioEstimator<T, Backend>;
+
+double ms_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    std::string root, out_prefix;
+    double ate_gate = 0.5;  // EuRoC V1_01_easy gate (see benchmarks/accuracy)
+    int max_clones = 11;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--out" && i + 1 < argc)
+            out_prefix = argv[++i];
+        else if (a == "--ate-gate" && i + 1 < argc)
+            ate_gate = std::stod(argv[++i]);
+        else if (a == "--max-clones" && i + 1 < argc)
+            max_clones = std::stoi(argv[++i]);
+        else if (a.rfind("--", 0) != 0 && root.empty())
+            root = a;
+    }
+    if (root.empty()) {
+        std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N]\n";
+        return 2;
+    }
+
+    // EuRoC cam0 (pinhole-radtan) intrinsics from the published calibration.
+    Backend::CameraCalibration cal;
+    cal.intrinsics =
+        Backend::Camera(458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
+    Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
+    bs::VioConfig cfg;
+    cfg.max_clones = max_clones;
+
+    std::vector<bs::ImuMeasurement<T>> imu;
+    std::vector<bs::euroc::ImageEntry> images;
+    try {
+        imu = bs::euroc::parse_imu<T>(root);
+        images = bs::euroc::parse_images(root);
+    } catch (const std::exception& e) {
+        std::cerr << "vio_bench: failed to load dataset at " << root << ": " << e.what() << "\n";
+        return 1;
+    }
+    if (images.size() < 2) {
+        std::cerr << "vio_bench: too few frames in " << root << "\n";
+        return 1;
+    }
+
+    est.configure(cfg);
+    est.activate();
+
+    // ── Run the sequence, timing each frame and accumulating counts ──────
+    std::vector<ev::StampedPose<T>> traj;
+    traj.reserve(images.size());
+    std::vector<double> latencies_ms;
+    double feat_sum = 0.0, dim_sum = 0.0;
+    std::size_t width = 0, height = 0;
+    std::size_t imu_idx = 0;
+
+    const bb::rapl::EnergyMeter meter;
+    const auto wall0 = std::chrono::steady_clock::now();
+
+    for (const auto& frame : images) {
+        std::size_t end = imu_idx;
+        while (end < imu.size() && imu[end].timestamp_s <= frame.t_s)
+            ++end;
+        if (end > imu_idx) {
+            est.feed_imu(std::span<const bs::ImuMeasurement<T>>{imu.data() + imu_idx, end - imu_idx});
+            imu_idx = end;
+        }
+        branes::cv::OwnedImage<std::uint8_t> img;
+        try {
+            img = branes::cv::read_png(frame.path);
+        } catch (const std::exception&) {
+            continue;  // skip an unreadable frame
+        }
+        if (img.view().empty())
+            continue;
+        if (width == 0) {
+            width = img.view().width();
+            height = img.view().height();
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        est.feed_image(frame.t_s, img.view());
+        latencies_ms.push_back(ms_since(t0));
+
+        feat_sum += static_cast<double>(est.num_tracked_features());
+        dim_sum += static_cast<double>(est.backend().state().dim());
+        traj.push_back(ev::StampedPose<T>{frame.t_s, est.current_pose()});
+    }
+
+    const double processing_s = ms_since(wall0) / 1000.0;
+    const double energy_j = meter.joules();
+    const bool rapl_ok = meter.available();
+
+    // ── Metrics ──────────────────────────────────────────────────────────
+    bb::BenchReport r;
+    r.sequence = root;
+    const std::size_t nframes = traj.size();
+    const double seq_duration = images.back().t_s - images.front().t_s;
+
+    const auto gt = bs::euroc::parse_groundtruth<T>(root);
+    const auto matched = ev::associate(traj, gt, 0.01);
+    if (matched.estimated.size() >= 2) {
+        r.ate_m = ev::ate_rmse(matched.estimated, matched.reference);
+        const std::size_t delta = std::max<std::size_t>(1, matched.estimated.size() / 20);
+        r.rpe_rmse_m = ev::rpe_translation_rmse(matched.estimated, matched.reference, delta);
+        const auto drift = ev::rpe_drift(matched.estimated, matched.reference, delta);
+        r.rpe_translation_pct = drift.translation_pct;
+        r.rpe_rotation_deg_per_m = drift.rotation_deg_per_m;
+    } else {
+        std::cerr << "vio_bench: warning — too few ground-truth matches; accuracy left at 0\n";
+    }
+    r.ate_gate_m = ate_gate;
+
+    r.sequence_duration_s = seq_duration;
+    r.processing_s = processing_s;
+    r.real_time_factor = processing_s > 0.0 ? seq_duration / processing_s : 0.0;
+    r.fps = processing_s > 0.0 ? static_cast<double>(nframes) / processing_s : 0.0;
+    if (!latencies_ms.empty()) {
+        r.latency_p50_ms = ev::percentile(latencies_ms, 0.5);
+        r.latency_p99_ms = ev::percentile(latencies_ms, 0.99);
+    }
+
+    r.rapl_available = rapl_ok;
+    if (rapl_ok && nframes > 0) {
+        r.energy_j = energy_j;
+        r.energy_per_frame_mj = energy_j / static_cast<double>(nframes) * 1000.0;
+        r.avg_power_w = processing_s > 0.0 ? energy_j / processing_s : 0.0;
+    }
+
+    r.accuracy_within_gate = matched.estimated.size() >= 2 && r.ate_m <= ate_gate;
+    if (rapl_ok && r.accuracy_within_gate && r.avg_power_w > 0.0)
+        r.fps_per_watt = r.fps / r.avg_power_w;
+
+    // ── Counts + operator profile (Phase-2 graphs input) ─────────────────
+    r.counts.frames = nframes;
+    r.counts.width = width;
+    r.counts.height = height;
+    r.counts.pyramid_levels = 3;
+    r.counts.avg_tracked_features = nframes ? feat_sum / static_cast<double>(nframes) : 0.0;
+    r.counts.avg_state_dim = nframes ? dim_sum / static_cast<double>(nframes) : 15.0;
+    r.counts.imu_samples = imu_idx;
+    // First-order: one camera update per frame; null-space leaves ~2·features rows.
+    r.counts.camera_updates = nframes;
+    r.counts.avg_update_rows = 2.0 * r.counts.avg_tracked_features;
+    r.profile = bb::build_pipeline_profile(r.counts);
+
+    // ── Output ───────────────────────────────────────────────────────────
+    bb::to_markdown(std::cout, r);
+    if (!out_prefix.empty()) {
+        std::ofstream js(out_prefix + ".json");
+        bb::to_json(js, r);
+        std::ofstream md(out_prefix + ".md");
+        bb::to_markdown(md, r);
+        std::cerr << "vio_bench: wrote " << out_prefix << ".json and " << out_prefix << ".md\n";
+    }
+    return 0;
+}
