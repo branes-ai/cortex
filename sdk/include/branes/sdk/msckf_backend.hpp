@@ -43,6 +43,43 @@
 
 namespace branes::sdk {
 
+/// How the backend resolved its initial attitude/bias. Surfacing this is the
+/// single most useful divergence-triage signal: a tilted real-world start that
+/// silently lands on `Identity` injects a phantom ~g acceleration and the
+/// filter diverges within seconds.
+enum class InitMethod {
+    None,          ///< not initialized yet
+    Static,        ///< stationary window: full roll/pitch + gyro bias
+    GravityAlign,  ///< moving start: roll/pitch from mean specific force
+    Identity,      ///< last resort: mean force wasn't even gravity-like
+};
+
+[[nodiscard]] inline const char* to_string(InitMethod m) noexcept {
+    switch (m) {
+    case InitMethod::Static:
+        return "static";
+    case InitMethod::GravityAlign:
+        return "gravity_align";
+    case InitMethod::Identity:
+        return "identity";
+    case InitMethod::None:
+        break;
+    }
+    return "none";
+}
+
+/// Read-only record of how initialization went (telemetry, like `initialized`).
+template <math::Scalar T>
+struct InitDiagnostics {
+    using DVec3 = math::lie::detail::Vec<T, 3>;
+    InitMethod method = InitMethod::None;
+    double t_s = 0.0;               ///< filter time at which init completed
+    DVec3 up_body{};                ///< measured "up" (specific-force) direction in the body frame
+    double gravity_residual = 0.0;  ///< ||mean accel| − g| / g over the init window
+    DVec3 gyro_bias{};
+    DVec3 accel_bias{};
+};
+
 template <math::Scalar T>
 class MsckfBackend final : public VioBackend<T> {
 public:
@@ -92,6 +129,7 @@ public:
         initializer_ = ImuInitializer<T>(icfg);
 
         state_ = msckf::State<T>(kInitialSigma());
+        init_diag_ = InitDiagnostics<T>{};
         initialized_ = false;
         have_last_time_ = false;
         last_imu_time_ = 0.0;
@@ -181,6 +219,14 @@ public:
         return initialized_;
     }
 
+    /// How initialization resolved the initial attitude/bias. `method` is
+    /// `None` until `initialized()` is true. The prime divergence-triage
+    /// signal: `Identity` (or a large `gravity_residual`) on real data means
+    /// the attitude seed is wrong and the filter will diverge.
+    [[nodiscard]] const InitDiagnostics<T>& init_diagnostics() const noexcept {
+        return init_diag_;
+    }
+
     /// Read-only view of the full filter state (covariance, clone window,
     /// biases). For inspection, logging, and the replay harness (#46).
     [[nodiscard]] const msckf::State<T>& state() const noexcept {
@@ -220,27 +266,64 @@ private:
         if (init_gyro_.size() < kInitSamples)
             return;
 
-        const auto r = initializer_.try_static(std::span<const DVec3>{init_gyro_}, std::span<const DVec3>{init_accel_});
-        if (r.success) {
-            state_ = msckf::State<T>(kInitialSigma());
-            state_.R = r.R_world_imu;
-            state_.bg = r.gyro_bias;
-            state_.ba = r.accel_bias;
-            state_.timestamp = t;
-            finish_init(t);
+        const std::span<const DVec3> g{init_gyro_}, a{init_accel_};
+        const auto stat = initializer_.try_static(g, a);
+        if (stat.success) {
+            apply_init(stat, InitMethod::Static, t);
             return;
         }
-        // Not stationary yet. Slide the window; if we never settle, fall
-        // back to an identity attitude (a moving start needs dynamic VI
-        // init, which the front end can drive via ImuInitializer).
+        // Not stationary yet. Keep sliding the window until kInitMaxSamples,
+        // then bootstrap without waiting for a rest condition that may never
+        // come (e.g. a sequence that is airborne from the first sample).
+        //
+        // The proper estimator for a moving start is full visual-inertial
+        // alignment (ImuInitializer::try_dynamic), which also recovers yaw,
+        // velocity, and scale — but it needs vision-estimated keyframe poses
+        // that require an SfM/two-view bootstrap the front end does not
+        // produce yet. Until that lands, gravity-only alignment fixes the
+        // dominant error (roll/pitch), which is enough to keep the filter
+        // from diverging. See the dynamic-VI-init follow-up.
         if (init_gyro_.size() >= kInitMaxSamples) {
-            state_ = msckf::State<T>(kInitialSigma());
-            state_.timestamp = t;
-            finish_init(t);
+            // Prefer gravity-only alignment (roll/pitch from the mean
+            // specific force) over a blind identity attitude: on a tilted
+            // mount, identity leaves gravity uncancelled in propagation and
+            // the position diverges quadratically. Identity is the last
+            // resort only when the mean force isn't even gravity-like.
+            const auto grav = initializer_.try_gravity_align(g, a);
+            if (grav.success)
+                apply_init(grav, InitMethod::GravityAlign, t);
+            else
+                apply_init(ImuInitResult<T>{}, InitMethod::Identity, t);
         } else {
             init_gyro_.erase(init_gyro_.begin());
             init_accel_.erase(init_accel_.begin());
         }
+    }
+
+    // Seed the state from an init result, record the diagnostics (measured
+    // up-direction + gravity residual over the window), and finish.
+    void apply_init(const ImuInitResult<T>& res, InitMethod method, double t) {
+        state_ = msckf::State<T>(kInitialSigma());
+        state_.R = res.R_world_imu;  // identity for a default-constructed result
+        state_.bg = res.gyro_bias;
+        state_.ba = res.accel_bias;
+        state_.timestamp = t;
+
+        DVec3 am{};
+        for (const DVec3& s : init_accel_)
+            am = am + s;
+        if (!init_accel_.empty())
+            am = am * (T{1} / static_cast<T>(init_accel_.size()));
+        const T g_meas = math::lie::detail::norm(am);
+        const T g_cfg = static_cast<T>(config_.gravity_magnitude);
+        init_diag_.method = method;
+        init_diag_.t_s = t;
+        init_diag_.up_body = g_meas > T{0} ? am * (T{1} / g_meas) : DVec3{};
+        init_diag_.gravity_residual =
+            (g_meas > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_meas - g_cfg) / g_cfg : T{1};
+        init_diag_.gyro_bias = res.gyro_bias;
+        init_diag_.accel_bias = res.accel_bias;
+        finish_init(t);
     }
 
     void finish_init(double t) {
@@ -329,6 +412,7 @@ private:
     VioConfig config_{};
     std::size_t max_clones_ = 11;
 
+    InitDiagnostics<T> init_diag_{};
     bool initialized_ = false;
     bool have_last_time_ = false;
     double last_imu_time_ = 0.0;

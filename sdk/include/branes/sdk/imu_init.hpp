@@ -55,6 +55,12 @@ struct ImuInitConfig {
     /// within this fraction, else the window is rejected (e.g. the device
     /// was accelerating, not at rest).
     T gravity_tol = T{5} / T{100};  ///< 5 %
+    /// Looser band for the gravity-only attitude bootstrap (try_gravity_align):
+    /// over a short window even a moving platform's mean specific force is
+    /// gravity-dominated, so its *direction* is usable for roll/pitch as long
+    /// as its magnitude is within this fraction of g. Wider than gravity_tol
+    /// because we only need a direction, not a rest condition.
+    T gravity_align_tol = T{30} / T{100};  ///< 30 %
 };
 
 /// What initialization recovers. `R_world_imu` is gravity-aligned with
@@ -137,6 +143,44 @@ public:
         const Vec3 up_body = accel_mean * (T{1} / g_meas);
         r.R_world_imu = align_to_world_up(up_body);
         r.gravity_world = Vec3{{T{0}, T{0}, -cfg_.gravity_magnitude}};
+        r.success = true;
+        return r;
+    }
+
+    /// Gravity-only attitude bootstrap for a platform that is *not* at rest
+    /// (so try_static rejects it) but for which no visual-inertial keyframes
+    /// are available yet (so try_dynamic cannot run). Over a short window the
+    /// mean specific force is dominated by gravity, so its direction fixes
+    /// roll/pitch (yaw stays at zero, unobservable). This is strictly better
+    /// than a blind identity attitude, which on a tilted mount leaves gravity
+    /// uncancelled in propagation and diverges the filter.
+    ///
+    /// `success = false` only when the window is empty/mismatched or the mean
+    /// specific force is not plausibly gravity (magnitude outside
+    /// `gravity_align_tol`), in which case its direction is meaningless and
+    /// the caller should fall back to identity. The gyro mean is trusted as
+    /// the bias only when the window is rotation-quiet (within `max_gyro_std`);
+    /// on a rotating start it is real angular rate, not bias, so bias stays 0.
+    [[nodiscard]] Result try_gravity_align(std::span<const Vec3> gyro, std::span<const Vec3> accel) const {
+        Result r;
+        const std::size_t n = accel.size();
+        if (n == 0 || gyro.size() != n)
+            return r;
+
+        const Vec3 accel_mean = mean(accel);
+        const T g_meas = math::lie::detail::norm(accel_mean);
+        if (!(g_meas > T{0}))
+            return r;
+        const T rel = abs_(g_meas - cfg_.gravity_magnitude) / cfg_.gravity_magnitude;
+        if (rel > cfg_.gravity_align_tol)
+            return r;  // mean force isn't gravity-like — direction unusable
+
+        const Vec3 up_body = accel_mean * (T{1} / g_meas);
+        r.R_world_imu = align_to_world_up(up_body);
+        r.gravity_world = Vec3{{T{0}, T{0}, -cfg_.gravity_magnitude}};
+        const Vec3 gyro_mean = mean(gyro);
+        r.gyro_bias = (std_dev(gyro, gyro_mean) <= cfg_.max_gyro_std) ? gyro_mean : Vec3{};
+        r.accel_bias = Vec3{};
         r.success = true;
         return r;
     }
