@@ -47,6 +47,7 @@ struct BenchReport {
     double avg_power_w = 0.0;
 
     // Efficiency — only meaningful when accuracy is within the gate.
+    bool accuracy_available = false;  ///< ground truth produced usable ATE/RPE (else they are 0, not "passing")
     bool accuracy_within_gate = false;
     double fps_per_watt = 0.0;  ///< 0 when power unavailable or accuracy out of gate
 
@@ -107,6 +108,7 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
     os << "  \"sequence\": \"" << detail::json_escape(r.sequence) << "\",\n";
 
     os << "  \"accuracy\": {\n";
+    os << "    \"available\": " << (r.accuracy_available ? "true" : "false") << ",\n";
     detail::json_kv(os, "ate_m", r.ate_m);
     detail::json_kv(os, "ate_gate_m", r.ate_gate_m);
     detail::json_kv(os, "rpe_rmse_m", r.rpe_rmse_m);
@@ -181,6 +183,9 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
         os << "❌ DIVERGED at frame " << r.divergence_frame << " (t=" << r.divergence_time_s << " s) — "
            << "peak speed " << r.peak_speed_mps << " m/s, |pos| up to " << r.max_position_m << " m. "
            << "Metrics below are not meaningful.\n\n";
+    else if (!r.accuracy_available)
+        os << "⚠️ accuracy unavailable — no usable ground truth, so ATE/RPE are not reported "
+              "(performance/health below are still valid).\n\n";
     else if (r.accuracy_within_gate)
         os << "✅ OK — ATE " << r.ate_m << " m within gate " << r.ate_gate_m << " m.\n\n";
     else
@@ -200,7 +205,8 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
               "expect divergence. The start is likely non-stationary with no usable gravity direction.\n\n";
     else if (r.init_method == "gravity_align")
         os << "> ℹ️ Init used **gravity-only alignment** (moving start, no static window). Roll/pitch from the "
-              "mean specific force; yaw and biases start at zero.\n\n";
+              "mean specific force and yaw starts at zero; the gyro bias is seeded only if the window is "
+              "rotation-quiet, otherwise it starts at zero too.\n\n";
 
     os << "## Accuracy\n\n";
     os << "| Metric | Value |\n|---|---|\n";

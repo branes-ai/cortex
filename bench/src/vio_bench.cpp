@@ -318,7 +318,11 @@ int main(int argc, char** argv) {
     bb::BenchReport r;
     r.sequence = root;
     const std::size_t nframes = traj.size();
-    const double seq_duration = images.back().t_s - images.front().t_s;
+    // Span of the frames actually processed (traj runs first→last included
+    // frame). Using images.back() would overstate the duration on a
+    // --fail-fast early exit, inflating real_time_factor against a partial
+    // processing time and frame count.
+    const double seq_duration = nframes >= 2 ? traj.back().t_s - traj.front().t_s : 0.0;
 
     // Ground truth is optional: a sequence without it (or a malformed file)
     // still yields the performance/energy report — accuracy is left at 0.
@@ -329,6 +333,7 @@ int main(int argc, char** argv) {
         std::cerr << "vio_bench: warning — no usable ground truth (" << e.what() << "); accuracy left at 0\n";
     }
     const auto matched = ev::associate(traj, gt, 0.01);
+    r.accuracy_available = matched.estimated.size() >= 2;
     if (matched.estimated.size() >= 2) {
         r.ate_m = ev::ate_rmse(matched.estimated, matched.reference);
         const std::size_t delta = std::max<std::size_t>(1, matched.estimated.size() / 20);
