@@ -186,7 +186,18 @@ int main(int argc, char** argv) {
     }
     const auto wall0 = std::chrono::steady_clock::now();
 
+    // The run is otherwise silent — emit a throttled progress line on stderr
+    // (stdout is reserved for the Markdown report) so a long sequence does not
+    // look hung. ~100 updates over the run, plus a guaranteed final 100%.
+    const std::size_t total_frames = images.size();
+    const std::size_t progress_every = std::max<std::size_t>(1, total_frames / 100);
+    std::size_t frame_idx = 0;
+
     for (const auto& frame : images) {
+        if (++frame_idx % progress_every == 0 || frame_idx == total_frames) {
+            std::cerr << "\rvio_bench: processed " << frame_idx << '/' << total_frames << " frames ("
+                      << (100 * frame_idx / total_frames) << "%)" << std::flush;
+        }
         std::size_t end = imu_idx;
         while (end < imu.size() && imu[end].timestamp_s <= frame.t_s)
             ++end;
@@ -214,6 +225,7 @@ int main(int argc, char** argv) {
         dim_sum += static_cast<double>(est.backend().state().dim());
         traj.push_back(ev::StampedPose<T>{frame.t_s, est.current_pose()});
     }
+    std::cerr << '\n';  // terminate the carriage-return progress line
 
     const double processing_s = ms_since(wall0) / 1000.0;
     const double energy_j = meter->joules();
