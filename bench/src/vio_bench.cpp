@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -61,12 +62,49 @@ int parse_int_strict(const std::string& v) {
     return n;
 }
 
+// Build an SO3 from a row-major 3×3 rotation matrix. The SDK SO3 has no
+// matrix constructor (it is quaternion/exp-based), but EuRoC publishes the
+// camera→IMU extrinsic as a matrix (T_BS), so convert here via the standard
+// branchy matrix→quaternion that stays well-conditioned for any rotation.
+branes::math::lie::SO3<T> so3_from_matrix(const double (&R)[9]) {
+    const double tr = R[0] + R[4] + R[8];
+    double w, x, y, z;
+    if (tr > 0.0) {
+        const double s = std::sqrt(tr + 1.0) * 2.0;  // s = 4w
+        w = 0.25 * s;
+        x = (R[7] - R[5]) / s;
+        y = (R[2] - R[6]) / s;
+        z = (R[3] - R[1]) / s;
+    } else if (R[0] > R[4] && R[0] > R[8]) {
+        const double s = std::sqrt(1.0 + R[0] - R[4] - R[8]) * 2.0;  // s = 4x
+        w = (R[7] - R[5]) / s;
+        x = 0.25 * s;
+        y = (R[1] + R[3]) / s;
+        z = (R[2] + R[6]) / s;
+    } else if (R[4] > R[8]) {
+        const double s = std::sqrt(1.0 + R[4] - R[0] - R[8]) * 2.0;  // s = 4y
+        w = (R[2] - R[6]) / s;
+        x = (R[1] + R[3]) / s;
+        y = 0.25 * s;
+        z = (R[5] + R[7]) / s;
+    } else {
+        const double s = std::sqrt(1.0 + R[8] - R[0] - R[4]) * 2.0;  // s = 4z
+        w = (R[3] - R[1]) / s;
+        x = (R[2] + R[6]) / s;
+        y = (R[5] + R[7]) / s;
+        z = 0.25 * s;
+    }
+    using SO3 = branes::math::lie::SO3<T>;
+    return SO3(typename SO3::Quaternion{{static_cast<T>(w), static_cast<T>(x), static_cast<T>(y), static_cast<T>(z)}});
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::string root, out_prefix, energy_kind_str = "rapl", energy_source;
     double ate_gate = 0.5;  // EuRoC V1_01_easy gate (see benchmarks/accuracy)
     int max_clones = 11;
+    bool fail_fast = false;  // stop at first divergence instead of running on
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto take = [&](std::string& dst) -> bool {
@@ -99,6 +137,8 @@ int main(int argc, char** argv) {
             } else if (a == "--energy-source") {
                 if (!take(energy_source))
                     return 2;
+            } else if (a == "--fail-fast") {
+                fail_fast = true;
             } else if (a.rfind("--", 0) == 0) {
                 std::cerr << "vio_bench: unknown flag " << a << "\n";
                 return 2;
@@ -114,7 +154,7 @@ int main(int argc, char** argv) {
         }
     }
     if (root.empty()) {
-        std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N]\n"
+        std::cerr << "usage: vio_bench <mav0-dir> [--out prefix] [--ate-gate X] [--max-clones N] [--fail-fast]\n"
                   << "                 [--energy rapl|tegrastats|external] [--energy-source <path|interval-ms>]\n";
         return 2;
     }
@@ -132,6 +172,21 @@ int main(int argc, char** argv) {
     Backend::CameraCalibration cal;
     cal.intrinsics =
         Backend::Camera(458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
+    // cam0→IMU extrinsics (T_BS from the published cam0 sensor.yaml): the
+    // camera is rotated ~90° about the body z and offset ~7 cm from the IMU.
+    // Leaving these at identity makes every camera update geometrically
+    // inconsistent with the IMU-propagated pose.
+    static const double R_imu_cam0[9] = {0.0148655429818,
+                                         -0.999880929698,
+                                         0.00414029679422,
+                                         0.999557249008,
+                                         0.0149672133247,
+                                         0.025715529948,
+                                         -0.0257744366974,
+                                         0.00375618835797,
+                                         0.999660727178};
+    cal.extrinsics.R_imu_cam = so3_from_matrix(R_imu_cam0);
+    cal.extrinsics.p_imu_cam = {{-0.0216401454975, -0.064676986768, 0.00981073058949}};
     Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
     bs::VioConfig cfg;
     cfg.max_clones = max_clones;
@@ -191,7 +246,17 @@ int main(int argc, char** argv) {
     // look hung. ~100 updates over the run, plus a guaranteed final 100%.
     const std::size_t total_frames = images.size();
     const std::size_t progress_every = std::max<std::size_t>(1, total_frames / 100);
-    std::size_t frame_idx = 0;
+
+    // Divergence guard: an EuRoC indoor MAV never exceeds a few m/s within a
+    // room. A speed or position far past physical limits (or a non-finite
+    // state) means the filter has blown up — record the first frame it does
+    // so a broken run is identified immediately, not inferred from a giant
+    // ATE after the whole sequence runs.
+    constexpr double kMaxSpeed = 50.0;      // m/s
+    constexpr double kMaxPosition = 1.0e3;  // m
+    bool diverged = false;
+    std::size_t divergence_frame = 0, frame_idx = 0;
+    double divergence_time_s = 0.0, peak_speed = 0.0, max_pos = 0.0;
 
     for (const auto& frame : images) {
         if (++frame_idx % progress_every == 0 || frame_idx == total_frames) {
@@ -224,6 +289,24 @@ int main(int argc, char** argv) {
         feat_sum += static_cast<double>(est.num_tracked_features());
         dim_sum += static_cast<double>(est.backend().state().dim());
         traj.push_back(ev::StampedPose<T>{frame.t_s, est.current_pose()});
+
+        // Health check on the freshly-updated state.
+        const auto ns = est.current_state();
+        const auto pos = ns.T_world_imu.translation();
+        const auto& vel = ns.velocity_world;
+        const double speed = std::sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
+        const double dist = std::sqrt(pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]);
+        peak_speed = std::max(peak_speed, speed);
+        max_pos = std::max(max_pos, dist);
+        if (!diverged && (!std::isfinite(speed) || !std::isfinite(dist) || speed > kMaxSpeed || dist > kMaxPosition)) {
+            diverged = true;
+            divergence_frame = frame_idx;
+            divergence_time_s = frame.t_s;
+            std::cerr << "vio_bench: DIVERGED at frame " << frame_idx << " (t=" << frame.t_s << " s): speed " << speed
+                      << " m/s, |pos| " << dist << " m\n";
+            if (fail_fast)
+                break;
+        }
     }
     std::cerr << '\n';  // terminate the carriage-return progress line
 
@@ -235,7 +318,11 @@ int main(int argc, char** argv) {
     bb::BenchReport r;
     r.sequence = root;
     const std::size_t nframes = traj.size();
-    const double seq_duration = images.back().t_s - images.front().t_s;
+    // Span of the frames actually processed (traj runs first→last included
+    // frame). Using images.back() would overstate the duration on a
+    // --fail-fast early exit, inflating real_time_factor against a partial
+    // processing time and frame count.
+    const double seq_duration = nframes >= 2 ? traj.back().t_s - traj.front().t_s : 0.0;
 
     // Ground truth is optional: a sequence without it (or a malformed file)
     // still yields the performance/energy report — accuracy is left at 0.
@@ -246,6 +333,7 @@ int main(int argc, char** argv) {
         std::cerr << "vio_bench: warning — no usable ground truth (" << e.what() << "); accuracy left at 0\n";
     }
     const auto matched = ev::associate(traj, gt, 0.01);
+    r.accuracy_available = matched.estimated.size() >= 2;
     if (matched.estimated.size() >= 2) {
         r.ate_m = ev::ate_rmse(matched.estimated, matched.reference);
         const std::size_t delta = std::max<std::size_t>(1, matched.estimated.size() / 20);
@@ -278,6 +366,29 @@ int main(int argc, char** argv) {
     r.accuracy_within_gate = matched.estimated.size() >= 2 && r.ate_m <= ate_gate;
     if (rapl_ok && r.accuracy_within_gate && r.avg_power_w > 0.0)
         r.fps_per_watt = r.fps / r.avg_power_w;
+
+    // ── Estimator health / initialization diagnostics ────────────────────
+    const auto& init = est.backend().init_diagnostics();
+    r.init_method = bs::to_string(init.method);
+    // Platform tilt at init = angle of the measured "up" (specific-force)
+    // direction from the body +z axis. Large here + init_method "identity"
+    // is the classic divergence signature.
+    const double uz = std::max(-1.0, std::min(1.0, static_cast<double>(init.up_body[2])));
+    r.init_tilt_deg = std::acos(uz) * 180.0 / std::acos(-1.0);
+    r.init_gravity_residual = init.gravity_residual;
+    // Derive the extrinsics-identity warning from the calibration we actually
+    // built (rotation angle ≈ 0 and translation ≈ 0), so it stays truthful if
+    // the extrinsics above are ever dropped — rather than asserting a constant.
+    {
+        const double rot_angle = branes::math::lie::detail::norm(cal.extrinsics.R_imu_cam.log());
+        const double trans = branes::math::lie::detail::norm(cal.extrinsics.p_imu_cam);
+        r.extrinsics_identity = rot_angle < 1e-9 && trans < 1e-9;
+    }
+    r.diverged = diverged;
+    r.divergence_frame = divergence_frame;
+    r.divergence_time_s = divergence_time_s;
+    r.peak_speed_mps = peak_speed;
+    r.max_position_m = max_pos;
 
     // ── Counts + operator profile (Phase-2 graphs input) ─────────────────
     r.counts.frames = nframes;
