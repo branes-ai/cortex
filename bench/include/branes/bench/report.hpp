@@ -210,10 +210,14 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
 
     os << "## Accuracy\n\n";
     os << "| Metric | Value |\n|---|---|\n";
-    os << "| ATE (m) | " << r.ate_m << " (gate " << r.ate_gate_m << ") |\n";
-    os << "| RPE RMSE (m) | " << r.rpe_rmse_m << " |\n";
-    os << "| RPE translation (%) | " << r.rpe_translation_pct << " |\n";
-    os << "| RPE rotation (deg/m) | " << r.rpe_rotation_deg_per_m << " |\n\n";
+    if (!r.accuracy_available) {
+        os << "| Accuracy | n/a (no usable ground truth) |\n\n";
+    } else {
+        os << "| ATE (m) | " << r.ate_m << " (gate " << r.ate_gate_m << ") |\n";
+        os << "| RPE RMSE (m) | " << r.rpe_rmse_m << " |\n";
+        os << "| RPE translation (%) | " << r.rpe_translation_pct << " |\n";
+        os << "| RPE rotation (deg/m) | " << r.rpe_rotation_deg_per_m << " |\n\n";
+    }
 
     os << "## Performance\n\n";
     os << "| Metric | Value |\n|---|---|\n";
@@ -230,6 +234,8 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
         os << "| Average power (W) | " << r.avg_power_w << " |\n";
         if (r.accuracy_within_gate)
             os << "| **Intelligence/Watt** (fps/W @ ATE≤gate) | **" << r.fps_per_watt << "** |\n";
+        else if (!r.accuracy_available)
+            os << "| Intelligence/Watt | n/a (accuracy unavailable) |\n";
         else
             os << "| Intelligence/Watt | n/a (ATE above gate) |\n";
     } else if (r.energy_backend == "rapl") {
