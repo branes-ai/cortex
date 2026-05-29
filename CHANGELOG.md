@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.22.0](https://github.com/branes-ai/cortex/compare/v0.21.0...v0.22.0) (2026-05-28)
+
+
+### Features
+
+* **bench:** graphs energy-model integration (cpu/gpu/kpu-t64) ([#204](https://github.com/branes-ai/cortex/issues/204)) ([9ec7b91](https://github.com/branes-ai/cortex/commit/9ec7b91931e3bed5b499fae299facb00c2030c79))
+* **bench:** on-device energy backends — tegrastats + external meter ([#207](https://github.com/branes-ai/cortex/issues/207)) ([dda2ac7](https://github.com/branes-ai/cortex/commit/dda2ac7a6d67976f68c6feecb30462b743bc8db2))
+
 ## [0.21.0](https://github.com/branes-ai/cortex/compare/v0.20.3...v0.21.0) (2026-05-28)
 
 
