@@ -79,6 +79,52 @@ TEST_CASE("static init rejects a non-stationary window", "[sdk][imu_init]") {
     REQUIRE_FALSE(init.try_static(gyro, accel).success);
 }
 
+TEST_CASE("gravity-align recovers roll/pitch on a moving start static init rejects", "[sdk][imu_init]") {
+    // A genuinely tilted platform that is also rotating + jostling: the mean
+    // specific force is still gravity-dominated, so roll/pitch is recoverable
+    // even though the window is far from at rest.
+    const SO3 R_true = SO3::exp(Vec3{{0.43, 0.17, 0.0}});  // ~25° / ~10° tilt
+    const Vec3 up_world{{0.0, 0.0, 9.81}};
+    const Vec3 a_rest = R_true.inverse() * up_world;
+    const Vec3 g_world{{0.0, 0.0, -9.81}};
+
+    std::vector<Vec3> gyro, accel;
+    for (int k = 0; k < 120; ++k) {
+        // Real angular rate (~0.2 rad/s swings) and ±0.4 m/s² translational
+        // jostle on top of the gravity term — clearly not stationary.
+        gyro.push_back(Vec3{{0.2 * std::sin(0.2 * k), 0.15 * std::cos(0.13 * k), 0.1 * std::sin(0.07 * k)}});
+        const T j = 0.4 * std::sin(0.3 * k);
+        accel.push_back(Vec3{{a_rest[0] + j, a_rest[1] - j, a_rest[2] + 0.5 * j}});
+    }
+
+    bs::ImuInitializer<T> init;
+    REQUIRE_FALSE(init.try_static(gyro, accel).success);  // too lively for static
+
+    const auto r = init.try_gravity_align(gyro, accel);
+    REQUIRE(r.success);
+    // Roll/pitch should be close to truth (the jostle adds a few degrees);
+    // yaw is unobservable, so compare the recovered gravity directions.
+    const Vec3 g_body_true = R_true.inverse() * g_world;
+    const Vec3 g_body_est = r.R_world_imu.inverse() * r.gravity_world;
+    const T deg = angle_between(g_body_true, g_body_est) * T(180) / std::numbers::pi_v<T>;
+    REQUIRE(deg < 5.0);
+    // The window is rotating, so the gyro mean is NOT trusted as bias.
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(r.gyro_bias[i] == T{0});
+}
+
+TEST_CASE("gravity-align rejects a window whose mean force isn't gravity", "[sdk][imu_init]") {
+    // Sustained free-fall-ish / high-acceleration: mean specific force is far
+    // from g, so its direction is meaningless and alignment must decline.
+    std::vector<Vec3> gyro, accel;
+    for (int k = 0; k < 80; ++k) {
+        gyro.push_back(Vec3{{0.0, 0.0, 0.0}});
+        accel.push_back(Vec3{{0.0, 0.0, 2.0}});  // |mean| ≈ 2 m/s², nowhere near 9.81
+    }
+    bs::ImuInitializer<T> init;
+    REQUIRE_FALSE(init.try_gravity_align(gyro, accel).success);
+}
+
 TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu_init]") {
     using KF = bs::DynInitKeyframe<T>;
     using Mat3 = bs::ImuInitializer<T>::Mat3;

@@ -47,8 +47,21 @@ struct BenchReport {
     double avg_power_w = 0.0;
 
     // Efficiency — only meaningful when accuracy is within the gate.
+    bool accuracy_available = false;  ///< ground truth produced usable ATE/RPE (else they are 0, not "passing")
     bool accuracy_within_gate = false;
     double fps_per_watt = 0.0;  ///< 0 when power unavailable or accuracy out of gate
+
+    // Estimator health / initialization — surfaced so a bad run is obvious
+    // from the report instead of inferred from a giant ATE.
+    std::string init_method = "none";    ///< static | gravity_align | identity | none
+    double init_tilt_deg = 0.0;          ///< angle of the recovered up-direction from body +z
+    double init_gravity_residual = 0.0;  ///< ||mean accel| − g| / g at init
+    bool extrinsics_identity = false;    ///< camera coincident with IMU (a bug for real rigs)
+    bool diverged = false;               ///< state went non-physical during the run
+    std::size_t divergence_frame = 0;    ///< first frame index it did (when diverged)
+    double divergence_time_s = 0.0;      ///< timestamp of that frame
+    double peak_speed_mps = 0.0;         ///< max |velocity| over the run
+    double max_position_m = 0.0;         ///< max |position| over the run
 };
 
 namespace detail {
@@ -95,6 +108,7 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
     os << "  \"sequence\": \"" << detail::json_escape(r.sequence) << "\",\n";
 
     os << "  \"accuracy\": {\n";
+    os << "    \"available\": " << (r.accuracy_available ? "true" : "false") << ",\n";
     detail::json_kv(os, "ate_m", r.ate_m);
     detail::json_kv(os, "ate_gate_m", r.ate_gate_m);
     detail::json_kv(os, "rpe_rmse_m", r.rpe_rmse_m);
@@ -125,6 +139,18 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
     detail::json_kv(os, "fps_per_watt", r.fps_per_watt, false);
     os << "  },\n";
 
+    os << "  \"health\": {\n";
+    os << "    \"init_method\": \"" << detail::json_escape(r.init_method) << "\",\n";
+    detail::json_kv(os, "init_tilt_deg", r.init_tilt_deg);
+    detail::json_kv(os, "init_gravity_residual", r.init_gravity_residual);
+    os << "    \"extrinsics_identity\": " << (r.extrinsics_identity ? "true" : "false") << ",\n";
+    os << "    \"diverged\": " << (r.diverged ? "true" : "false") << ",\n";
+    detail::json_kv(os, "divergence_frame", static_cast<double>(r.divergence_frame));
+    detail::json_kv(os, "divergence_time_s", r.divergence_time_s);
+    detail::json_kv(os, "peak_speed_mps", r.peak_speed_mps);
+    detail::json_kv(os, "max_position_m", r.max_position_m, false);
+    os << "  },\n";
+
     // Per-operator profile — the Phase-2 graphs energy-model input.
     os << "  \"operator_profile\": [\n";
     for (std::size_t i = 0; i < r.profile.size(); ++i) {
@@ -149,12 +175,49 @@ inline void to_json(std::ostream& os, const BenchReport& r) {
 
 inline void to_markdown(std::ostream& os, const BenchReport& r) {
     os << "# VIO benchmark — " << r.sequence << "\n\n";
+
+    // Top-line verdict: a reader should see "this run is broken" before any
+    // metric. DIVERGED dominates; otherwise the accuracy gate decides.
+    os << "**Verdict:** ";
+    if (r.diverged)
+        os << "❌ DIVERGED at frame " << r.divergence_frame << " (t=" << r.divergence_time_s << " s) — "
+           << "peak speed " << r.peak_speed_mps << " m/s, |pos| up to " << r.max_position_m << " m. "
+           << "Metrics below are not meaningful.\n\n";
+    else if (!r.accuracy_available)
+        os << "⚠️ accuracy unavailable — no usable ground truth, so ATE/RPE are not reported "
+              "(performance/health below are still valid).\n\n";
+    else if (r.accuracy_within_gate)
+        os << "✅ OK — ATE " << r.ate_m << " m within gate " << r.ate_gate_m << " m.\n\n";
+    else
+        os << "⚠️ ATE " << r.ate_m << " m above gate " << r.ate_gate_m << " m (no hard divergence detected).\n\n";
+
+    os << "## Estimator health\n\n";
+    os << "| Check | Value |\n|---|---|\n";
+    os << "| Init method | `" << r.init_method << "` |\n";
+    os << "| Platform tilt at init (deg) | " << r.init_tilt_deg << " |\n";
+    os << "| Init gravity residual | " << r.init_gravity_residual << " |\n";
+    os << "| Camera↔IMU extrinsics | " << (r.extrinsics_identity ? "**identity (suspect for a real rig)**" : "set")
+       << " |\n";
+    os << "| Peak speed (m/s) | " << r.peak_speed_mps << " |\n";
+    os << "| Max position norm (m) | " << r.max_position_m << " |\n\n";
+    if (r.init_method == "identity")
+        os << "> ⚠️ Init fell back to **identity attitude** — gravity is uncancelled in propagation; "
+              "expect divergence. The start is likely non-stationary with no usable gravity direction.\n\n";
+    else if (r.init_method == "gravity_align")
+        os << "> ℹ️ Init used **gravity-only alignment** (moving start, no static window). Roll/pitch from the "
+              "mean specific force and yaw starts at zero; the gyro bias is seeded only if the window is "
+              "rotation-quiet, otherwise it starts at zero too.\n\n";
+
     os << "## Accuracy\n\n";
     os << "| Metric | Value |\n|---|---|\n";
-    os << "| ATE (m) | " << r.ate_m << " (gate " << r.ate_gate_m << ") |\n";
-    os << "| RPE RMSE (m) | " << r.rpe_rmse_m << " |\n";
-    os << "| RPE translation (%) | " << r.rpe_translation_pct << " |\n";
-    os << "| RPE rotation (deg/m) | " << r.rpe_rotation_deg_per_m << " |\n\n";
+    if (!r.accuracy_available) {
+        os << "| Accuracy | n/a (no usable ground truth) |\n\n";
+    } else {
+        os << "| ATE (m) | " << r.ate_m << " (gate " << r.ate_gate_m << ") |\n";
+        os << "| RPE RMSE (m) | " << r.rpe_rmse_m << " |\n";
+        os << "| RPE translation (%) | " << r.rpe_translation_pct << " |\n";
+        os << "| RPE rotation (deg/m) | " << r.rpe_rotation_deg_per_m << " |\n\n";
+    }
 
     os << "## Performance\n\n";
     os << "| Metric | Value |\n|---|---|\n";
@@ -171,6 +234,8 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
         os << "| Average power (W) | " << r.avg_power_w << " |\n";
         if (r.accuracy_within_gate)
             os << "| **Intelligence/Watt** (fps/W @ ATE≤gate) | **" << r.fps_per_watt << "** |\n";
+        else if (!r.accuracy_available)
+            os << "| Intelligence/Watt | n/a (accuracy unavailable) |\n";
         else
             os << "| Intelligence/Watt | n/a (ATE above gate) |\n";
     } else if (r.energy_backend == "rapl") {
