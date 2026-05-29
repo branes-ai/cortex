@@ -371,7 +371,14 @@ int main(int argc, char** argv) {
     const double uz = std::max(-1.0, std::min(1.0, static_cast<double>(init.up_body[2])));
     r.init_tilt_deg = std::acos(uz) * 180.0 / std::acos(-1.0);
     r.init_gravity_residual = init.gravity_residual;
-    r.extrinsics_identity = false;  // bench sets the real EuRoC cam0 extrinsics
+    // Derive the extrinsics-identity warning from the calibration we actually
+    // built (rotation angle ≈ 0 and translation ≈ 0), so it stays truthful if
+    // the extrinsics above are ever dropped — rather than asserting a constant.
+    {
+        const double rot_angle = branes::math::lie::detail::norm(cal.extrinsics.R_imu_cam.log());
+        const double trans = branes::math::lie::detail::norm(cal.extrinsics.p_imu_cam);
+        r.extrinsics_identity = rot_angle < 1e-9 && trans < 1e-9;
+    }
     r.diverged = diverged;
     r.divergence_frame = divergence_frame;
     r.divergence_time_s = divergence_time_s;

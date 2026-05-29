@@ -194,7 +194,7 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
     os << "| Camera↔IMU extrinsics | " << (r.extrinsics_identity ? "**identity (suspect for a real rig)**" : "set")
        << " |\n";
     os << "| Peak speed (m/s) | " << r.peak_speed_mps << " |\n";
-    os << "| Max |position| (m) | " << r.max_position_m << " |\n\n";
+    os << "| Max position norm (m) | " << r.max_position_m << " |\n\n";
     if (r.init_method == "identity")
         os << "> ⚠️ Init fell back to **identity attitude** — gravity is uncancelled in propagation; "
               "expect divergence. The start is likely non-stationary with no usable gravity direction.\n\n";

@@ -135,6 +135,7 @@ public:
         last_imu_time_ = 0.0;
         init_gyro_.clear();
         init_accel_.clear();
+        init_samples_seen_ = 0;
         tracks_.clear();
     }
 
@@ -263,6 +264,17 @@ private:
     void try_initialize(const DVec3& gyro, const DVec3& accel, double t) {
         init_gyro_.push_back(gyro);
         init_accel_.push_back(accel);
+        ++init_samples_seen_;
+        // Slide a fixed window of the most recent kInitSamples: the static
+        // check wants the latest stretch (most likely to catch a quiet
+        // moment), while init_samples_seen_ tracks total elapsed samples for
+        // the timeout below. (Trimming on every miss instead — the previous
+        // behaviour — pinned the window at kInitSamples so it never reached
+        // kInitMaxSamples and the fallback was unreachable.)
+        if (init_gyro_.size() > kInitSamples) {
+            init_gyro_.erase(init_gyro_.begin());
+            init_accel_.erase(init_accel_.begin());
+        }
         if (init_gyro_.size() < kInitSamples)
             return;
 
@@ -272,9 +284,9 @@ private:
             apply_init(stat, InitMethod::Static, t);
             return;
         }
-        // Not stationary yet. Keep sliding the window until kInitMaxSamples,
-        // then bootstrap without waiting for a rest condition that may never
-        // come (e.g. a sequence that is airborne from the first sample).
+        // No stationary window after kInitMaxSamples of trying: bootstrap from
+        // the most recent window without waiting for a rest that may never
+        // come (e.g. a sequence airborne from the first sample).
         //
         // The proper estimator for a moving start is full visual-inertial
         // alignment (ImuInitializer::try_dynamic), which also recovers yaw,
@@ -283,7 +295,7 @@ private:
         // produce yet. Until that lands, gravity-only alignment fixes the
         // dominant error (roll/pitch), which is enough to keep the filter
         // from diverging. See the dynamic-VI-init follow-up.
-        if (init_gyro_.size() >= kInitMaxSamples) {
+        if (init_samples_seen_ >= kInitMaxSamples) {
             // Prefer gravity-only alignment (roll/pitch from the mean
             // specific force) over a blind identity attitude: on a tilted
             // mount, identity leaves gravity uncancelled in propagation and
@@ -294,9 +306,6 @@ private:
                 apply_init(grav, InitMethod::GravityAlign, t);
             else
                 apply_init(ImuInitResult<T>{}, InitMethod::Identity, t);
-        } else {
-            init_gyro_.erase(init_gyro_.begin());
-            init_accel_.erase(init_accel_.begin());
         }
     }
 
@@ -420,6 +429,7 @@ private:
     DVec3 last_accel_{};
     std::vector<DVec3> init_gyro_;
     std::vector<DVec3> init_accel_;
+    std::size_t init_samples_seen_ = 0;  ///< total IMU samples seen during init (for the timeout)
     std::unordered_map<std::uint64_t, std::vector<ObsRec>> tracks_;
 };
 

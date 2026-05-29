@@ -74,6 +74,40 @@ TEST_CASE("the backend initializes attitude from a stationary window", "[sdk][ms
     REQUIRE(deg < 1.0);
 }
 
+TEST_CASE("a never-stationary tilted start initializes via gravity alignment", "[sdk][msckf][backend]") {
+    Backend backend;
+    backend.initialize(default_config());
+
+    // Tilted ~25°/10°, and moving the whole time: real angular rate + a
+    // translational jostle keep every window above the static gates, so the
+    // backend must fall through to the gravity-only bootstrap. (This path was
+    // previously unreachable — the init buffer was trimmed on every miss and
+    // never reached the timeout.)
+    const auto R_true = branes::math::lie::SO3<T>::exp(DVec3{{0.43, 0.17, 0.0}});
+    const DVec3 up_world{{0.0, 0.0, 9.81}};
+    const DVec3 a_rest = R_true.inverse() * up_world;
+
+    double t = 0.0;
+    for (int k = 0; k < 450; ++k, t += 0.005) {  // > kInitMaxSamples (400)
+        const DVec3 gyro{{0.2 * std::sin(0.2 * k), 0.15 * std::cos(0.13 * k), 0.1 * std::sin(0.07 * k)}};
+        const T j = 0.4 * std::sin(0.3 * k);
+        backend.process_imu(imu_sample(t, gyro, DVec3{{a_rest[0] + j, a_rest[1] - j, a_rest[2] + 0.5 * j}}));
+    }
+
+    REQUIRE(backend.initialized());
+    REQUIRE(backend.init_diagnostics().method == bs::InitMethod::GravityAlign);
+
+    // Gravity-in-body from the bootstrap attitude should be within a few
+    // degrees of truth (the jostle adds error; yaw is unobservable).
+    const DVec3 g_world{{0.0, 0.0, -9.81}};
+    const DVec3 g_body_true = R_true.inverse() * g_world;
+    const DVec3 g_body_est = backend.current_state().T_world_imu.rotation().inverse() * g_world;
+    const T cosang = branes::math::lie::detail::dot(g_body_true, g_body_est) /
+                     (branes::math::lie::detail::norm(g_body_true) * branes::math::lie::detail::norm(g_body_est));
+    const T deg = std::acos(std::min(T{1}, std::max(T{-1}, cosang))) * T{180} / std::numbers::pi_v<T>;
+    REQUIRE(deg < 5.0);
+}
+
 TEST_CASE("the backend runs end-to-end and stays stable under motion", "[sdk][msckf][backend]") {
     const auto cfg = default_config();
     Backend backend;
