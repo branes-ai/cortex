@@ -22,6 +22,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.25.2](https://github.com/branes-ai/cortex/compare/v0.25.1...v0.25.2) (2026-05-30)
+
+
+### Bug Fixes
+
+* **docs:** point the benchmark generator at the moved euroc test ([#223](https://github.com/branes-ai/cortex/issues/223)) ([023fb74](https://github.com/branes-ai/cortex/commit/023fb74e7df7b3adeeac12d97fefb1faaf706f27))
+
+
+### Code Refactoring
+
+* **test:** drop redundant layer/_test segments from test filenames ([#225](https://github.com/branes-ai/cortex/issues/225)) ([1cafd9a](https://github.com/branes-ai/cortex/commit/1cafd9a4f467cc38369fed72a53ddbc640b730a6))
+
 ## [0.25.1](https://github.com/branes-ai/cortex/compare/v0.25.0...v0.25.1) (2026-05-30)
 
 
