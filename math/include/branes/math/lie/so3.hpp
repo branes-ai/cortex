@@ -20,6 +20,8 @@
 
 #include <branes/math/lie/detail.hpp>
 
+#include <cassert>
+
 namespace branes::math::lie {
 
 /// SO(3) — the group of 3D rotations, stored as a unit quaternion.
@@ -38,6 +40,10 @@ public:
     constexpr SO3() noexcept : q_{{T{1}, T{0}, T{0}, T{0}}} {}
 
     /// Construct from a (not necessarily normalized) quaternion (w,x,y,z).
+    /// Precondition: the quaternion is non-zero (it need not be unit, but a
+    /// zero / underflowed quaternion has no rotation and cannot be
+    /// normalized). Checked by a debug assert; in release the hot path stays
+    /// branch-free and a degenerate input is undefined.
     explicit SO3(const Quaternion& q) : q_(q) {
         normalize();
     }
@@ -188,6 +194,10 @@ private:
 
     void normalize() {
         T n = detail::sqrt_(q_[0] * q_[0] + q_[1] * q_[1] + q_[2] * q_[2] + q_[3] * q_[3]);
+        // Invariant: a representable rotation has a positive-norm quaternion.
+        // A zero / underflowed quaternion would make inv = 1/n non-finite and
+        // silently poison every downstream rotation.
+        assert(n > T{0} && "SO3::normalize: quaternion norm must be positive");
         const T inv = T{1} / n;
         for (std::size_t i = 0; i < 4; ++i)
             q_[i] = q_[i] * inv;

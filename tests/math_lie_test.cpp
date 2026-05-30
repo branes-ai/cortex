@@ -369,3 +369,31 @@ TEST_CASE("Sim3 round-trip across arithmetic types", "[math][lie][sim3]") {
     auto Sp = lie::Sim3<posit32>::exp(tau);
     require_vec_close(Sp.log(), tau, 1e-4);
 }
+
+// ── #161: degenerate-input guards must admit all legitimate inputs ──────
+
+TEST_CASE("SO3 normalizes non-unit and small-but-nonzero quaternions", "[math][lie][so3]") {
+    // A non-unit quaternion is a documented valid input: it must normalize,
+    // not trip the positive-norm guard.
+    const lie::SO3<double> a(det::Vec<double, 4>{{2.0, 0.0, 0.0, 0.0}});
+    require_mat_close(a.matrix(), det::Mat<double, 3, 3>::identity(), 1e-12);
+
+    // Tiny but non-zero magnitude is still a valid direction once normalized.
+    const lie::SO3<double> b(det::Vec<double, 4>{{1e-6, 1e-6, 0.0, 0.0}});
+    require_mat_close(b.matrix() * det::transpose(b.matrix()), det::Mat<double, 3, 3>::identity(), 1e-9);
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE(std::isfinite(b.matrix()(i, j)));
+}
+
+TEST_CASE("Sim3 admits a small positive scale and inverts it", "[math][lie][sim3]") {
+    const double s = 1e-3;
+    const lie::Sim3<double> S(
+        s, lie::SO3<double>::exp(det::Vec<double, 3>{{0.1, -0.2, 0.05}}), det::Vec<double, 3>{{0.4, -0.1, 0.2}});
+    const auto Si = S.inverse();
+    REQUIRE(std::abs(double(Si.scale()) - 1.0 / s) < 1e-6);
+    // S · S⁻¹ = identity (scale 1, no rotation, no translation).
+    const auto I = S * Si;
+    REQUIRE(std::abs(double(I.scale()) - 1.0) < 1e-9);
+    require_vec_close(I.translation(), det::Vec<double, 3>{{0.0, 0.0, 0.0}}, 1e-9);
+}

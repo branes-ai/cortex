@@ -22,6 +22,7 @@
 #include <branes/math/arithmetic.hpp>
 
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <utility>
@@ -233,7 +234,12 @@ template <Scalar T>
 /// Dense inverse of a small square matrix via Gauss–Jordan elimination
 /// with partial pivoting. Used for the modest fixed sizes (3x3 W block,
 /// 7x7 Sim3 Jacobian) where a generic routine is clearer than per-size
-/// closed forms. Assumes the matrix is invertible.
+/// closed forms.
+///
+/// Precondition: `a` is invertible. A singular (or numerically rank-deficient)
+/// matrix leaves a zero pivot, making 1/diag non-finite and silently poisoning
+/// the result; that is caught by a debug assert below, while release keeps the
+/// elimination branch-free.
 template <Scalar T, std::size_t N>
 [[nodiscard]] Mat<T, N, N> inverse(const Mat<T, N, N>& a) {
     Mat<T, N, N> m = a;
@@ -255,6 +261,9 @@ template <Scalar T, std::size_t N>
                 std::swap(inv(col, j), inv(pivot, j));
             }
         }
+        // `best` is the largest |entry| in this column at/below the diagonal;
+        // a zero (or denormal) pivot means the matrix is singular.
+        assert(best > T{0} && "lie::detail::inverse: matrix is singular (zero pivot)");
         const T diag = m(col, col);
         const T inv_diag = T{1} / diag;
         for (std::size_t j = 0; j < N; ++j) {
