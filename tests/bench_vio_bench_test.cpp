@@ -145,7 +145,7 @@ TEST_CASE("tegrastats parser prefers a total rail and handles both formats", "[b
     REQUIRE_THAT(tg::parse_power_mw("RAM 1/2MB CPU [1%@1200]"), Catch::Matchers::WithinAbs(0.0, 1e-9));
 }
 
-TEST_CASE("power→energy integrator is trapezoidal", "[bench][tegrastats]") {
+TEST_CASE("power-to-energy integrator is trapezoidal", "[bench][tegrastats]") {
     namespace tg = branes::bench::tegrastats;
     // Constant 10 W over 2 s ⇒ 20 J.
     REQUIRE_THAT(tg::integrate_energy_j({{0.0, 10.0}, {1.0, 10.0}, {2.0, 10.0}}),
@@ -156,7 +156,7 @@ TEST_CASE("power→energy integrator is trapezoidal", "[bench][tegrastats]") {
     REQUIRE_THAT(tg::integrate_energy_j({{0.0, 10.0}}), Catch::Matchers::WithinAbs(0.0, 1e-9));
 }
 
-TEST_CASE("external counter-file backend reports the µJ delta", "[bench][energy]") {
+TEST_CASE("external counter-file backend reports the uJ delta", "[bench][energy]") {
     namespace fs = std::filesystem;
     const fs::path p = fs::temp_directory_path() / "cortex_energy_counter_uj";
     {

@@ -32,8 +32,15 @@ namespace {
 // without privileges. Setting the env var before make_resource_manager
 // is the supported way to control SitlMemoryProvider's backend choice.
 void use_heap_backend() {
+#if defined(_WIN32)
+    // MSVC has no POSIX setenv/unsetenv. _putenv_s sets the variable, and an
+    // empty value removes it from the environment (documented behaviour).
+    _putenv_s("CORTEX_MEM_BACKEND", "heap");
+    _putenv_s("RUST_HAL_TARGET", "");
+#else
     ::setenv("CORTEX_MEM_BACKEND", "heap", /*overwrite=*/1);
     ::unsetenv("RUST_HAL_TARGET");
+#endif
 }
 
 }  // namespace
