@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.23.1](https://github.com/branes-ai/cortex/compare/v0.23.0...v0.23.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* **math:** guard degenerate inputs in the Lie-group helpers ([#214](https://github.com/branes-ai/cortex/issues/214)) ([f51c3a9](https://github.com/branes-ai/cortex/commit/f51c3a91ec457b62d691d87ff834c48cef2dd33e)), closes [#161](https://github.com/branes-ai/cortex/issues/161)
+
 ## [0.23.0](https://github.com/branes-ai/cortex/compare/v0.22.0...v0.23.0) (2026-05-29)
 
 
