@@ -18,7 +18,7 @@ add_library(branes::test_support ALIAS branes_test_support)
 # branes::math is header-only; Universal supplies the posit/cfloat element
 # types the math suite instantiates against. math_type_smoke carries a prefix
 # so `ctest -R math_type_smoke` (the issue #25 acceptance) selects it.
-file(GLOB MATH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/math/*.cpp)
+file(GLOB MATH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/math/*_test.cpp)
 list(REMOVE_ITEM MATH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/math/math_type_smoke_test.cpp)
 compile_all(FOLDER "Tests/math" LIBS branes::math universal SOURCES ${MATH_SRC})
 compile_all(FOLDER "Tests/math" LIBS branes::math universal
@@ -28,14 +28,14 @@ compile_all(FOLDER "Tests/math" LIBS branes::math universal
 # ── CV layer (issues #37, #38, #48, #49) ───────────────────────────────────
 # stb_image provides the PNG encode header cv_image uses for fixtures; linking
 # it to the whole group is harmless (header-only) and keeps the glob uniform.
-file(GLOB CV_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cv/*.cpp)
+file(GLOB CV_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cv/*_test.cpp)
 compile_all(FOLDER "Tests/cv" LIBS branes::cv branes::stb_image SOURCES ${CV_SRC})
 
 # ── SDK layer (issues #34-#36, #40-#47, #187) ──────────────────────────────
 # Some SDK tests drive the cv front end; linking branes::cv across the group is
 # harmless (header-only) and keeps the glob uniform. vio_euroc carries a prefix
 # so its dataset-gated cases group under `ctest -R vio_euroc` (issue #46).
-file(GLOB SDK_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sdk/*.cpp)
+file(GLOB SDK_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/sdk/*_test.cpp)
 list(REMOVE_ITEM SDK_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sdk/sdk_vio_euroc_test.cpp)
 compile_all(FOLDER "Tests/sdk" LIBS branes::sdk branes::cv SOURCES ${SDK_SRC})
 compile_all(FOLDER "Tests/sdk" LIBS branes::sdk branes::cv
@@ -43,7 +43,7 @@ compile_all(FOLDER "Tests/sdk" LIBS branes::sdk branes::cv
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/sdk/sdk_vio_euroc_test.cpp)
 
 # ── Bench layer (issue #200) ───────────────────────────────────────────────
-file(GLOB BENCH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp)
+file(GLOB BENCH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/*_test.cpp)
 compile_all(FOLDER "Tests/bench" LIBS branes::bench branes::sdk SOURCES ${BENCH_SRC})
 
 # ── Integration: foundational deps + the C++↔Rust cxx::bridge ──────────────
