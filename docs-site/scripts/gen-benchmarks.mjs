@@ -63,7 +63,7 @@ const latencyDouble = inRange(latencyBudget('double'), 0, 10000, 'double latency
 const latencyFloat = inRange(latencyBudget('float'), 0, 10000, 'float latency budget (ms)');
 
 // EuRoC ATE gate: anchor on the REQUIRE assertion, not the INFO log line.
-const eurocTest = stripCppComments(read('tests/sdk_vio_euroc_test.cpp'));
+const eurocTest = stripCppComments(read('tests/sdk/sdk_vio_euroc_test.cpp'));
 const ateGate = inRange(
   Number(extract(eurocTest, /REQUIRE\(\s*ate\s*<\s*([0-9.]+)\s*\)/, 'EuRoC V1_01_easy ATE gate (REQUIRE(ate < …))')),
   0,
