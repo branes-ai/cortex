@@ -106,9 +106,13 @@ jobs:
         # MSVC toolchain itself, so no vcvars / Developer Prompt step is needed.
         run: cmake --preset msvc
       - name: Build
-        run: cmake --build --preset msvc-debug
+        # Release config so the C++ /MD CRT matches the Corrosion-built Rust
+        # staticlib (cargo compiles cxx glue in the release profile). A Debug
+        # build links /MDd against /MD → LNK2038/LNK1319. Driving cargo's debug
+        # profile from a Debug CMake config is a separate Corrosion follow-up.
+        run: cmake --build --preset msvc-release
       - name: Run C++ Unit Tests (Math & Emulation)
-        run: ctest --preset msvc-debug
+        run: ctest --preset msvc-release
 
   coverage:
     name: Coverage (cargo-llvm-cov, gated >= 85%)
