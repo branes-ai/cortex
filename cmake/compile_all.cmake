@@ -7,10 +7,11 @@
 # per binary), and an optional TEST_PREFIX namespaces those case names for
 # suites whose acceptance commands filter on a prefix (e.g. `ctest -R vio_euroc`).
 #
-# The point is productivity: drop a `<layer>_<name>_test.cpp` into the right
-# tests/ subdirectory and it is built, linked, IDE-grouped, and registered with
-# no edit to any CMakeLists. Each target is named after its file stem and placed
-# under an IDE FOLDER so Visual Studio's Solution Explorer mirrors the layout.
+# The point is productivity: drop a `<name>.cpp` into the right tests/<layer>/
+# subdirectory and it is built, linked, IDE-grouped, and registered with no edit
+# to any CMakeLists. Each target is named after its file stem (which must be
+# globally unique) and placed under an IDE FOLDER so Visual Studio's Solution
+# Explorer mirrors the layout.
 #
 #   compile_all(
 #     FOLDER       <ide-folder>          # e.g. "Tests/sdk" (Solution Explorer group)
