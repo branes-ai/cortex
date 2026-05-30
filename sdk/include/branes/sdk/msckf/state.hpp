@@ -10,12 +10,18 @@
 //   [ δθ(3) δp(3) δv(3) δbg(3) δba(3) | per clone: δθ_c(3) δp_c(3) ... ]
 // so the covariance is (15 + 6·#clones) square.
 //
+// The covariance representation is a policy (`Cov`): `FullCovariance` carries
+// the dense P, `SqrtCovariance` carries the Cholesky factor S (P = S·Sᵀ). The
+// mean, clone window, and feature management are identical either way — only
+// the covariance algebra differs, and it lives behind `cov`.
+//
 // Header-only, C++20, type-generic.
 
 #ifndef BRANES_SDK_MSCKF_STATE_HPP
 #define BRANES_SDK_MSCKF_STATE_HPP
 
 #include <branes/math/lie/so3.hpp>
+#include <branes/sdk/msckf/covariance.hpp>
 #include <branes/sdk/msckf/dense.hpp>
 
 #include <cstddef>
@@ -23,7 +29,7 @@
 
 namespace branes::sdk::msckf {
 
-template <math::Scalar T>
+template <math::Scalar T, CovarianceModel<T> Cov = FullCovariance<T>>
 struct State {
     using SO3 = math::lie::SO3<T>;
     using Vec3 = math::lie::detail::Vec<T, 3>;
@@ -55,13 +61,10 @@ struct State {
     double timestamp = 0.0;
 
     std::vector<Clone> clones;
-    DynMat<T> P;  ///< joint error-state covariance, dim() square
+    Cov cov;  ///< joint error-state covariance (representation-policy), dim() square
 
     /// Construct with an initial IMU covariance (15×15 by default).
-    explicit State(T initial_sigma = T{1}) : P(kImuDim, kImuDim) {
-        for (std::size_t i = 0; i < kImuDim; ++i)
-            P(i, i) = initial_sigma * initial_sigma;
-    }
+    explicit State(T initial_sigma = T{1}) : cov(initial_sigma, kImuDim) {}
 
     [[nodiscard]] std::size_t num_clones() const {
         return clones.size();
@@ -72,6 +75,13 @@ struct State {
     /// Error-state offset of clone `i`'s δθ block.
     [[nodiscard]] std::size_t clone_offset(std::size_t i) const {
         return kImuDim + kCloneDim * i;
+    }
+
+    /// Dense error-state covariance P for inspection / PSD checks. For the
+    /// full representation this is the stored matrix; for the square-root
+    /// representation it is S·Sᵀ.
+    [[nodiscard]] DynMat<T> covariance() const {
+        return cov.covariance();
     }
 };
 
