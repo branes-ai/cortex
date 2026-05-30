@@ -87,6 +87,7 @@
   "testPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
     { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
-    { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug", "output": { "outputOnFailure": true } }
+    { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } }
   ]
 }
