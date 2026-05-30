@@ -80,6 +80,36 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  build-and-test-windows:
+    name: Build and Test (Windows - MSVC)
+    runs-on: windows-2022
+    # The Visual Studio generator ignores compiler launchers, and sccache's
+    # MSVC support trips over CMake's default /Zi shared-PDB. Disable sccache
+    # for this job (overriding the workflow-level env) — correctness over
+    # cache until a Windows sccache config is proven out.
+    env:
+      RUSTC_WRAPPER: ""
+      CMAKE_C_COMPILER_LAUNCHER: ""
+      CMAKE_CXX_COMPILER_LAUNCHER: ""
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        # rust-toolchain.toml pins the channel; on Windows this resolves the
+        # x86_64-pc-windows-msvc host toolchain that Corrosion builds with.
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
+        with:
+          toolchain: 1.83.0
+      - name: Configure
+        # windows-2022 ships CMake + the VS 2022 generator; CMake locates the
+        # MSVC toolchain itself, so no vcvars / Developer Prompt step is needed.
+        run: cmake --preset msvc
+      - name: Build
+        run: cmake --build --preset msvc-debug
+      - name: Run C++ Unit Tests (Math & Emulation)
+        run: ctest --preset msvc-debug
+
   coverage:
     name: Coverage (cargo-llvm-cov, gated >= 85%)
     runs-on: ubuntu-24.04
