@@ -98,22 +98,31 @@ struct SqrtCovariance {
         // LQ(pre) = (QR(preᵀ))ᵀ → block-lower-triangular post.
         const DynMat<T> post = retriangularize(pre);
 
-        // S' = post[k:, k:].
-        DynMat<T> Sn(d, d);
-        for (std::size_t i = 0; i < d; ++i)
-            for (std::size_t j = 0; j < d; ++j)
-                Sn(i, j) = post(k + i, k + j);
-
-        // δx = Kbar·(Re⁻¹ r): forward-solve Re y = r (Re = post[0:k,0:k]
-        // lower-triangular), then δx = Kbar y (Kbar = post[k:, 0:k]).
+        // δx = Kbar·(Re⁻¹ r): forward-solve Re y = r (Re = post[0:k,0:k],
+        // lower-triangular). A zero pivot means the innovation is singular in
+        // that direction — the same condition mahalanobis() rejects on — so
+        // skip the update entirely (leave S and the mean unchanged) rather
+        // than apply a δx from an unobservable innovation. This mirrors the
+        // full-covariance path, whose spd_solve no-ops on a non-PD innovation.
+        // With gating enabled (the default) the gate already rejects this
+        // before update() runs; the guard covers the gating-disabled path.
         std::vector<T> y(k, T{0});
         for (std::size_t i = 0; i < k; ++i) {
             T s = r[i];
             for (std::size_t j = 0; j < i; ++j)
                 s -= post(i, j) * y[j];
             const T diag = post(i, i);
-            y[i] = diag != T{0} ? s / diag : T{0};
+            if (diag == T{0})
+                return std::vector<T>(d, T{0});  // singular innovation ⇒ no-op
+            y[i] = s / diag;
         }
+
+        // Commit the updated factor S' = post[k:, k:] and form the correction
+        // δx = Kbar y (Kbar = post[k:, 0:k]) now that the solve has succeeded.
+        DynMat<T> Sn(d, d);
+        for (std::size_t i = 0; i < d; ++i)
+            for (std::size_t j = 0; j < d; ++j)
+                Sn(i, j) = post(k + i, k + j);
         std::vector<T> dx(d, T{0});
         for (std::size_t i = 0; i < d; ++i) {
             T acc = T{0};
@@ -121,7 +130,6 @@ struct SqrtCovariance {
                 acc += post(k + i, j) * y[j];
             dx[i] = acc;
         }
-
         S = std::move(Sn);
         return dx;
     }
