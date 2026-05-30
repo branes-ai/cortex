@@ -5,6 +5,10 @@ project(branes_cortex LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Organize targets into folders in IDEs (Visual Studio, Xcode). The tests/
+# tree groups its generated per-file targets under "Tests/<layer>" via this.
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 # MSVC needs two opt-ins that gcc/clang give by default:
 #   /Zc:preprocessor — the conformant preprocessor; the legacy one mis-parses
 #       raw-string literals passed as macro arguments (Catch2 REQUIRE(R"(...)")).
