@@ -22,6 +22,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.25.1](https://github.com/branes-ai/cortex/compare/v0.25.0...v0.25.1) (2026-05-30)
+
+
+### Build System
+
+* **test:** generate test targets from a compile_all glob macro ([#220](https://github.com/branes-ai/cortex/issues/220)) ([33c6126](https://github.com/branes-ai/cortex/commit/33c6126921d96e24f41b6dd35c775d0f9915b4b3))
+
+
+### Continuous Integration
+
+* **windows:** build the MSVC job via Ninja + sccache ([#222](https://github.com/branes-ai/cortex/issues/222)) ([2d59380](https://github.com/branes-ai/cortex/commit/2d593809cf22a2e3d41ead85d598afb6a03172dd))
+
 ## [0.25.0](https://github.com/branes-ai/cortex/compare/v0.24.0...v0.25.0) (2026-05-30)
 
 
