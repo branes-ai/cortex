@@ -14,6 +14,10 @@
 
 #include <branes/sdk/msckf/state.hpp>
 
+#include <array>
+#include <cstddef>
+#include <span>
+
 namespace branes::sdk::msckf {
 
 /// Continuous-time IMU noise densities.
@@ -36,8 +40,12 @@ public:
         : noise_(noise), gravity_(gravity) {}
 
     /// Propagate one IMU sample (gyro, accel) over `dt`. Ignores
-    /// non-positive dt.
-    void propagate(State<T>& s, const Vec3& gyro, const Vec3& accel, T dt) {
+    /// non-positive dt. Generic over the covariance representation: builds
+    /// the error-state transition F and the diagonal process-noise Q, then
+    /// hands both to the covariance policy (which applies F P Fᵀ + Q in
+    /// whichever representation it carries).
+    template <class Cov>
+    void propagate(State<T, Cov>& s, const Vec3& gyro, const Vec3& accel, T dt) {
         if (!(dt > T{0}))
             return;
         const Vec3 w = gyro - s.bg;
@@ -62,15 +70,13 @@ public:
         place3(F, State<T>::kVel, State<T>::kTheta, negRahat_dt);
         place3(F, State<T>::kVel, State<T>::kBa, negR_dt);
 
-        DynMat<T> FP = mul(F, s.P);
-        DynMat<T> P = mul(FP, transpose(F));
         // Discrete process noise on the IMU block (diagonal injection).
-        add_diag(P, State<T>::kTheta, noise_.gyro * noise_.gyro * dt);
-        add_diag(P, State<T>::kVel, noise_.accel * noise_.accel * dt);
-        add_diag(P, State<T>::kBg, noise_.gyro_bias * noise_.gyro_bias * dt);
-        add_diag(P, State<T>::kBa, noise_.accel_bias * noise_.accel_bias * dt);
-        symmetrize(P);
-        s.P = std::move(P);
+        std::array<NoiseTerm<T>, 12> q;
+        push_diag(q, 0, State<T>::kTheta, noise_.gyro * noise_.gyro * dt);
+        push_diag(q, 3, State<T>::kVel, noise_.accel * noise_.accel * dt);
+        push_diag(q, 6, State<T>::kBg, noise_.gyro_bias * noise_.gyro_bias * dt);
+        push_diag(q, 9, State<T>::kBa, noise_.accel_bias * noise_.accel_bias * dt);
+        s.cov.predict(F, std::span<const NoiseTerm<T>>{q});
 
         // ── Mean: strapdown integration ────────────────────────────────
         const Vec3 a_world = R * a + gravity_;
@@ -86,9 +92,9 @@ private:
             for (std::size_t j = 0; j < 3; ++j)
                 M(r0 + i, c0 + j) += B(i, j);
     }
-    static void add_diag(DynMat<T>& M, std::size_t off, T val) {
+    static void push_diag(std::array<NoiseTerm<T>, 12>& q, std::size_t at, std::size_t off, T val) {
         for (std::size_t i = 0; i < 3; ++i)
-            M(off + i, off + i) += val;
+            q[at + i] = NoiseTerm<T>{off + i, val};
     }
 
     ImuNoise<T> noise_;

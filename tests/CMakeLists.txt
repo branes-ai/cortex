@@ -220,6 +220,17 @@ target_compile_features(sdk_msckf_backend_test PRIVATE cxx_std_20)
 
 catch_discover_tests(sdk_msckf_backend_test)
 
+# SDK layer — square-root covariance MSCKF backend (issue #187).
+add_executable(sdk_msckf_sqrt_backend_test sdk_msckf_sqrt_backend_test.cpp)
+target_link_libraries(sdk_msckf_sqrt_backend_test PRIVATE
+    Catch2::Catch2WithMain
+    branes::sdk
+    branes::test_support
+)
+target_compile_features(sdk_msckf_sqrt_backend_test PRIVATE cxx_std_20)
+
+catch_discover_tests(sdk_msckf_sqrt_backend_test)
+
 # SDK layer — top-level VioEstimator API (issue #45).
 add_executable(sdk_vio_estimator_test sdk_vio_estimator_test.cpp)
 target_link_libraries(sdk_vio_estimator_test PRIVATE

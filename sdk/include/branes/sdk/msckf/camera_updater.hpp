@@ -101,7 +101,8 @@ public:
     /// update for one feature track. Returns true iff the state was
     /// updated. Tracks that are too short, triangulate behind a camera, or
     /// fail the Mahalanobis gate are skipped (the filter is unchanged).
-    bool update(State<T>& s, const FeatureTrack<T>& track) const {
+    template <class Cov>
+    bool update(State<T, Cov>& s, const FeatureTrack<T>& track) const {
         const auto& obs = track.observations;
         const std::size_t m = obs.size();
         if (m < 2)
@@ -161,7 +162,8 @@ public:
     }
 
     /// Update with a batch of tracks, returning how many were applied.
-    std::size_t update_all(State<T>& s, std::span<const FeatureTrack<T>> tracks) const {
+    template <class Cov>
+    std::size_t update_all(State<T, Cov>& s, std::span<const FeatureTrack<T>> tracks) const {
         std::size_t applied = 0;
         for (const auto& t : tracks)
             applied += update(s, t) ? 1 : 0;
@@ -179,7 +181,8 @@ private:
 
     // Camera-frame point of `p_f` for observation `o`. `y` is the feature
     // in the clone's IMU frame (needed for the orientation Jacobian).
-    bool to_camera(const State<T>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
+    template <class Cov>
+    bool to_camera(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
         const auto& cl = s.clones[o.clone_index];
         const auto& ex = cameras_[o.camera_index];
         const Mat3 Rit = cl.R.inverse().matrix();
@@ -189,7 +192,8 @@ private:
         return p_c[2] > T{0};            // must be in front of the camera
     }
 
-    bool project(const State<T>& s, const CameraObservation<T>& o, const Vec3& p_f, Jacobians& J) const {
+    template <class Cov>
+    bool project(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Jacobians& J) const {
         Vec3 p_c, y;
         if (!to_camera(s, o, p_f, p_c, y))
             return false;
@@ -218,7 +222,8 @@ private:
 
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton
     // reprojection refinements. Solves Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C.
-    bool triangulate(const State<T>& s, const std::vector<CameraObservation<T>>& obs, Vec3& p_f) const {
+    template <class Cov>
+    bool triangulate(const State<T, Cov>& s, const std::vector<CameraObservation<T>>& obs, Vec3& p_f) const {
         DynMat<T> A(3, 3);
         DynMat<T> b(3, 1);
         for (const auto& o : obs) {
@@ -280,24 +285,15 @@ private:
     }
 
     // Mahalanobis gate: γ = rᵀ (H P Hᵀ + R)⁻¹ r, accepted when
-    // γ ≤ chi2_per_dof · rows.
-    bool passes_gate(const State<T>& s, const DynMat<T>& H, const std::vector<T>& r, T r2) const {
+    // γ ≤ chi2_per_dof · rows. The covariance policy computes γ in whichever
+    // representation it carries (and reports an ill-conditioned innovation,
+    // which is rejected).
+    template <class Cov>
+    bool passes_gate(const State<T, Cov>& s, const DynMat<T>& H, const std::vector<T>& r, T r2) const {
         const std::size_t k = H.rows;
-        const DynMat<T> Ht = transpose(H);
-        const DynMat<T> PHt = mul(s.P, Ht);
-        DynMat<T> S = mul(H, PHt);
-        for (std::size_t i = 0; i < k; ++i)
-            S(i, i) += r2;
-        DynMat<T> rv(k, 1);
-        for (std::size_t i = 0; i < k; ++i)
-            rv(i, 0) = r[i];
-        DynMat<T> L;
-        if (!cholesky(S, L))
-            return false;  // ill-conditioned innovation ⇒ reject
-        const DynMat<T> Sinv_r = cholesky_solve(L, rv);
         T gamma = T{0};
-        for (std::size_t i = 0; i < k; ++i)
-            gamma += r[i] * Sinv_r(i, 0);
+        if (!s.cov.mahalanobis(H, std::span<const T>{r}, r2, gamma))
+            return false;  // ill-conditioned innovation ⇒ reject
         return gamma <= opts_.chi2_per_dof * static_cast<T>(k);
     }
 
