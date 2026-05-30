@@ -103,6 +103,7 @@ TEST_CASE("16-bit PGM round-trips big-endian", "[cv][image][io]") {
         const auto px = static_cast<std::uint16_t>((hi << 8) | lo);
         REQUIRE(px == src.data()[i]);
     }
+    in.close();  // Windows refuses to remove a file while a handle is open.
     std::filesystem::remove(path);
 }
 
