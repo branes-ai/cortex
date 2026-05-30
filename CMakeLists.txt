@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # tree groups its generated per-file targets under "Tests/<layer>" via this.
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Honor CMAKE_MSVC_DEBUG_INFORMATION_FORMAT (lets the msvc-ninja CI preset pick
+# /Z7 embedded debug info over /Zi, so sccache isn't defeated by a shared PDB).
+# Defaults are unchanged for every other preset; a no-op on non-MSVC toolchains.
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+endif()
+
 # MSVC needs two opt-ins that gcc/clang give by default:
 #   /Zc:preprocessor — the conformant preprocessor; the legacy one mis-parses
 #       raw-string literals passed as macro arguments (Catch2 REQUIRE(R"(...)")).
