@@ -21,6 +21,8 @@
 
 #include <branes/math/lie/so3.hpp>
 
+#include <cassert>
+
 namespace branes::math::lie {
 
 /// Sim(3) — 3D similarity transforms (scale · rotation · translation).
@@ -39,8 +41,14 @@ public:
     /// Identity (scale 1, no rotation, no translation).
     constexpr Sim3() noexcept = default;
 
+    /// Precondition: `scale` is strictly positive — a Sim(3) similarity has a
+    /// positive scale factor (σ = log s is its tangent component). A
+    /// non-positive scale makes `inverse()` (1/s) and `log()` (log s)
+    /// non-finite. Checked by a debug assert; release stays branch-free.
     Sim3(const T& scale, const SO3<T>& rotation, const Vector3& translation)
-        : R_(rotation), t_(translation), s_(scale) {}
+        : R_(rotation), t_(translation), s_(scale) {
+        assert(scale > T{0} && "Sim3: scale must be positive");
+    }
 
     [[nodiscard]] const T& scale() const noexcept {
         return s_;
@@ -65,6 +73,7 @@ public:
     }
 
     [[nodiscard]] Tangent log() const {
+        assert(s_ > T{0} && "Sim3::log: scale must be positive");
         const Vector3 phi = R_.log();
         const T sigma = detail::log_(s_);
         const Matrix3 Winv = detail::inverse(w_matrix(phi, sigma));
@@ -86,6 +95,7 @@ public:
     }
 
     [[nodiscard]] Sim3 inverse() const {
+        assert(s_ > T{0} && "Sim3::inverse: scale must be positive");
         const T si = T{1} / s_;
         const SO3<T> Ri = R_.inverse();
         return Sim3(si, Ri, (Ri * t_) * (-si));
