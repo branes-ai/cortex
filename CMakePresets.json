@@ -74,6 +74,23 @@
       "cacheVariables": {
         "BUILD_TARGET_KPU": "OFF"
       }
+    },
+    {
+      "name": "msvc-ninja",
+      "inherits": "base",
+      "displayName": "MSVC + Ninja (CI, sccache-cached)",
+      "description": "Windows MSVC build through Ninja instead of the Visual Studio generator, so sccache's compiler launcher actually takes effect (the VS generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER). Single-config Release to match the Corrosion-built Rust CRT (/MD). CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded forces /Z7 over /Zi so sccache isn't defeated by a shared PDB. Requires the MSVC environment to be active (cl.exe on PATH + INCLUDE/LIB set) — the CI job runs vcvars via msvc-dev-cmd. This is the CI Windows target; the `msvc` Visual Studio preset stays for local IDE work.",
+      "generator": "Ninja",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TARGET_KPU": "OFF",
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded"
+      }
     }
   ],
   "buildPresets": [
@@ -82,12 +99,14 @@
     { "name": "kpu-cross",    "configurePreset": "kpu-cross",    "displayName": "KPU Cross" },
     { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" },
     { "name": "msvc-debug",   "configurePreset": "msvc", "displayName": "MSVC Debug",   "configuration": "Debug" },
-    { "name": "msvc-release", "configurePreset": "msvc", "displayName": "MSVC Release", "configuration": "Release" }
+    { "name": "msvc-release", "configurePreset": "msvc", "displayName": "MSVC Release", "configuration": "Release" },
+    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "displayName": "MSVC + Ninja (CI)" }
   ],
   "testPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
     { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
     { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
-    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } }
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true } }
   ]
 }

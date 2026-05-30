@@ -83,14 +83,6 @@ jobs:
   build-and-test-windows:
     name: Build and Test (Windows - MSVC)
     runs-on: windows-2022
-    # The Visual Studio generator ignores compiler launchers, and sccache's
-    # MSVC support trips over CMake's default /Zi shared-PDB. Disable sccache
-    # for this job (overriding the workflow-level env) — correctness over
-    # cache until a Windows sccache config is proven out.
-    env:
-      RUSTC_WRAPPER: ""
-      CMAKE_C_COMPILER_LAUNCHER: ""
-      CMAKE_CXX_COMPILER_LAUNCHER: ""
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -101,18 +93,33 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
+      - name: Set up the MSVC environment (vcvars x64)
+        # The Ninja generator — unlike the Visual Studio generator — does not
+        # locate the toolchain itself: it needs cl.exe on PATH and INCLUDE/LIB
+        # set. msvc-dev-cmd runs vcvars64 and exports the environment for the
+        # steps below.
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
+        with:
+          arch: x64
+      - name: Run sccache-action
+        # Caches both rustc (RUSTC_WRAPPER) and cl.exe (CMAKE_<LANG>_COMPILER_
+        # LAUNCHER) objects via the workflow-level env. Effective here because
+        # the Ninja generator honors the compiler launcher (the VS generator
+        # does not) and the msvc-ninja preset emits /Z7 instead of /Zi, so a
+        # shared PDB no longer defeats the cache.
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
-        # windows-2022 ships CMake + the VS 2022 generator; CMake locates the
-        # MSVC toolchain itself, so no vcvars / Developer Prompt step is needed.
-        run: cmake --preset msvc
+        # Ninja + sccache. Release so the C++ /MD CRT matches the Corrosion-
+        # built Rust staticlib (cargo compiles cxx glue in the release profile);
+        # a Debug build links /MDd against /MD → LNK2038/LNK1319.
+        run: cmake --preset msvc-ninja
       - name: Build
-        # Release config so the C++ /MD CRT matches the Corrosion-built Rust
-        # staticlib (cargo compiles cxx glue in the release profile). A Debug
-        # build links /MDd against /MD → LNK2038/LNK1319. Driving cargo's debug
-        # profile from a Debug CMake config is a separate Corrosion follow-up.
-        run: cmake --build --preset msvc-release
+        run: cmake --build --preset msvc-ninja
       - name: Run C++ Unit Tests (Math & Emulation)
-        run: ctest --preset msvc-release
+        run: ctest --preset msvc-ninja
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   coverage:
     name: Coverage (cargo-llvm-cov, gated >= 85%)
