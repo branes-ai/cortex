@@ -58,16 +58,36 @@
           "hostOS": [ "Linux" ]
         }
       }
+    },
+    {
+      "name": "msvc",
+      "inherits": "base",
+      "displayName": "MSVC (Windows x64, Visual Studio 2022)",
+      "description": "Native Windows build with the MSVC toolchain via the Visual Studio 2022 generator (multi-config: the build/test presets select Debug or Release). CMake locates the toolchain automatically — no vcvars / Developer Command Prompt setup needed. This is the CI Windows target and mirrors the primary VS2022 developer environment.",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "BUILD_TARGET_KPU": "OFF"
+      }
     }
   ],
   "buildPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "displayName": "SITL Debug" },
     { "name": "sitl-release", "configurePreset": "sitl-release", "displayName": "SITL Release" },
     { "name": "kpu-cross",    "configurePreset": "kpu-cross",    "displayName": "KPU Cross" },
-    { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" }
+    { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" },
+    { "name": "msvc-debug",   "configurePreset": "msvc", "displayName": "MSVC Debug",   "configuration": "Debug" },
+    { "name": "msvc-release", "configurePreset": "msvc", "displayName": "MSVC Release", "configuration": "Release" }
   ],
   "testPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
-    { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } }
+    { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
+    { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } }
   ]
 }

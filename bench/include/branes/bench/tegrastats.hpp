@@ -9,18 +9,19 @@
 // samples its output on a reader thread, and integrates. On a host without
 // tegrastats the backend simply reports unavailable.
 //
-// Header-only, C++20 (POSIX; the Jetson target is Linux).
+// The spawning backend needs POSIX process/pipe primitives, so on Windows
+// (which has no tegrastats anyway) it degrades to an always-unavailable stub.
+// The two pure helpers are portable and compile everywhere.
+//
+// Header-only, C++20 (POSIX backend; the Jetson target is Linux).
 
 #ifndef BRANES_BENCH_TEGRASTATS_HPP
 #define BRANES_BENCH_TEGRASTATS_HPP
 
 #include <branes/bench/energy_backend.hpp>
 
-#include <sys/wait.h>
-
 #include <atomic>
 #include <chrono>
-#include <csignal>
 #include <cstdio>
 #include <mutex>
 #include <regex>
@@ -29,7 +30,13 @@
 #include <utility>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <sys/wait.h>
+
+#include <csignal>
+
 #include <unistd.h>
+#endif
 
 namespace branes::bench::tegrastats {
 
@@ -80,6 +87,8 @@ inline const std::vector<std::string>& total_rail_names() {
     }
     return energy;
 }
+
+#if !defined(_WIN32)
 
 /// Spawns `tegrastats --interval <ms>`, samples total power on a reader
 /// thread, and integrates to joules over the scope. Unavailable (joules 0)
@@ -175,6 +184,29 @@ private:
     bool started_ = false;
     bool finished_ = false;
 };
+
+#else  // _WIN32
+
+/// Windows stub: tegrastats is a Jetson/Linux tool with no Windows equivalent,
+/// and the spawning backend relies on POSIX process/pipe primitives. It is
+/// always unavailable (joules 0), so selecting `--energy tegrastats` on Windows
+/// just reports no energy while keeping the bench buildable.
+class TegrastatsBackend final : public EnergyBackend {
+public:
+    explicit TegrastatsBackend(int /*interval_ms*/ = 100) {}
+
+    [[nodiscard]] bool available() const override {
+        return false;
+    }
+    [[nodiscard]] double joules() const override {
+        return 0.0;
+    }
+    [[nodiscard]] const char* name() const override {
+        return "tegrastats";
+    }
+};
+
+#endif  // _WIN32
 
 }  // namespace branes::bench::tegrastats
 
