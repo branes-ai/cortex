@@ -16,7 +16,7 @@ on:
       - 'sdk/include/**'
       - 'cv/include/**'
       # Benchmark-gate sources the docs are pinned to (gen-benchmarks.mjs):
-      - 'tests/sdk/sdk_vio_euroc_test.cpp'
+      - 'tests/sdk/vio_euroc.cpp'
       - '.github/workflows/ci.yml'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
