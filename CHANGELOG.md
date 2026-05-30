@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.25.0](https://github.com/branes-ai/cortex/compare/v0.24.0...v0.25.0) (2026-05-30)
+
+
+### Features
+
+* **sdk:** square-root covariance MSCKF backend ([#218](https://github.com/branes-ai/cortex/issues/218)) ([b9a4478](https://github.com/branes-ai/cortex/commit/b9a4478692456dd0b60634314ef9feb5ecc945bd))
+
 ## [0.24.0](https://github.com/branes-ai/cortex/compare/v0.23.1...v0.24.0) (2026-05-30)
 
 
