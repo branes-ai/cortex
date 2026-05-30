@@ -84,10 +84,10 @@ TEST_CASE("a camera update reduces covariance and keeps it PSD", "[sdk][msckf][c
     const auto track = make_track(s, f);
     REQUIRE(track.observations.size() == 4);
 
-    const T tr_before = trace(s.P);
+    const T tr_before = trace(s.covariance());
     REQUIRE(upd.update(s, track));
-    REQUIRE(ms::is_positive_semidefinite(s.P));
-    REQUIRE(trace(s.P) <= tr_before + 1e-9);
+    REQUIRE(ms::is_positive_semidefinite(s.covariance()));
+    REQUIRE(trace(s.covariance()) <= tr_before + 1e-9);
 }
 
 TEST_CASE("a single-observation track is rejected", "[sdk][msckf][camera]") {
@@ -133,7 +133,7 @@ TEST_CASE("the filter stays stable over 1000 updates", "[sdk][msckf][camera]") {
     // A handful of features spread across the field of view.
     const std::vector<Vec3> feats = {{{0.4, 0.2, 3.0}}, {{0.9, -0.3, 5.0}}, {{1.3, 0.4, 4.0}}, {{0.7, -0.1, 6.0}}};
 
-    T tr_prev = trace(s.P);
+    T tr_prev = trace(s.covariance());
     std::size_t applied = 0;
     for (int step = 0; step < 1000; ++step) {
         const Vec3& f = feats[static_cast<std::size_t>(step) % feats.size()];
@@ -144,8 +144,8 @@ TEST_CASE("the filter stays stable over 1000 updates", "[sdk][msckf][camera]") {
         // indefinite and never blows up. With no propagation between
         // updates, every step only removes information, so the trace is
         // monotonically non-increasing — assert that per step.
-        REQUIRE(ms::is_positive_semidefinite(s.P));
-        const T tr = trace(s.P);
+        REQUIRE(ms::is_positive_semidefinite(s.covariance()));
+        const T tr = trace(s.covariance());
         REQUIRE(std::isfinite(tr));
         REQUIRE(tr <= tr_prev + 1e-9);
         REQUIRE(tr > 0.0);

@@ -80,8 +80,13 @@ struct InitDiagnostics {
     DVec3 accel_bias{};
 };
 
-template <math::Scalar T>
-class MsckfBackend final : public VioBackend<T> {
+/// The MSCKF backend, generic over the covariance representation `Cov`
+/// (`FullCovariance` — Joseph-form, the default; or `SqrtCovariance` — the
+/// QR array update). The mean, IMU init, feature management, and window
+/// policy are identical for either; only the covariance algebra differs.
+/// Use the `MsckfBackend<T>` / `MsckfSqrtBackend<T>` aliases below.
+template <math::Scalar T, msckf::CovarianceModel<T> Cov = msckf::FullCovariance<T>>
+class MsckfBackendT final : public VioBackend<T> {
 public:
     using Scalar = T;
     using Camera = math::cameras::PinholeRadtanCamera<T>;
@@ -104,10 +109,10 @@ public:
     /// This is only correct when the observations are already normalized /
     /// rectified (tests, or a front end that pre-normalizes); production
     /// code must construct with the real per-camera `CameraCalibration`.
-    MsckfBackend() : MsckfBackend(std::vector<CameraCalibration>{CameraCalibration{}}) {}
+    MsckfBackendT() : MsckfBackendT(std::vector<CameraCalibration>{CameraCalibration{}}) {}
 
     /// Precondition: `cameras` is non-empty.
-    explicit MsckfBackend(std::vector<CameraCalibration> cameras)
+    explicit MsckfBackendT(std::vector<CameraCalibration> cameras)
         : cameras_(std::move(cameras)), updater_(extrinsics_of(cameras_)) {
         if (cameras_.empty())
             throw std::invalid_argument("MsckfBackend: at least one camera calibration is required");
@@ -128,7 +133,7 @@ public:
         icfg.gravity_magnitude = static_cast<T>(config.gravity_magnitude);
         initializer_ = ImuInitializer<T>(icfg);
 
-        state_ = msckf::State<T>(kInitialSigma());
+        state_ = msckf::State<T, Cov>(kInitialSigma());
         init_diag_ = InitDiagnostics<T>{};
         initialized_ = false;
         have_last_time_ = false;
@@ -230,7 +235,7 @@ public:
 
     /// Read-only view of the full filter state (covariance, clone window,
     /// biases). For inspection, logging, and the replay harness (#46).
-    [[nodiscard]] const msckf::State<T>& state() const noexcept {
+    [[nodiscard]] const msckf::State<T, Cov>& state() const noexcept {
         return state_;
     }
 
@@ -312,7 +317,7 @@ private:
     // Seed the state from an init result, record the diagnostics (measured
     // up-direction + gravity residual over the window), and finish.
     void apply_init(const ImuInitResult<T>& res, InitMethod method, double t) {
-        state_ = msckf::State<T>(kInitialSigma());
+        state_ = msckf::State<T, Cov>(kInitialSigma());
         state_.R = res.R_world_imu;  // identity for a default-constructed result
         state_.bg = res.gyro_bias;
         state_.ba = res.accel_bias;
@@ -417,7 +422,7 @@ private:
     msckf::CameraUpdater<T> updater_;
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
-    msckf::State<T> state_{kInitialSigma()};
+    msckf::State<T, Cov> state_{kInitialSigma()};
     VioConfig config_{};
     std::size_t max_clones_ = 11;
 
@@ -432,6 +437,18 @@ private:
     std::size_t init_samples_seen_ = 0;  ///< total IMU samples seen during init (for the timeout)
     std::unordered_map<std::uint64_t, std::vector<ObsRec>> tracks_;
 };
+
+/// Full-covariance MSCKF backend (Joseph-form update). The default backend.
+template <math::Scalar T>
+using MsckfBackend = MsckfBackendT<T, msckf::FullCovariance<T>>;
+
+/// Square-root-covariance MSCKF backend: carries the Cholesky factor of the
+/// covariance and updates it with a QR (Householder) array algorithm instead
+/// of the Joseph form — numerically superior conditioning over long runs.
+/// Same VioBackend interface and feature-management policy as MsckfBackend<T>,
+/// so it drops in without changing the front end (issue #187).
+template <math::Scalar T>
+using MsckfSqrtBackend = MsckfBackendT<T, msckf::SqrtCovariance<T>>;
 
 }  // namespace branes::sdk
 

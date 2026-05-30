@@ -32,11 +32,11 @@ TEST_CASE("IMU propagation keeps the covariance positive-definite", "[sdk][msckf
     ms::State<T> s(0.1);
     ms::Propagator<T> prop;
     REQUIRE(s.dim() == 15);
-    REQUIRE(ms::is_positive_definite(s.P));
+    REQUIRE(ms::is_positive_definite(s.covariance()));
     for (int k = 0; k < 100; ++k) {
         const T t = k * 0.005;
         prop.propagate(s, Vec3{{0.1 * std::sin(t), 0.05, -0.08}}, Vec3{{0.2, -0.1, 9.7}}, 0.005);
-        REQUIRE(ms::is_positive_definite(s.P));
+        REQUIRE(ms::is_positive_definite(s.covariance()));
     }
     REQUIRE(std::abs(s.timestamp - 0.5) < 1e-9);
 }
@@ -51,7 +51,7 @@ TEST_CASE("clone augmentation grows the state and stays PSD", "[sdk][msckf]") {
     ms::StateHelper<T>::augment_clone(s);
     REQUIRE(s.num_clones() == 1);
     REQUIRE(s.dim() == 21);
-    REQUIRE(ms::is_positive_semidefinite(s.P));
+    REQUIRE(ms::is_positive_semidefinite(s.covariance()));
 
     // Propagate between clones (as in real operation) so the second clone
     // captures a distinct pose, not a duplicate of the first.
@@ -60,12 +60,12 @@ TEST_CASE("clone augmentation grows the state and stays PSD", "[sdk][msckf]") {
     ms::StateHelper<T>::augment_clone(s);
     REQUIRE(s.num_clones() == 2);
     REQUIRE(s.dim() == 27);
-    REQUIRE(ms::is_positive_semidefinite(s.P));
+    REQUIRE(ms::is_positive_semidefinite(s.covariance()));
 
     // Continued propagation injects process noise and restores full rank.
     for (int k = 0; k < 60; ++k)
         prop.propagate(s, Vec3{{0.02, 0.01, -0.01}}, Vec3{{0.1, 0, 9.8}}, 0.01);
-    REQUIRE(ms::is_positive_definite(s.P));
+    REQUIRE(ms::is_positive_definite(s.covariance()));
 }
 
 TEST_CASE("marginalization removes a clone and stays PSD", "[sdk][msckf]") {
@@ -78,7 +78,7 @@ TEST_CASE("marginalization removes a clone and stays PSD", "[sdk][msckf]") {
     ms::StateHelper<T>::marginalize_clone(s, 1);  // drop the middle clone
     REQUIRE(s.num_clones() == 2);
     REQUIRE(s.dim() == 15 + 12);
-    REQUIRE(ms::is_positive_semidefinite(s.P));
+    REQUIRE(ms::is_positive_semidefinite(s.covariance()));
 }
 
 TEST_CASE("EKF update reduces covariance and stays PD", "[sdk][msckf]") {
@@ -100,8 +100,8 @@ TEST_CASE("EKF update reduces covariance and stays PD", "[sdk][msckf]") {
     for (int kk = 0; kk < 50; ++kk)
         prop.propagate(s, Vec3{{0.01, 0, 0}}, Vec3{{0, 0, 9.81}}, 0.01);
 
-    const T tr_before = trace(s.P);
+    const T tr_before = trace(s.covariance());
     ms::StateHelper<T>::ekf_update(s, H, std::span<const T>{r}, std::span<const T>{Rd});
-    REQUIRE(ms::is_positive_semidefinite(s.P));
-    REQUIRE(trace(s.P) <= tr_before + 1e-9);  // an update cannot add info
+    REQUIRE(ms::is_positive_semidefinite(s.covariance()));
+    REQUIRE(trace(s.covariance()) <= tr_before + 1e-9);  // an update cannot add info
 }

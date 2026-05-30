@@ -159,7 +159,7 @@ TEST_CASE("the backend runs end-to-end and stays stable under motion", "[sdk][ms
 
             // Invariants after each frame: covariance stays valid, the
             // window respects max_clones, and the state is finite.
-            REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().P));
+            REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().covariance()));
             REQUIRE(backend.state().clones.size() <= static_cast<std::size_t>(cfg.max_clones));
             const auto pose = backend.current_state().T_world_imu.translation();
             for (std::size_t i = 0; i < 3; ++i)
@@ -194,5 +194,5 @@ TEST_CASE("the backend rejects an empty calibration and out-of-range cameras", "
     o.v = 0.0;
     std::vector<bs::FrontendObservation<T>> obs{o};
     backend.process_camera(t + 0.01, obs);  // must not crash
-    REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().P));
+    REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().covariance()));
 }
