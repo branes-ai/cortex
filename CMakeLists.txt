@@ -5,6 +5,15 @@ project(branes_cortex LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# MSVC needs two opt-ins that gcc/clang give by default:
+#   /Zc:preprocessor — the conformant preprocessor; the legacy one mis-parses
+#       raw-string literals passed as macro arguments (Catch2 REQUIRE(R"(...)")).
+#   /utf-8           — treat sources and string literals as UTF-8; the codebase
+#       uses Unicode in comments and report strings (e.g. ✅, °, →).
+if(MSVC)
+    add_compile_options(/Zc:preprocessor /utf-8)
+endif()
+
 # 1. Define the Hardware Target Flag (SITL vs KPU)
 option(BUILD_TARGET_KPU "Build for the custom KPU silicon (DMA + kernel driver)" OFF)
 if(BUILD_TARGET_KPU)
