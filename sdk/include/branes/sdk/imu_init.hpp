@@ -326,7 +326,6 @@ private:
     // (unknowns [v, b₁, b₂, s]) over a few iterations, which pins the gauge and
     // recovers the metric scale. Velocities and gravity come out metric.
     [[nodiscard]] bool estimate_gravity_and_velocities(std::span<const DynInitKeyframe<T>> kfs, Result& r) const {
-        const std::size_t n = kfs.size();
         Vec3 g_rough;
         if (!solve_alignment(kfs, /*g_hat=*/nullptr, g_rough, r))
             return false;  // rough pass: also yields the gravity direction to refine
@@ -347,7 +346,6 @@ private:
         r.gravity_world = g_final;
         if (!(r.scale > T{0}))
             return false;  // a non-positive metric scale is non-physical ⇒ reject
-        (void)n;
         return true;
     }
 
