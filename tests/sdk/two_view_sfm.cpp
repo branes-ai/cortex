@@ -87,7 +87,9 @@ TEST_CASE("two-view SfM recovers a known relative pose (noise-free)", "[sdk][sfm
     CAPTURE(align);
     REQUIRE(align > 0.999999);
 
-    // Triangulated points sit in front of camera 0.
+    // inliers and points_cam0 are aligned 1:1 (every kept correspondence has a
+    // triangulated landmark), and the landmarks sit in front of camera 0.
+    REQUIRE(r.points_cam0.size() == r.inliers.size());
     REQUIRE(r.points_cam0.size() == x0.size());
     for (const Vec3& X : r.points_cam0)
         REQUIRE(X[2] > 0.0);

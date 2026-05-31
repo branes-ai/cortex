@@ -151,9 +151,11 @@ struct TwoViewOptions {
 /// Recovered two-view geometry. `R_1_0` and `t_1_0_unit` give the second
 /// camera's pose relative to the first (x₁ = R_1_0·x₀ + s·t for some s>0); the
 /// translation is a unit direction only — metric scale is unobservable from
-/// vision alone. `points_cam0` holds the triangulated inliers in camera-0
-/// coordinates (also up to the same scale); `inliers` indexes the input
-/// correspondences kept.
+/// vision alone. `inliers` and `points_cam0` are aligned **1:1**: for each kept
+/// correspondence `inliers[j]` (an index into the input), `points_cam0[j]` is
+/// its triangulated landmark in camera-0 coordinates (up to the same scale).
+/// Only correspondences that pass both the Sampson gate and positive-cheirality
+/// triangulation are retained.
 template <math::Scalar T>
 struct TwoViewResult {
     bool success = false;
@@ -300,9 +302,11 @@ template <math::Scalar T>
     return X[2] > T{0} && Xc1[2] > T{0};
 }
 
-/// Sampson first-order geometric distance of a correspondence to E.
+/// *Squared* Sampson distance — the first-order geometric reprojection error of
+/// a correspondence to E. Returned squared to avoid a sqrt on the RANSAC hot
+/// path; callers gate against threshold².
 template <math::Scalar T>
-[[nodiscard]] T sampson(const Mat3<T>& E, const Vec2<T>& a, const Vec2<T>& b) {
+[[nodiscard]] T sampson_squared(const Mat3<T>& E, const Vec2<T>& a, const Vec2<T>& b) {
     const Vec3<T> x0{{a[0], a[1], T{1}}};
     const Vec3<T> x1{{b[0], b[1], T{1}}};
     const Vec3<T> Ex0 = E * x0;
@@ -380,7 +384,7 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
             continue;
         std::vector<std::size_t> inliers;
         for (std::size_t k = 0; k < n; ++k)
-            if (detail::sampson<T>(E, x0[k], x1[k]) < opt.sampson_threshold * opt.sampson_threshold)
+            if (detail::sampson_squared<T>(E, x0[k], x1[k]) < opt.sampson_threshold * opt.sampson_threshold)
                 inliers.push_back(k);
         if (inliers.size() > best_inliers.size()) {
             best_inliers = std::move(inliers);
@@ -399,34 +403,37 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
     if (detail::essential_8point<T>(x0, x1, std::span<const std::size_t>{best_inliers}, refit))
         E = refit;
 
-    // Pick the (R, ±t) with the most points triangulating in front of both cameras.
+    // Pick the (R, ±t) with the most points triangulating in front of both
+    // cameras. For the winner, `inliers` and `points_cam0` are kept strictly
+    // 1:1 — only the Sampson inliers that also triangulate with positive
+    // cheirality are retained, so points_cam0[j] is the landmark for inliers[j].
     Mat3<T> R0, R1;
     Vec3<T> t;
     decompose_essential<T>(E, R0, R1, t);
     const Mat3<T> Rs[2] = {R0, R1};
-    int best_count = -1;
+    std::size_t best_count = 0;
     for (const Mat3<T>& R : Rs) {
         for (int sign = -1; sign <= 1; sign += 2) {
             const Vec3<T> tc = t * static_cast<T>(sign);
-            int count = 0;
             std::vector<Vec3<T>> pts;
+            std::vector<std::size_t> kept;
             for (std::size_t k : best_inliers) {
                 Vec3<T> X;
                 if (detail::triangulate<T>(x0[k], x1[k], R, tc, X)) {
-                    ++count;
                     pts.push_back(X);
+                    kept.push_back(k);
                 }
             }
-            if (count > best_count) {
-                best_count = count;
+            if (pts.size() > best_count) {
+                best_count = pts.size();
                 out.R_1_0 = R;
                 out.t_1_0_unit = tc;
                 out.points_cam0 = std::move(pts);
+                out.inliers = std::move(kept);
             }
         }
     }
-    out.inliers = std::move(best_inliers);
-    out.success = best_count > 0 && static_cast<std::size_t>(best_count) >= opt.min_inliers;
+    out.success = best_count >= opt.min_inliers;
     return out;
 }
 
