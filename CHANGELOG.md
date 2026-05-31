@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.26.0](https://github.com/branes-ai/cortex/compare/v0.25.3...v0.26.0) (2026-05-31)
+
+
+### Features
+
+* **sdk:** two-view SfM bootstrap (essential matrix + RANSAC) ([#231](https://github.com/branes-ai/cortex/issues/231)) ([a5b3031](https://github.com/branes-ai/cortex/commit/a5b303177db45935f0f84053135b8aee480c478c))
+
 ## [0.25.3](https://github.com/branes-ai/cortex/compare/v0.25.2...v0.25.3) (2026-05-31)
 
 
