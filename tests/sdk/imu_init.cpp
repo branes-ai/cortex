@@ -132,16 +132,17 @@ TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu
     const Vec3 g_world{{0.0, 0.0, -9.81}};
     const Vec3 bg_true{{0.004, -0.002, 0.006}};
     const T dt = 0.1;
-    const std::size_t n = 6;
+    const std::size_t n = 8;
 
-    // A known moving trajectory: per-keyframe world pose and velocity.
+    // A known, *well-excited* moving trajectory (varied rotation and a curved
+    // translation) so gravity, scale, and the velocities are all observable.
     std::vector<SO3> R(n);
     std::vector<Vec3> p(n), v(n);
     for (std::size_t i = 0; i < n; ++i) {
         const T s = static_cast<T>(i);
-        R[i] = SO3::exp(Vec3{{0.05 * s, -0.03 * s, 0.02 * s}});
-        p[i] = Vec3{{0.4 * s, 0.1 * s * s, -0.05 * s}};
-        v[i] = Vec3{{0.4 + 0.1 * s, 0.2 * s, 0.05}};
+        R[i] = SO3::exp(Vec3{{0.3 * std::sin(0.7 * s), 0.25 * std::cos(0.5 * s), 0.2 * s}});
+        p[i] = Vec3{{0.5 * s + 0.3 * std::sin(s), 0.08 * s * s, 0.2 * std::cos(0.6 * s) + 0.1 * s}};
+        v[i] = Vec3{{0.5 + 0.2 * std::cos(s), 0.16 * s, -0.12 * std::sin(0.6 * s) + 0.1}};
     }
 
     // Build preintegration deltas exactly consistent with truth, so the
@@ -170,10 +171,61 @@ TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu
     for (std::size_t i = 0; i < 3; ++i)
         REQUIRE_THAT(r.gyro_bias[i], Catch::Matchers::WithinAbs(bg_true[i], 1e-6));
 
+    // The keyframe positions here are already metric, so the recovered scale is 1.
+    REQUIRE_THAT(r.scale, Catch::Matchers::WithinAbs(1.0, 1e-3));
+
     REQUIRE(r.velocities_world.size() == n);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < 3; ++j)
             REQUIRE_THAT(r.velocities_world[i][j], Catch::Matchers::WithinAbs(v[i][j], 1e-3));
+}
+
+TEST_CASE("dynamic init recovers metric scale from up-to-scale vision poses", "[sdk][imu_init]") {
+    using KF = bs::DynInitKeyframe<T>;
+    using Mat3 = bs::ImuInitializer<T>::Mat3;
+
+    const Vec3 g_world{{0.0, 0.0, -9.81}};
+    const T dt = 0.1;
+    const std::size_t n = 8;
+    const T scale_true = 4.0;  // the vision baseline is 1/4 the metric size
+
+    // Same well-excited trajectory; the IMU preintegration is metric, the
+    // vision keyframe positions are supplied only up to scale (÷ scale_true).
+    std::vector<SO3> R(n);
+    std::vector<Vec3> p(n), v(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const T s = static_cast<T>(i);
+        R[i] = SO3::exp(Vec3{{0.3 * std::sin(0.7 * s), 0.25 * std::cos(0.5 * s), 0.2 * s}});
+        p[i] = Vec3{{0.5 * s + 0.3 * std::sin(s), 0.08 * s * s, 0.2 * std::cos(0.6 * s) + 0.1 * s}};
+        v[i] = Vec3{{0.5 + 0.2 * std::cos(s), 0.16 * s, -0.12 * std::sin(0.6 * s) + 0.1}};
+    }
+
+    std::vector<KF> kfs(n);
+    kfs[0].R_world_imu = R[0];
+    kfs[0].p_world_imu = p[0] * (1.0 / scale_true);
+    for (std::size_t i = 1; i < n; ++i) {
+        const Mat3 Rit = R[i - 1].inverse().matrix();
+        kfs[i].R_world_imu = R[i];
+        kfs[i].p_world_imu = p[i] * (1.0 / scale_true);  // up-to-scale vision position
+        kfs[i].dt = dt;
+        kfs[i].dR_dbg = Mat3::identity();
+        kfs[i].dR = R[i - 1].inverse() * R[i];  // no gyro bias here
+        kfs[i].dv = Rit * (v[i] - v[i - 1] + g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt + g_world * (T{0.5} * dt * dt));
+    }
+
+    bs::ImuInitializer<T> init;
+    const auto r = init.try_dynamic(kfs);
+    REQUIRE(r.success);
+
+    // The metric scale of the vision poses is recovered: scale · p_vision = p_metric.
+    REQUIRE_THAT(r.scale, Catch::Matchers::WithinAbs(scale_true, 1e-3));
+    // Gravity and velocities come out metric regardless of the vision scaling.
+    REQUIRE_THAT(branes::math::lie::detail::norm(r.gravity_world), Catch::Matchers::WithinAbs(9.81, 1e-3));
+    REQUIRE(angle_between(r.gravity_world, g_world) * T(180) / std::numbers::pi_v<T> < 0.5);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE_THAT(r.velocities_world[i][j], Catch::Matchers::WithinAbs(v[i][j], 1e-2));
 }
 
 TEST_CASE("dynamic init recovers the gyro bias with a non-identity dR_dbg", "[sdk][imu_init]") {
