@@ -91,6 +91,15 @@
         "BUILD_TARGET_KPU": "OFF",
         "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "Embedded"
       }
+    },
+    {
+      "name": "msvc-ninja-debug",
+      "inherits": "msvc-ninja",
+      "displayName": "MSVC + Ninja Debug (CI)",
+      "description": "Debug-config counterpart of msvc-ninja. Guards that the C++ Debug build links the Rust core under the project-wide /MD CRT pin — the case the Release CI build can't catch and the one the Visual Studio IDE hits by default (LNK2038 _ITERATOR_DEBUG_LEVEL / RuntimeLibrary). Same Ninja + sccache + embedded-debug-info setup, only the config differs.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
@@ -100,13 +109,15 @@
     { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" },
     { "name": "msvc-debug",   "configurePreset": "msvc", "displayName": "MSVC Debug",   "configuration": "Debug" },
     { "name": "msvc-release", "configurePreset": "msvc", "displayName": "MSVC Release", "configuration": "Release" },
-    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "displayName": "MSVC + Ninja (CI)" }
+    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "displayName": "MSVC + Ninja (CI)" },
+    { "name": "msvc-ninja-debug", "configurePreset": "msvc-ninja-debug", "displayName": "MSVC + Ninja Debug (CI)" }
   ],
   "testPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
     { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
     { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
     { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } },
-    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true } }
+    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true } },
+    { "name": "msvc-ninja-debug", "configurePreset": "msvc-ninja-debug", "output": { "outputOnFailure": true } }
   ]
 }

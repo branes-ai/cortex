@@ -80,9 +80,20 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  # One job per config (Release + Debug) over a preset matrix. Release matches
+  # the Corrosion-built Rust CRT; Debug additionally guards the Rust-core link
+  # the Visual Studio IDE hits by default — without the project-wide /MD CRT pin
+  # it fails LNK2038/LNK1319 (C++ /MDd clashing the always-/MD Rust staticlib),
+  # which the Release job can't catch.
   build-and-test-windows:
-    name: Build and Test (Windows - MSVC)
+    name: Build and Test (Windows - MSVC ${{ matrix.label }})
     runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { preset: msvc-ninja,       label: Release }
+          - { preset: msvc-ninja-debug, label: Debug }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -105,18 +116,15 @@ jobs:
         # Caches both rustc (RUSTC_WRAPPER) and cl.exe (CMAKE_<LANG>_COMPILER_
         # LAUNCHER) objects via the workflow-level env. Effective here because
         # the Ninja generator honors the compiler launcher (the VS generator
-        # does not) and the msvc-ninja preset emits /Z7 instead of /Zi, so a
-        # shared PDB no longer defeats the cache.
+        # does not) and the preset emits /Z7 instead of /Zi, so a shared PDB no
+        # longer defeats the cache.
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
-        # Ninja + sccache. Release so the C++ /MD CRT matches the Corrosion-
-        # built Rust staticlib (cargo compiles cxx glue in the release profile);
-        # a Debug build links /MDd against /MD → LNK2038/LNK1319.
-        run: cmake --preset msvc-ninja
+        run: cmake --preset ${{ matrix.preset }}
       - name: Build
-        run: cmake --build --preset msvc-ninja
+        run: cmake --build --preset ${{ matrix.preset }}
       - name: Run C++ Unit Tests (Math & Emulation)
-        run: ctest --preset msvc-ninja
+        run: ctest --preset ${{ matrix.preset }}
       - name: sccache stats
         if: always()
         run: sccache --show-stats
