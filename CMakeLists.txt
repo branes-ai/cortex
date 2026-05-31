@@ -9,9 +9,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # tree groups its generated per-file targets under "Tests/<layer>" via this.
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-# Honor CMAKE_MSVC_DEBUG_INFORMATION_FORMAT (lets the msvc-ninja CI preset pick
-# /Z7 embedded debug info over /Zi, so sccache isn't defeated by a shared PDB).
-# Defaults are unchanged for every other preset; a no-op on non-MSVC toolchains.
+# Honor CMAKE_MSVC_DEBUG_INFORMATION_FORMAT so the msvc-ninja presets pick /Z7
+# embedded debug info over /Zi. This matters twice: sccache isn't defeated by a
+# shared PDB, and parallel Ninja Debug builds don't fail with C1041 (many
+# cl.exe writing one .pdb). CMAKE_POLICY_DEFAULT_CMP0141 forces the policy NEW
+# in *every* scope, including the FetchContent deps (Catch2, yaml-cpp) whose
+# older cmake_minimum_required would otherwise reset it to OLD and leave them on
+# /Zi. No-op on non-MSVC toolchains.
+set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
 if(POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
 endif()
