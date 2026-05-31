@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.25.3](https://github.com/branes-ai/cortex/compare/v0.25.2...v0.25.3) (2026-05-31)
+
+
+### Bug Fixes
+
+* **build:** link the Rust core in MSVC Debug by pinning the release CRT ([#226](https://github.com/branes-ai/cortex/issues/226)) ([59075af](https://github.com/branes-ai/cortex/commit/59075af8ba67f7d8c5bef2d18acd6148e03c4a28))
+
 ## [0.25.2](https://github.com/branes-ai/cortex/compare/v0.25.1...v0.25.2) (2026-05-30)
 
 
