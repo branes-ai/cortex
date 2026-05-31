@@ -85,16 +85,18 @@ TEST_CASE("PnP rejects gross 2D-3D mismatches via RANSAC", "[sdk][sfm][pnp]") {
     std::vector<Vec2> obs;
     project_all(R_true, t_true, landmarks(), X3, obs);
     const std::size_t n_clean = X3.size();
-    REQUIRE(n_clean >= 12);
+    REQUIRE(n_clean >= 16);  // headroom so the corrupted indices below stay in range
 
-    // Corrupt several observations with deterministic garbage.
-    for (std::size_t k = 0; k < 5; ++k)
+    // Corrupt several observations with deterministic garbage (spread across the
+    // set; the index guard keeps the writes in bounds regardless of geometry).
+    std::size_t corrupted = 0;
+    for (std::size_t k = 0; k < 5 && k * 3 < n_clean; ++k, ++corrupted)
         obs[k * 3] = Vec2{{-0.4 + 0.1 * static_cast<T>(k), 0.35 - 0.08 * static_cast<T>(k)}};
 
     const auto r = sfm::estimate_pose<T>(X3, obs);
     REQUIRE(r.success);
-    REQUIRE(r.inliers.size() >= n_clean - 5 - 2);
-    REQUIRE(r.inliers.size() <= n_clean - 5 + 2);
+    REQUIRE(r.inliers.size() >= n_clean - corrupted - 2);
+    REQUIRE(r.inliers.size() <= n_clean - corrupted + 2);
     REQUIRE(frob_diff(r.R, R_true) < 1e-3);
     for (std::size_t i = 0; i < 3; ++i)
         REQUIRE_THAT(r.t[i], Catch::Matchers::WithinAbs(t_true[i], 1e-2));
