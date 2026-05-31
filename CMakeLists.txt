@@ -1,4 +1,19 @@
 cmake_minimum_required(VERSION 3.22)
+
+# Opt into CMP0141 *before* project(), so MSVC debug-info format is governed by
+# CMAKE_MSVC_DEBUG_INFORMATION_FORMAT instead of a hardcoded /Zi. CMake bakes
+# the debug-info flag into CMAKE_CXX_FLAGS_DEBUG during project()'s language
+# init under the policy in effect *then*; set after project() it is too late —
+# /Zi is already baked in and inherited by every target, including the
+# FetchContent deps (Catch2, yaml-cpp), which then fail the msvc-ninja /Z7 Debug
+# build with C1041 (many cl.exe contending on one shared .pdb under Ninja).
+# CMAKE_POLICY_DEFAULT_CMP0141 carries the NEW default into the deps' own
+# project() calls. No-op pre-3.25 / on non-MSVC.
+if(POLICY CMP0141)
+    cmake_policy(SET CMP0141 NEW)
+endif()
+set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
+
 project(branes_cortex LANGUAGES CXX)
 
 # Enforce modern C++ for MTL5 and std::span
@@ -8,18 +23,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Organize targets into folders in IDEs (Visual Studio, Xcode). The tests/
 # tree groups its generated per-file targets under "Tests/<layer>" via this.
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
-# Honor CMAKE_MSVC_DEBUG_INFORMATION_FORMAT so the msvc-ninja presets pick /Z7
-# embedded debug info over /Zi. This matters twice: sccache isn't defeated by a
-# shared PDB, and parallel Ninja Debug builds don't fail with C1041 (many
-# cl.exe writing one .pdb). CMAKE_POLICY_DEFAULT_CMP0141 forces the policy NEW
-# in *every* scope, including the FetchContent deps (Catch2, yaml-cpp) whose
-# older cmake_minimum_required would otherwise reset it to OLD and leave them on
-# /Zi. No-op on non-MSVC toolchains.
-set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
-if(POLICY CMP0141)
-    cmake_policy(SET CMP0141 NEW)
-endif()
 
 # MSVC needs two opt-ins that gcc/clang give by default:
 #   /Zc:preprocessor — the conformant preprocessor; the legacy one mis-parses
