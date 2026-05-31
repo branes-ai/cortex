@@ -433,7 +433,11 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
             }
         }
     }
-    out.success = best_count >= opt.min_inliers;
+    // Re-apply both support gates to the final cheirality-filtered set, not just
+    // the pre-triangulation Sampson set — triangulation can shrink it below the
+    // configured thresholds.
+    out.success =
+        best_count >= opt.min_inliers && static_cast<T>(best_count) >= opt.min_inlier_ratio * static_cast<T>(n);
     return out;
 }
 
