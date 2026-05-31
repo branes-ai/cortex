@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <initializer_list>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -78,6 +79,11 @@ struct ImuInitResult {
     Vec3 gravity_world{};
     SO3 R_world_imu{};
     std::vector<Vec3> velocities_world;
+    /// Metric scale of the vision-estimated keyframe positions: a `p_world_imu`
+    /// supplied up to scale (e.g. from a two-view SfM bootstrap) is metric when
+    /// multiplied by `scale`. Resolved by `try_dynamic`; 1 on the other paths,
+    /// where poses are already metric.
+    T scale = T{1};
 };
 
 /// One keyframe for dynamic initialization. The caller supplies the
@@ -305,56 +311,129 @@ private:
         return Vec3{{x(0, 0), x(1, 0), x(2, 0)}};
     }
 
-    // Linear alignment for the gravity vector and per-keyframe velocities.
-    // Between consecutive keyframes (known metric poses Rᵢ, pᵢ):
-    //   pⱼ − pᵢ = vᵢ Δt − ½ g Δt² + Rᵢ Δp
-    //   vⱼ − vᵢ = −g Δt + Rᵢ Δv
-    // Unknowns x = [v₀ … v_{n-1}, g] (3n + 3). Solve the normal equations.
+    // Linear alignment for the gravity vector, per-keyframe velocities, and the
+    // metric scale of the vision poses. The keyframe positions arrive only up to
+    // scale (a two-view SfM bootstrap cannot fix the baseline magnitude), so the
+    // metric position is s·pᵢ and s is an unknown alongside gravity. Between
+    // consecutive keyframes:
+    //   s (pⱼ − pᵢ) = vᵢ Δt − ½ g Δt² + Rᵢ Δp
+    //   vⱼ − vᵢ      = −g Δt + Rᵢ Δv
+    //
+    // Solved unconstrained, [v, g, s] is rank-deficient: a constant velocity
+    // offset trades off against gravity magnitude and scale. So this follows
+    // VINS-Mono (§V): a rough solve seeds the gravity *direction*, then gravity
+    // is constrained to the known magnitude G and refined on its 2-D tangent
+    // (unknowns [v, b₁, b₂, s]) over a few iterations, which pins the gauge and
+    // recovers the metric scale. Velocities and gravity come out metric.
     [[nodiscard]] bool estimate_gravity_and_velocities(std::span<const DynInitKeyframe<T>> kfs, Result& r) const {
         const std::size_t n = kfs.size();
-        const std::size_t dim = 3 * n + 3;  // velocities + gravity
-        const std::size_t g0 = 3 * n;       // gravity block offset
+        Vec3 g_rough;
+        if (!solve_alignment(kfs, /*g_hat=*/nullptr, g_rough, r))
+            return false;  // rough pass: also yields the gravity direction to refine
+
+        const T g_norm = math::lie::detail::norm(g_rough);
+        if (!(g_norm > T{0}))
+            return false;
+        Vec3 g_hat = g_rough * (T{1} / g_norm);
+        Vec3 g_final = g_rough;
+        for (int iter = 0; iter < 4; ++iter) {  // refine on the |g|=G sphere tangent
+            if (!solve_alignment(kfs, &g_hat, g_final, r))
+                return false;
+            const T gn = math::lie::detail::norm(g_final);
+            if (!(gn > T{0}))
+                return false;
+            g_hat = g_final * (T{1} / gn);
+        }
+        r.gravity_world = g_final;
+        if (!(r.scale > T{0}))
+            return false;  // a non-positive metric scale is non-physical ⇒ reject
+        (void)n;
+        return true;
+    }
+
+    // One linear solve of the alignment normal equations. With `g_hat == nullptr`
+    // gravity is a free 3-vector (unknowns [v, g, s], the rough pass) and `g_out`
+    // returns the recovered gravity. Otherwise gravity is pinned to the known
+    // magnitude G along `*g_hat` and refined on its tangent (unknowns [v, b₁, b₂,
+    // s]), `g_out = G·ĝ + w₁ b₁ + w₂ b₂`. Either way `r.velocities_world` and
+    // `r.scale` are filled. Returns false if the system is singular.
+    [[nodiscard]] bool
+    solve_alignment(std::span<const DynInitKeyframe<T>> kfs, const Vec3* g_hat, Vec3& g_out, Result& r) const {
+        const std::size_t n = kfs.size();
+        const bool constrained = g_hat != nullptr;
+        // Column layout: velocities [0, 3n); then gravity — a free 3-vector
+        // (g0..g0+2) when rough, or two tangent coeffs (g0, g0+1) when refining;
+        // then the scale column.
+        const std::size_t g0 = 3 * n;
+        const std::size_t gw = constrained ? 2 : 3;  // gravity unknown width
+        const std::size_t s0 = g0 + gw;
+        const std::size_t dim = s0 + 1;
+
+        Vec3 w1{}, w2{}, base{};
+        if (constrained) {
+            tangent_basis(*g_hat, w1, w2);
+            base = *g_hat * cfg_.gravity_magnitude;  // fixed-magnitude gravity base
+        }
+
         DynMat<T> H(dim, dim);
         DynMat<T> b(dim, 1);
-
-        // One vector residual row-block Σ_k Aₖ·x[colₖ] = rhs, folded into
-        // the normal equations HᵀH, Hᵀr (each term a (col, 3×3) pair).
-        using Term = std::pair<std::size_t, Mat3>;
-        auto accumulate = [&](std::initializer_list<Term> terms, const Vec3& rhs) {
-            for (const auto& [ca, A] : terms) {
-                const Mat3 At = math::lie::detail::transpose(A);
-                for (const auto& [cb, B] : terms) {
-                    const Mat3 AtB = At * B;
-                    for (std::size_t i = 0; i < 3; ++i)
-                        for (std::size_t j = 0; j < 3; ++j)
-                            H(ca + i, cb + j) += AtB(i, j);
-                }
-                const Vec3 Atr = At * rhs;
-                for (std::size_t i = 0; i < 3; ++i)
-                    b(ca + i, 0) += Atr[i];
+        // Fold one 3-row vector constraint J·x = rhs (given as its nonzero
+        // (row, col, value) entries) into the normal equations. A generic entry
+        // list lets the scalar columns (tangent coeffs, scale) share the system
+        // with the 3-vector unknowns.
+        std::vector<std::tuple<std::size_t, std::size_t, T>> e;
+        auto diag = [&](std::size_t col, T c) {
+            for (std::size_t k = 0; k < 3; ++k)
+                e.emplace_back(k, col + k, c);
+        };
+        auto col = [&](std::size_t c, const Vec3& v) {
+            for (std::size_t k = 0; k < 3; ++k)
+                e.emplace_back(k, c, v[k]);
+        };
+        auto flush = [&](const Vec3& rhs) {
+            for (const auto& [r1, c1, v1] : e) {
+                for (const auto& [r2, c2, v2] : e)
+                    if (r1 == r2)
+                        H(c1, c2) += v1 * v2;
+                b(c1, 0) += v1 * rhs[r1];
             }
+            e.clear();
         };
 
-        const Mat3 I = Mat3::identity();
         for (std::size_t i = 1; i < n; ++i) {
             const std::size_t vi = 3 * (i - 1);
             const std::size_t vj = 3 * i;
             const Mat3 R_i = kfs[i - 1].R_world_imu.matrix();
             const T dt = kfs[i].dt;
-
-            // Position constraint: vᵢ Δt − ½ g Δt² = (pⱼ − pᵢ) − Rᵢ Δp.
             const Vec3 dp_world = kfs[i].p_world_imu - kfs[i - 1].p_world_imu;
-            const Vec3 rhs_p = dp_world - R_i * kfs[i].dp;
-            accumulate({{vi, I * dt}, {g0, I * (-T{0.5} * dt * dt)}}, rhs_p);
 
-            // Velocity constraint: vⱼ − vᵢ + g Δt = Rᵢ Δv.
-            const Vec3 rhs_v = R_i * kfs[i].dv;
-            accumulate({{vj, I}, {vi, I * (-T{1})}, {g0, I * dt}}, rhs_v);
+            // Position: vᵢ Δt − ½ g Δt² − s (pⱼ − pᵢ) = −Rᵢ Δp.
+            diag(vi, dt);
+            col(s0, dp_world * (-T{1}));
+            if (constrained) {
+                col(g0, w1 * (-T{0.5} * dt * dt));
+                col(g0 + 1, w2 * (-T{0.5} * dt * dt));
+                flush(R_i * kfs[i].dp * (-T{1}) + base * (T{0.5} * dt * dt));
+            } else {
+                diag(g0, -T{0.5} * dt * dt);
+                flush(R_i * kfs[i].dp * (-T{1}));
+            }
+
+            // Velocity: vⱼ − vᵢ + g Δt = Rᵢ Δv (scale-free).
+            diag(vj, T{1});
+            diag(vi, -T{1});
+            if (constrained) {
+                col(g0, w1 * dt);
+                col(g0 + 1, w2 * dt);
+                flush(R_i * kfs[i].dv - base * dt);
+            } else {
+                diag(g0, dt);
+                flush(R_i * kfs[i].dv);
+            }
         }
 
-        // Gravity is well-determined; the velocities need motion to be
-        // observable. A small ridge regularizes the rest. Factor once and
-        // reuse the factor for the solve (return false if not PD).
+        // The velocities need motion to be observable; a small ridge
+        // regularizes. Factor once and reuse the factor for the solve.
         for (std::size_t i = 0; i < dim; ++i)
             H(i, i) += T(1e-9);
         DynMat<T> L;
@@ -365,8 +444,18 @@ private:
         r.velocities_world.resize(n);
         for (std::size_t i = 0; i < n; ++i)
             r.velocities_world[i] = Vec3{{x(3 * i, 0), x(3 * i + 1, 0), x(3 * i + 2, 0)}};
-        r.gravity_world = Vec3{{x(g0, 0), x(g0 + 1, 0), x(g0 + 2, 0)}};
+        r.scale = x(s0, 0);
+        g_out = constrained ? base + w1 * x(g0, 0) + w2 * x(g0 + 1, 0) : Vec3{{x(g0, 0), x(g0 + 1, 0), x(g0 + 2, 0)}};
         return true;
+    }
+
+    // Two orthonormal vectors spanning the tangent plane of the unit `g_hat`.
+    static void tangent_basis(const Vec3& g_hat, Vec3& w1, Vec3& w2) {
+        const Vec3 a = abs_(g_hat[0]) < T{9} / T{10} ? Vec3{{T{1}, T{0}, T{0}}} : Vec3{{T{0}, T{0}, T{1}}};
+        Vec3 t = a - g_hat * math::lie::detail::dot(a, g_hat);
+        const T tn = math::lie::detail::norm(t);
+        w1 = tn > T{0} ? t * (T{1} / tn) : Vec3{{T{1}, T{0}, T{0}}};
+        w2 = math::lie::detail::cross(g_hat, w1);
     }
 
     Config cfg_;
