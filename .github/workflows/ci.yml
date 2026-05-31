@@ -109,14 +109,44 @@ jobs:
         # shared PDB no longer defeats the cache.
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
-        # Ninja + sccache. Release so the C++ /MD CRT matches the Corrosion-
-        # built Rust staticlib (cargo compiles cxx glue in the release profile);
-        # a Debug build links /MDd against /MD → LNK2038/LNK1319.
+        # Ninja + sccache. Release config (the root CMake pins /MD across all
+        # configs so the C++ CRT matches the Corrosion-built Rust staticlib).
         run: cmake --preset msvc-ninja
       - name: Build
         run: cmake --build --preset msvc-ninja
       - name: Run C++ Unit Tests (Math & Emulation)
         run: ctest --preset msvc-ninja
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  build-and-test-windows-debug:
+    name: Build and Test (Windows - MSVC Debug)
+    runs-on: windows-2022
+    # Guards the Debug-config link against the Rust core — the case the Release
+    # job can't catch and the one the Visual Studio IDE hits by default. Without
+    # the project-wide /MD CRT pin this fails with LNK2038/LNK1319 (the C++
+    # /MDd objects clash with the always-/MD Rust staticlib).
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
+        with:
+          toolchain: 1.83.0
+      - name: Set up the MSVC environment (vcvars x64)
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
+        with:
+          arch: x64
+      - name: Run sccache-action
+        uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
+      - name: Configure
+        run: cmake --preset msvc-ninja-debug
+      - name: Build
+        run: cmake --build --preset msvc-ninja-debug
+      - name: Run C++ Unit Tests (Math & Emulation)
+        run: ctest --preset msvc-ninja-debug
       - name: sccache stats
         if: always()
         run: sccache --show-stats

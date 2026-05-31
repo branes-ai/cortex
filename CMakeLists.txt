@@ -23,6 +23,25 @@ endif()
 #       uses Unicode in comments and report strings (e.g. ✅, °, →).
 if(MSVC)
     add_compile_options(/Zc:preprocessor /utf-8)
+
+    # Use the dynamic *release* CRT (/MD) in every configuration, including
+    # Debug. rustc on x86_64-pc-windows-msvc has no debug-CRT variant: the Rust
+    # staticlib (cortex_core) and its cc-compiled cxx glue always link /MD
+    # (_ITERATOR_DEBUG_LEVEL=0). A C++ Debug build's default /MDd (IDL=2) clashes
+    # → LNK2038/LNK1319 when any target links the bridge (e.g. tests/integration/
+    # cxx_bridge). Pinning /MD project-wide keeps every object's CRT consistent
+    # with the Rust core, so the Visual Studio IDE can build & link the Debug
+    # config (and run the debugger) — not just the CI Release build. Requires
+    # CMP0091 (NEW by default at our cmake_minimum_required).
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+
+    # /RTC1 (runtime checks, in CMake's default MSVC Debug flags) requires the
+    # debug CRT, so it is incompatible with the /MD pin above — strip it. A
+    # Debug build keeps /Od + debug info, so source-level debugging is intact;
+    # only the CRT debug heap and /RTC stack checks are given up (the price of
+    # linking a Rust staticlib, which mandates the release CRT).
+    string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
 
 # 1. Define the Hardware Target Flag (SITL vs KPU)
