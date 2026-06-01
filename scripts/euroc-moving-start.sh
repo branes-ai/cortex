@@ -24,7 +24,12 @@ WORK="$REPO/build/euroc-data"
 # extract_seq <zip> <name> → prints the sequence's mav0 directory, extracting
 # the ASL archive into build/euroc-data/<name> the first time.
 extract_seq() {
-    local zip="$1" name="$2" dest="$WORK/$name"
+    # Separate declarations: in a single `local a=$1 b=$2 c=$b`, bash expands
+    # c's RHS before b is assigned, so under `set -u` `$name` reads the unset
+    # *global* and aborts with "name: unbound variable".
+    local zip="$1"
+    local name="$2"
+    local dest="$WORK/$name"
     if [ ! -d "$dest" ]; then
         if [ ! -f "$zip" ]; then
             echo "  (missing $zip — skipping $name)" >&2
