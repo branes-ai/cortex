@@ -181,7 +181,8 @@ namespace {
 // method, frame count, and ATE are WARN'd (printed regardless of pass/fail) so
 // a generous gate can be tuned from the actual numbers. Shared by the V1_01
 // (static-start) benchmark and the MH_05 / V2_03 moving-start cases (epic #211).
-void run_euroc_replay(const char* env_var, const char* label, T ate_gate, bool expect_converged = true) {
+void run_euroc_replay(
+    const char* env_var, const char* label, T ate_gate, bool expect_converged = true, bool prefer_dynamic = false) {
     const char* env = std::getenv(env_var);
     if (env == nullptr || std::string(env).empty())
         SKIP(std::string("set ") + env_var + " to the " + label + "/mav0 directory to run this benchmark");
@@ -211,6 +212,10 @@ void run_euroc_replay(const char* env_var, const char* label, T ate_gate, bool e
 
     bs::VioConfig cfg;
     cfg.max_clones = 11;
+    // Suppress the static path so the dynamic VI-init bootstraps even on a
+    // sequence with an early quiet window — exercises the epic #211 dynamic
+    // path on real data.
+    cfg.prefer_dynamic_init = prefer_dynamic;
     const auto traj = bs::euroc::replay(std::string(env), est, cfg);
     REQUIRE(traj.size() > 100);
 
@@ -219,6 +224,11 @@ void run_euroc_replay(const char* env_var, const char* label, T ate_gate, bool e
     const auto& diag = est.backend().init_diagnostics();
     REQUIRE(diag.method != bs::InitMethod::None);
     REQUIRE(diag.method != bs::InitMethod::Identity);
+    // When we force the dynamic path, confirm it actually fired (not the
+    // gravity-only timeout fallback) — otherwise the case proves nothing
+    // about dynamic VI-init.
+    if (prefer_dynamic)
+        REQUIRE(diag.method == bs::InitMethod::Dynamic);
 
     const auto gt = bs::euroc::parse_groundtruth<T>(std::string(env));
     const auto matched = ev::associate(traj, gt, 0.01);
@@ -247,6 +257,17 @@ TEST_CASE("V1_01_easy replay keeps ATE under threshold", "[vio][euroc][dataset]"
 
 TEST_CASE("MH_05_difficult replay (moving start) bootstraps and stays bounded", "[vio][euroc][dataset]") {
     run_euroc_replay("CORTEX_EUROC_MH05", "MH_05_difficult", 1.5);
+}
+
+// MH_05 has an early quiet window, so the default run takes the (more accurate)
+// static path. Forcing the dynamic path here exercises epic #211's dynamic
+// VI-init on real data and asserts it both fires AND converges within gate.
+TEST_CASE("MH_05_difficult forced dynamic VI-init converges", "[vio][euroc][dataset]") {
+    run_euroc_replay("CORTEX_EUROC_MH05",
+                     "MH_05_difficult (dynamic)",
+                     1.5,
+                     /*expect_converged=*/true,
+                     /*prefer_dynamic=*/true);
 }
 
 // V2_03_difficult is the most aggressive EuRoC sequence; the MVP MSCKF still
