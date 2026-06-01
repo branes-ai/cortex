@@ -29,8 +29,11 @@
 // closure), so gates are generous — enough to catch a broken pipeline without
 // over-fitting to a tuned SOTA number:
 //   - V1_01_easy  : 0.50 m (strict).
-//   - MH_05_difficult : 1.5 m (strict) — measured ~0.79 m; validates epic #211
-//     dynamic-init + estimation on a difficult moving-start sequence.
+//   - MH_05_difficult : 1.5 m (strict) — measured ~0.79 m via the static path
+//     (MH_05 has an early quiet window); validates the estimator + extrinsics on
+//     a difficult sequence. A second case forces the dynamic path (epic #211):
+//     it fires but diverges (~42 km) on the same data — the real-data scale
+//     solve is bad, tracked in #247, so that case only guards finiteness.
 //   - V2_03_difficult : the most aggressive sequence; the MVP still diverges
 //     (~12 km) — tracked in #244, so its case only guards against a NaN/inf
 //     blow-up for now.
