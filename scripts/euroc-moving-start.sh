@@ -21,25 +21,40 @@ DATASET_ROOT="${CORTEX_EUROC_ROOT:-/srv/samba/sw-21/EuRoC-MAV-dataset}"
 PRESET="${CORTEX_PRESET:-sitl-release}"
 WORK="$REPO/build/euroc-data"
 
-# extract_seq <zip> <name> → prints the sequence's mav0 directory, extracting
-# the ASL archive into build/euroc-data/<name> the first time.
-extract_seq() {
-    local zip="$1" name="$2" dest="$WORK/$name"
-    if [ ! -d "$dest" ]; then
-        if [ ! -f "$zip" ]; then
-            echo "  (missing $zip — skipping $name)" >&2
-            return 0
-        fi
-        echo "  extracting $name (one-time) ..." >&2
-        mkdir -p "$dest"
-        unzip -q "$zip" -d "$dest"
+# locate_mav0 <sequence-dir> <name> → prints the sequence's `mav0` directory.
+# Reuses an already-extracted mav0 (anywhere under the sequence dir or under
+# build/euroc-data/<name>); otherwise extracts the first `.zip` found in the
+# sequence dir into build/euroc-data/<name>. The EuRoC layout nests each
+# sequence in its own directory (machine_hall/MH_05_difficult/…), so we search
+# rather than assume a fixed zip path.
+# Separate `local` decls on purpose: in `local a=$1 b=$2 c=$b`, bash expands c's
+# RHS before b is assigned, so under `set -u` `$name` would read the unset
+# global and abort with "name: unbound variable".
+locate_mav0() {
+    local seqdir="$1"
+    local name="$2"
+    local dest="$WORK/$name"
+    local existing
+    existing="$(find "$seqdir" "$dest" -maxdepth 3 -type d -name mav0 2>/dev/null | head -1 || true)"
+    if [ -n "$existing" ]; then
+        echo "$existing"
+        return 0
     fi
-    find "$dest" -type d -name mav0 | head -1
+    local zip
+    zip="$(find "$seqdir" -maxdepth 1 -type f -name '*.zip' 2>/dev/null | head -1 || true)"
+    if [ -z "$zip" ]; then
+        echo "  (no extracted mav0 or .zip under $seqdir — skipping $name)" >&2
+        return 0
+    fi
+    echo "  extracting $name (one-time) from $(basename "$zip") ..." >&2
+    mkdir -p "$dest"
+    unzip -q "$zip" -d "$dest"
+    find "$dest" -maxdepth 3 -type d -name mav0 | head -1
 }
 
 echo "== locating sequences under $DATASET_ROOT =="
-MH05="$(extract_seq "$DATASET_ROOT/machine_hall/MH_05_difficult.zip" MH_05_difficult)"
-V203="$(extract_seq "$DATASET_ROOT/vicon_room2/V2_03_difficult.zip" V2_03_difficult)"
+MH05="$(locate_mav0 "$DATASET_ROOT/machine_hall/MH_05_difficult" MH_05_difficult)"
+V203="$(locate_mav0 "$DATASET_ROOT/vicon_room2/V2_03_difficult" V2_03_difficult)"
 echo "  MH_05 mav0: ${MH05:-<not found>}"
 echo "  V2_03 mav0: ${V203:-<not found>}"
 if [ -z "${MH05}${V203}" ]; then
