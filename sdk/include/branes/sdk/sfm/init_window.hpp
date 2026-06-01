@@ -115,6 +115,11 @@ template <math::Scalar T>
     const std::size_t n = frames.size();
     if (n < 3)
         return out;
+    // Each frame's ids and obs are parallel arrays; a mismatch would index out
+    // of bounds in the correspondence loops below.
+    for (const auto& f : frames)
+        if (f.ids.size() != f.obs.size())
+            return out;
 
     // 1) Two-view bootstrap on frames 0–1 fixes the points (cam-0 frame, up to
     //    scale). cam0 is the world origin; cam1's world pose is the inverse of

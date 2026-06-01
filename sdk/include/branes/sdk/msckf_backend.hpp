@@ -186,6 +186,11 @@ public:
 
     void process_camera(double timestamp_s, std::span<const FrontendObservation<T>> obs) override {
         if (!initialized_) {
+            // Drop duplicate / out-of-order frames: a non-increasing timestamp
+            // would corrupt the SfM + preintegration window (the post-init path
+            // guards this too).
+            if (!init_frames_.empty() && !(timestamp_s > init_frames_.back().timestamp))
+                return;
             // Buffer the frame for the dynamic-init SfM window and attempt the
             // visual-inertial alignment once enough frames have accumulated.
             buffer_init_frame(timestamp_s, obs);
