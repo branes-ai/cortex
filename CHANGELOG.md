@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.28.0](https://github.com/branes-ai/cortex/compare/v0.27.0...v0.28.0) (2026-06-01)
+
+
+### Features
+
+* **sdk:** perspective-n-point resectioning via DLT + RANSAC ([#236](https://github.com/branes-ai/cortex/issues/236)) ([fb3370a](https://github.com/branes-ai/cortex/commit/fb3370aee8434c061c2d66268d83e615b94d5d36))
+
 ## [0.27.0](https://github.com/branes-ai/cortex/compare/v0.26.0...v0.27.0) (2026-05-31)
 
 
