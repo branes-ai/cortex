@@ -30,7 +30,9 @@
 
 #include <branes/math/cameras/pinhole_radtan.hpp>
 #include <branes/sdk/imu_init.hpp>
+#include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
+#include <branes/sdk/sfm/init_window.hpp>
 #include <branes/sdk/vio_backend.hpp>
 
 #include <cstddef>
@@ -50,7 +52,8 @@ namespace branes::sdk {
 enum class InitMethod {
     None,          ///< not initialized yet
     Static,        ///< stationary window: full roll/pitch + gyro bias
-    GravityAlign,  ///< moving start: roll/pitch from mean specific force
+    Dynamic,       ///< moving start: full visual-inertial alignment (yaw + scale + velocity)
+    GravityAlign,  ///< moving start: roll/pitch from mean specific force only
     Identity,      ///< last resort: mean force wasn't even gravity-like
 };
 
@@ -58,6 +61,8 @@ enum class InitMethod {
     switch (m) {
     case InitMethod::Static:
         return "static";
+    case InitMethod::Dynamic:
+        return "dynamic";
     case InitMethod::GravityAlign:
         return "gravity_align";
     case InitMethod::Identity:
@@ -141,6 +146,10 @@ public:
         init_gyro_.clear();
         init_accel_.clear();
         init_samples_seen_ = 0;
+        init_frames_.clear();
+        init_preint_ = ImuPreintegrator<T>{};
+        init_have_imu_t_ = false;
+        init_last_imu_t_ = 0.0;
         tracks_.clear();
     }
 
@@ -149,6 +158,16 @@ public:
         const DVec3 accel = to_dvec(imu.linear_acceleration);
 
         if (!initialized_) {
+            // Accumulate IMU preintegration for the dynamic-init window (the
+            // deltas between successive camera frames). Bias linearization at
+            // zero; try_dynamic corrects via dR_dbg.
+            if (init_have_imu_t_) {
+                const double dt = imu.timestamp_s - init_last_imu_t_;
+                if (dt > 0.0)
+                    init_preint_.integrate(gyro, accel, static_cast<T>(dt));
+            }
+            init_last_imu_t_ = imu.timestamp_s;
+            init_have_imu_t_ = true;
             try_initialize(gyro, accel, imu.timestamp_s);
             return;
         }
@@ -166,8 +185,18 @@ public:
     }
 
     void process_camera(double timestamp_s, std::span<const FrontendObservation<T>> obs) override {
-        if (!initialized_)
+        if (!initialized_) {
+            // Drop duplicate / out-of-order frames: a non-increasing timestamp
+            // would corrupt the SfM + preintegration window (the post-init path
+            // guards this too).
+            if (!init_frames_.empty() && !(timestamp_s > init_frames_.back().timestamp))
+                return;
+            // Buffer the frame for the dynamic-init SfM window and attempt the
+            // visual-inertial alignment once enough frames have accumulated.
+            buffer_init_frame(timestamp_s, obs);
+            try_dynamic_init(timestamp_s);
             return;
+        }
 
         // Propagate to the image time (zero-order hold on the last IMU
         // sample) so the clone is anchored at exactly `timestamp_s`, even
@@ -253,6 +282,8 @@ private:
     }
     static constexpr std::size_t kInitSamples = 50;      ///< static-init window
     static constexpr std::size_t kInitMaxSamples = 400;  ///< fall back past this
+    static constexpr std::size_t kMinDynFrames = 5;      ///< camera frames before attempting dynamic init
+    static constexpr std::size_t kMaxDynFrames = 12;     ///< bounded init-window frame buffer
 
     static std::vector<Extrinsics> extrinsics_of(const std::vector<CameraCalibration>& cams) {
         std::vector<Extrinsics> e;
@@ -346,6 +377,80 @@ private:
         last_imu_time_ = t;
         init_gyro_.clear();
         init_accel_.clear();
+        init_frames_.clear();
+    }
+
+    // Record one init-window camera frame (camera 0 only — the bootstrap is
+    // single-camera) with its normalized observations and the IMU
+    // preintegration accumulated since the previous frame, then reset the
+    // preintegrator. A bounded sliding buffer; dropping the oldest is harmless
+    // because the SfM window re-anchors on its first frame.
+    void buffer_init_frame(double t, std::span<const FrontendObservation<T>> obs) {
+        sfm::InitFrame<T> frame;
+        frame.timestamp = t;
+        for (const auto& o : obs) {
+            if (o.camera_id != 0)
+                continue;
+            DVec2 xy;
+            if (!to_normalized(o.camera_id, o.u, o.v, xy))
+                continue;
+            frame.ids.push_back(o.feature_id);
+            frame.obs.push_back(sfm::Vec2<T>{{xy[0], xy[1]}});
+        }
+        if (!init_frames_.empty()) {  // the first frame has no preintegration
+            frame.dR = init_preint_.delta_rotation();
+            frame.dv = init_preint_.delta_velocity();
+            frame.dp = init_preint_.delta_position();
+            frame.dR_dbg = init_preint_.d_rotation_d_gyro_bias();
+            frame.dt = init_preint_.delta_time();
+        }
+        init_preint_ = ImuPreintegrator<T>{};  // start the next interval
+        init_frames_.push_back(std::move(frame));
+        while (init_frames_.size() > kMaxDynFrames)
+            init_frames_.erase(init_frames_.begin());
+    }
+
+    // Once enough frames have accumulated, build the SfM window and run the
+    // visual-inertial alignment; on success seed the state from it. Preferred
+    // over the gravity-only fallback, which only fires later (kInitMaxSamples)
+    // and only while still uninitialized.
+    void try_dynamic_init(double t) {
+        if (init_frames_.size() < kMinDynFrames)
+            return;
+        const auto win =
+            sfm::build_init_window<T>(std::span<const sfm::InitFrame<T>>{init_frames_}, cameras_[0].extrinsics);
+        if (!win.success)
+            return;
+        const auto r = initializer_.try_dynamic(win.keyframes);
+        if (!r.success)
+            return;
+        apply_dynamic_init(r, win, t);
+    }
+
+    // Seed the state from a successful dynamic alignment. try_dynamic resolves
+    // gravity, metric per-keyframe velocity, scale, and the gravity-aligned
+    // attitude of the *first* keyframe; carry the vision relative rotation to
+    // the last keyframe (the current pose) and take its velocity.
+    void apply_dynamic_init(const ImuInitResult<T>& r, const sfm::InitWindowResult<T>& win, double t) {
+        state_ = msckf::State<T, Cov>(kInitialSigma());
+        const auto rel = win.keyframes.front().R_world_imu.inverse() * win.keyframes.back().R_world_imu;
+        state_.R = r.R_world_imu * rel;
+        state_.v = r.velocities_world.empty() ? DVec3{} : r.velocities_world.back();
+        state_.bg = r.gyro_bias;
+        state_.ba = DVec3{};  // accel bias is not observable from the dynamic alignment
+        state_.timestamp = t;
+
+        const T g_norm = math::lie::detail::norm(r.gravity_world);
+        const T g_cfg = static_cast<T>(config_.gravity_magnitude);
+        const DVec3 up_world = g_norm > T{0} ? r.gravity_world * (-T{1} / g_norm) : DVec3{};
+        init_diag_.method = InitMethod::Dynamic;
+        init_diag_.t_s = t;
+        init_diag_.up_body = state_.R.inverse() * up_world;  // "up" in the current body frame
+        init_diag_.gravity_residual =
+            (g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1};
+        init_diag_.gyro_bias = r.gyro_bias;
+        init_diag_.accel_bias = DVec3{};
+        finish_init(t);
     }
 
     bool to_normalized(std::uint32_t cam_id, T u, T v, DVec2& out) const {
@@ -435,6 +540,14 @@ private:
     std::vector<DVec3> init_gyro_;
     std::vector<DVec3> init_accel_;
     std::size_t init_samples_seen_ = 0;  ///< total IMU samples seen during init (for the timeout)
+
+    // Dynamic-init state: a bounded buffer of init-window camera frames and the
+    // IMU preintegrator accumulating the deltas between them.
+    std::vector<sfm::InitFrame<T>> init_frames_;
+    ImuPreintegrator<T> init_preint_{};
+    bool init_have_imu_t_ = false;
+    double init_last_imu_t_ = 0.0;
+
     std::unordered_map<std::uint64_t, std::vector<ObsRec>> tracks_;
 };
 
