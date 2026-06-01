@@ -223,6 +223,10 @@ void replay_moving_start(const char* env_var, const char* label, T ate_gate) {
     const auto matched = ev::associate(traj, gt, 0.01);
     REQUIRE(matched.estimated.size() > 100);
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
+    // Surface the headline metrics on every run (WARN prints regardless of
+    // pass/fail) so the gate can be tuned from the actual numbers.
+    WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
+               << " m (gate " << ate_gate << " m)");
     INFO(label << " ATE = " << ate << " m (gate " << ate_gate << " m)");
     REQUIRE(ate < ate_gate);
 }
