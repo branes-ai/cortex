@@ -288,9 +288,14 @@ private:
         return T{1} / T{10};
     }
     static constexpr std::size_t kInitSamples = 50;      ///< static-init window
-    static constexpr std::size_t kInitMaxSamples = 400;  ///< fall back past this
-    static constexpr std::size_t kMinDynFrames = 5;      ///< camera frames before attempting dynamic init
-    static constexpr std::size_t kMaxDynFrames = 12;     ///< bounded init-window frame buffer
+    static constexpr std::size_t kInitMaxSamples = 400;  ///< fall back past this (~2 s @ 200 Hz)
+    /// Longer runway before the gravity-only fallback when the caller prefers
+    /// the dynamic path: a moving start may hover briefly before the motion
+    /// that makes the metric scale observable, so give dynamic init time to
+    /// fire on a later excited window instead of preempting it at 2 s.
+    static constexpr std::size_t kInitMaxSamplesDynamic = 4000;  ///< ~20 s @ 200 Hz
+    static constexpr std::size_t kMinDynFrames = 5;              ///< camera frames before attempting dynamic init
+    static constexpr std::size_t kMaxDynFrames = 12;             ///< bounded init-window frame buffer
 
     static std::vector<Extrinsics> extrinsics_of(const std::vector<CameraCalibration>& cams) {
         std::vector<Extrinsics> e;
@@ -344,7 +349,8 @@ private:
         // produce yet. Until that lands, gravity-only alignment fixes the
         // dominant error (roll/pitch), which is enough to keep the filter
         // from diverging. See the dynamic-VI-init follow-up.
-        if (init_samples_seen_ >= kInitMaxSamples) {
+        const std::size_t init_max = config_.prefer_dynamic_init ? kInitMaxSamplesDynamic : kInitMaxSamples;
+        if (init_samples_seen_ >= init_max) {
             // Prefer gravity-only alignment (roll/pitch from the mean
             // specific force) over a blind identity attitude: on a tilted
             // mount, identity leaves gravity uncancelled in propagation and
