@@ -9,7 +9,13 @@
 //     CORTEX_EUROC_V101=/path/to/V1_01_easy/mav0
 //
 // to enable it; otherwise that case is skipped (so `ctest -R vio_euroc`
-// stays green in CI).
+// stays green in CI). Two moving-start sequences validate the dynamic VI-init
+// path (epic #211) the same way, each behind its own variable:
+//
+//     CORTEX_EUROC_MH05=/path/to/MH_05_difficult/mav0
+//     CORTEX_EUROC_V203=/path/to/V2_03_difficult/mav0
+//
+// (extract the published EuRoC ASL .zip to get the `mav0` directory).
 //
 // ATE threshold rationale (documented per the issue): published keyframe
 // ATE on V1_01_easy is ~0.05–0.06 m for OpenVINS and ~0.08 m for
@@ -152,30 +158,59 @@ TEST_CASE("ASL CSV parsers read the EuRoC layout", "[vio][euroc]") {
     fs::remove_all(root);
 }
 
-TEST_CASE("V1_01_easy replay keeps ATE under threshold", "[vio][euroc][dataset]") {
-    const char* env = std::getenv("CORTEX_EUROC_V101");
+namespace {
+
+// Replay an EuRoC sequence end-to-end and validate the run: it bootstraps with
+// a real attitude (never the divergent identity fallback — the chosen
+// InitMethod is surfaced) and lands ATE under `ate_gate`. Gated on `env_var`
+// (the sequence's mav0 directory), so these cases are skipped in CI. The init
+// method, frame count, and ATE are WARN'd (printed regardless of pass/fail) so
+// a generous gate can be tuned from the actual numbers. Shared by the V1_01
+// (static-start) benchmark and the MH_05 / V2_03 moving-start cases (epic #211).
+void run_euroc_replay(const char* env_var, const char* label, T ate_gate) {
+    const char* env = std::getenv(env_var);
     if (env == nullptr || std::string(env).empty())
-        SKIP("set CORTEX_EUROC_V101 to the V1_01_easy/mav0 directory to run this benchmark");
+        SKIP(std::string("set ") + env_var + " to the " + label + "/mav0 directory to run this benchmark");
 
     using Backend = bs::MsckfBackend<T>;
     using Estimator = bs::VioEstimator<T, Backend>;
-
     // EuRoC cam0 (pinhole-radtan) intrinsics, from the published calibration.
-    Backend::CameraCalibration cal;
-    cal.intrinsics =
-        Backend::Camera(458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
-    Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
+    typename Backend::CameraCalibration cal;
+    cal.intrinsics = typename Backend::Camera(
+        458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
+    Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
 
     bs::VioConfig cfg;
     cfg.max_clones = 11;
     const auto traj = bs::euroc::replay(std::string(env), est, cfg);
     REQUIRE(traj.size() > 100);
 
+    // Init must resolve a real attitude (static, dynamic VI alignment, or
+    // gravity-only) — never the divergent identity fallback.
+    const auto& diag = est.backend().init_diagnostics();
+    REQUIRE(diag.method != bs::InitMethod::None);
+    REQUIRE(diag.method != bs::InitMethod::Identity);
+
     const auto gt = bs::euroc::parse_groundtruth<T>(std::string(env));
     const auto matched = ev::associate(traj, gt, 0.01);
     REQUIRE(matched.estimated.size() > 100);
-
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
-    INFO("V1_01_easy ATE = " << ate << " m (gate 0.50 m)");
-    REQUIRE(ate < 0.50);
+    WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
+               << " m (gate " << ate_gate << " m)");
+    INFO(label << " ATE = " << ate << " m (gate " << ate_gate << " m)");
+    REQUIRE(ate < ate_gate);
+}
+
+}  // namespace
+
+TEST_CASE("V1_01_easy replay keeps ATE under threshold", "[vio][euroc][dataset]") {
+    run_euroc_replay("CORTEX_EUROC_V101", "V1_01_easy", 0.50);
+}
+
+TEST_CASE("MH_05_difficult replay (moving start) bootstraps and stays bounded", "[vio][euroc][dataset]") {
+    run_euroc_replay("CORTEX_EUROC_MH05", "MH_05_difficult", 1.5);
+}
+
+TEST_CASE("V2_03_difficult replay (moving start) bootstraps and stays bounded", "[vio][euroc][dataset]") {
+    run_euroc_replay("CORTEX_EUROC_V203", "V2_03_difficult", 1.5);
 }
