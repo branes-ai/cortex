@@ -53,7 +53,7 @@ struct BenchReport {
 
     // Estimator health / initialization — surfaced so a bad run is obvious
     // from the report instead of inferred from a giant ATE.
-    std::string init_method = "none";    ///< static | gravity_align | identity | none
+    std::string init_method = "none";    ///< static | dynamic | gravity_align | identity | none
     double init_tilt_deg = 0.0;          ///< angle of the recovered up-direction from body +z
     double init_gravity_residual = 0.0;  ///< ||mean accel| − g| / g at init
     bool extrinsics_identity = false;    ///< camera coincident with IMU (a bug for real rigs)
@@ -207,6 +207,9 @@ inline void to_markdown(std::ostream& os, const BenchReport& r) {
         os << "> ℹ️ Init used **gravity-only alignment** (moving start, no static window). Roll/pitch from the "
               "mean specific force and yaw starts at zero; the gyro bias is seeded only if the window is "
               "rotation-quiet, otherwise it starts at zero too.\n\n";
+    else if (r.init_method == "dynamic")
+        os << "> ✅ Init used **dynamic visual-inertial alignment** (moving start). Full roll/pitch/yaw, "
+              "gyro bias, per-keyframe velocity, and metric scale recovered from the SfM window + IMU.\n\n";
 
     os << "## Accuracy\n\n";
     os << "| Metric | Value |\n|---|---|\n";
