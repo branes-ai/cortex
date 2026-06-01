@@ -26,6 +26,7 @@
 
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
+#include <branes/sdk/sfm/init_window.hpp>  // so3_from_matrix (extrinsics rotation)
 #include <branes/sdk/vio_estimator.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -46,6 +47,7 @@ using T = double;
 using SE3 = branes::math::lie::SE3<T>;
 using SO3 = branes::math::lie::SO3<T>;
 using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+using Mat3 = branes::math::lie::detail::Mat<T, 3, 3>;
 
 ev::StampedPose<T> pose_at(double t, const Vec3& p, const SO3& R = {}) {
     return ev::StampedPose<T>{t, SE3(R, p)};
@@ -178,6 +180,21 @@ void run_euroc_replay(const char* env_var, const char* label, T ate_gate) {
     typename Backend::CameraCalibration cal;
     cal.intrinsics = typename Backend::Camera(
         458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
+    // Real cam0→IMU (body) extrinsics T_BS, from the published calibration. The
+    // EuRoC cam0 is rotated ~90° from the IMU, so assuming identity gives a
+    // grossly wrong measurement model and the filter diverges on fast motion.
+    Mat3 R_imu_cam{};
+    R_imu_cam(0, 0) = 0.0148655429818;
+    R_imu_cam(0, 1) = -0.999880929698;
+    R_imu_cam(0, 2) = 0.00414029679422;
+    R_imu_cam(1, 0) = 0.999557249008;
+    R_imu_cam(1, 1) = 0.0149672133247;
+    R_imu_cam(1, 2) = 0.025715529948;
+    R_imu_cam(2, 0) = -0.0257744366974;
+    R_imu_cam(2, 1) = 0.00375618835797;
+    R_imu_cam(2, 2) = 0.999660727178;
+    cal.extrinsics.R_imu_cam = bs::sfm::so3_from_matrix<T>(R_imu_cam);
+    cal.extrinsics.p_imu_cam = Vec3{{-0.0216401454975, -0.064676986768, 0.00981073058949}};
     Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
 
     bs::VioConfig cfg;
