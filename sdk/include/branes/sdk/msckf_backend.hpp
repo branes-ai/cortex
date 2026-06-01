@@ -83,6 +83,13 @@ struct InitDiagnostics {
     double gravity_residual = 0.0;  ///< ||mean accel| − g| / g over the init window
     DVec3 gyro_bias{};
     DVec3 accel_bias{};
+    // Dynamic-path diagnostics (only meaningful when method == Dynamic): the
+    // recovered metric scale of the vision poses, the speed the filter is
+    // seeded with (|v_world| of the last keyframe), and the number of SfM
+    // keyframes the alignment used. Surfaced to localize a bad dynamic seed.
+    double dyn_scale = 0.0;
+    double dyn_seed_speed = 0.0;
+    int dyn_keyframes = 0;
 };
 
 /// The MSCKF backend, generic over the covariance representation `Cov`
@@ -456,6 +463,9 @@ private:
             (g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1};
         init_diag_.gyro_bias = r.gyro_bias;
         init_diag_.accel_bias = DVec3{};
+        init_diag_.dyn_scale = static_cast<double>(r.scale);
+        init_diag_.dyn_seed_speed = static_cast<double>(math::lie::detail::norm(state_.v));
+        init_diag_.dyn_keyframes = static_cast<int>(win.keyframes.size());
         finish_init(t);
     }
 

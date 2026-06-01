@@ -239,6 +239,9 @@ void run_euroc_replay(
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
     WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
                << " m (gate " << ate_gate << " m)");
+    if (diag.method == bs::InitMethod::Dynamic)
+        WARN(label << ": dyn-init scale=" << diag.dyn_scale << ", seed_speed=" << diag.dyn_seed_speed
+                   << " m/s, sfm_keyframes=" << diag.dyn_keyframes << ", grav_residual=" << diag.gravity_residual);
     INFO(label << " ATE = " << ate << " m (gate " << ate_gate << " m)");
     if (expect_converged) {
         REQUIRE(ate < ate_gate);
