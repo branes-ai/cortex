@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace branes::sdk::sfm {
@@ -206,6 +207,11 @@ estimate_pose(std::span<const Vec3<T>> pts3d, std::span<const Vec2<T>> obs2d, co
         if (detail::reprojection_error<T>(R, t, pts3d[k], obs2d[k]) < opt.reprojection_threshold)
             kept.push_back(k);
     if (kept.size() < opt.min_inliers || static_cast<T>(kept.size()) < opt.min_inlier_ratio * static_cast<T>(n))
+        return out;
+
+    // Final refit on the pruned set so out.R/out.t are consistent with the
+    // returned out.inliers (not the larger best_inliers they were pruned from).
+    if (!detail::pnp_dlt<T>(pts3d, obs2d, std::span<const std::size_t>{kept}, R, t))
         return out;
 
     out.success = true;
