@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.29.0](https://github.com/branes-ai/cortex/compare/v0.28.0...v0.29.0) (2026-06-01)
+
+
+### Features
+
+* **sdk:** wire dynamic VI init into MsckfBackend (InitMethod::Dynamic) ([#238](https://github.com/branes-ai/cortex/issues/238)) ([108cf02](https://github.com/branes-ai/cortex/commit/108cf02bf8f1148e51505a96e9c52f45c9c64416))
+
 ## [0.28.0](https://github.com/branes-ai/cortex/compare/v0.27.0...v0.28.0) (2026-06-01)
 
 
