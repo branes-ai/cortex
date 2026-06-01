@@ -62,6 +62,15 @@ struct ImuInitConfig {
     /// as its magnitude is within this fraction of g. Wider than gravity_tol
     /// because we only need a direction, not a rest condition.
     T gravity_align_tol = T{30} / T{100};  ///< 30 %
+    /// Scale-observability gate for the dynamic alignment. The metric scale is
+    /// only observable with enough translational excitation; on a near-hover
+    /// window the rank-deficient solve collapses scale → 0 (the trivial
+    /// IMU-only solution), which would seed a degenerate state and diverge the
+    /// filter. Require the resolved metric motion across the init window
+    /// (scale · max keyframe displacement) to exceed this floor, else decline
+    /// dynamic init so the backend retries on a later, better-excited window or
+    /// falls back. (scale > 0 alone is insufficient — 1e-8 is "positive".)
+    T min_dynamic_motion = T{5} / T{100};  ///< 5 cm of resolved motion
 };
 
 /// What initialization recovers. `R_world_imu` is gravity-aligned with
@@ -205,6 +214,20 @@ public:
         r.gyro_bias = estimate_gyro_bias(kfs);
         if (!estimate_gravity_and_velocities(kfs, r))
             return r;
+
+        // Scale-observability gate: on a near-hover window the metric scale is
+        // unobservable and the solve collapses it toward zero, so reject when
+        // the resolved metric motion (scale · the largest keyframe displacement
+        // in vision units) is below the floor. Leaves success = false so the
+        // caller retries later or falls back. See #247.
+        T vis_span = T{0};
+        for (std::size_t i = 1; i < n; ++i) {
+            const T d = math::lie::detail::norm(kfs[i].p_world_imu - kfs[0].p_world_imu);
+            if (d > vis_span)
+                vis_span = d;
+        }
+        if (r.scale * vis_span < cfg_.min_dynamic_motion)
+            return r;  // unobservable scale ⇒ decline (success stays false)
 
         // The alignment recovers gravity in the (arbitrary) vision world
         // frame. Rotate the whole result into a gravity-aligned world —
