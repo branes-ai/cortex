@@ -315,10 +315,16 @@ private:
             return;
 
         const std::span<const DVec3> g{init_gyro_}, a{init_accel_};
-        const auto stat = initializer_.try_static(g, a);
-        if (stat.success) {
-            apply_init(stat, InitMethod::Static, t);
-            return;
+        // prefer_dynamic_init suppresses the static path so the dynamic VI
+        // alignment (driven from process_camera) bootstraps the filter even
+        // when an early quiet window exists. The gravity-only timeout fallback
+        // below still applies as a safety net if dynamic never fires.
+        if (!config_.prefer_dynamic_init) {
+            const auto stat = initializer_.try_static(g, a);
+            if (stat.success) {
+                apply_init(stat, InitMethod::Static, t);
+                return;
+            }
         }
         // No stationary window after kInitMaxSamples of trying: bootstrap from
         // the most recent window without waiting for a rest that may never

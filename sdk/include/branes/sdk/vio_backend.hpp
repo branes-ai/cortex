@@ -44,6 +44,13 @@ struct VioConfig {
     double gyro_bias_random_walk = 1.9e-5;
     int num_cameras = 1;  ///< 1 = mono, 2 = stereo
     int max_clones = 11;  ///< MSCKF sliding-window length
+    /// Skip the stationary-window static init and bootstrap from the dynamic
+    /// visual-inertial alignment instead. For a known moving start (the drone
+    /// is already in motion at the first sample) the static check would only
+    /// burn samples before timing out; preferring dynamic also lets the
+    /// dynamic-init path be exercised on sequences that happen to contain an
+    /// early quiet moment. The gravity-only timeout fallback still applies.
+    bool prefer_dynamic_init = false;
 };
 
 /// A single inertial sample, in the IMU frame. Timestamps are seconds.
