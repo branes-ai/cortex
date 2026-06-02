@@ -102,6 +102,12 @@ struct InitDiagnostics {
     int dyn_window_builds = 0;
     int dyn_best_keyframes = 0;
     double dyn_best_metric_motion = 0.0;
+    // Roll/pitch sanity for a dynamic seed (#247): angle (deg) between the
+    // seed's world-up expressed in the body frame and the accelerometer's
+    // mean specific-force direction over the init window. Large ⇒ the
+    // VI-solved gravity DIRECTION is wrong (under-observable on a low-excitation
+    // window), injecting phantom horizontal gravity → divergence.
+    double dyn_tilt_vs_accel_deg = 0.0;
 };
 
 /// The MSCKF backend, generic over the covariance representation `Cov`
@@ -307,7 +313,14 @@ private:
     /// fire on a later excited window instead of preempting it at 2 s.
     static constexpr std::size_t kInitMaxSamplesDynamic = 4000;  ///< ~20 s @ 200 Hz
     static constexpr std::size_t kMinDynFrames = 5;              ///< camera frames before attempting dynamic init
-    static constexpr std::size_t kMaxDynFrames = 12;             ///< bounded init-window frame buffer
+    // Bounded init-window frame buffer. Wider spans more time, so even a slow
+    // moving start accumulates enough translational baseline for the two-view
+    // gravity/scale solve to be well-observable: a 12-frame (0.55 s @ 20 Hz)
+    // window on MH_05's ~0.1 m/s start gave only ~5 cm of motion and an
+    // under-observable gravity direction → divergence (#247). Bounded at 20 so
+    // the per-frame init retry (a two-view solve + one PnP per later frame)
+    // stays cheap if dynamic init keeps declining until the timeout.
+    static constexpr std::size_t kMaxDynFrames = 20;  ///< ~1 s @ 20 Hz
 
     static std::vector<Extrinsics> extrinsics_of(const std::vector<CameraCalibration>& cams) {
         std::vector<Extrinsics> e;
@@ -489,6 +502,24 @@ private:
             (g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1};
         init_diag_.gyro_bias = r.gyro_bias;
         init_diag_.accel_bias = DVec3{};
+        // Roll/pitch sanity: how far the seed's up disagrees with the mean
+        // accelerometer up over the init window (gravity-dominated). Large ⇒
+        // the VI-solved gravity direction is wrong → divergence (#247).
+        if (!init_accel_.empty()) {
+            namespace ld = math::lie::detail;
+            DVec3 am{};
+            for (const auto& a : init_accel_)
+                am = am + a;
+            const T amn = ld::norm(am);
+            const T ubn = ld::norm(init_diag_.up_body);
+            if (amn > T{0} && ubn > T{0}) {
+                const DVec3 au = am * (T{1} / amn);                  // accelerometer up (body)
+                const DVec3 su = init_diag_.up_body * (T{1} / ubn);  // seed up (body)
+                // angle(u,v) = atan2(|u×v|, u·v) — robust near 0 and π.
+                const T ang = ld::atan2_(ld::norm(ld::cross(au, su)), ld::dot(au, su));
+                init_diag_.dyn_tilt_vs_accel_deg = static_cast<double>(ang) * 180.0 / 3.14159265358979323846;
+            }
+        }
         init_diag_.dyn_scale = static_cast<double>(r.scale);
         init_diag_.dyn_seed_speed = static_cast<double>(math::lie::detail::norm(state_.v));
         init_diag_.dyn_keyframes = static_cast<int>(win.keyframes.size());

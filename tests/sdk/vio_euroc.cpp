@@ -32,11 +32,13 @@
 //   - MH_05_difficult : 1.5 m (strict) — measured ~0.79 m via the static path
 //     (MH_05 has an early quiet window); validates the estimator + extrinsics on
 //     a difficult sequence. A second case forces the dynamic path (epic #211):
-//     it fires but diverges (~42 km) on the same data — the real-data scale
-//     solve is bad, tracked in #247, so that case only guards finiteness.
-//   - V2_03_difficult : the most aggressive sequence; the MVP still diverges
-//     (~12 km) — tracked in #244, so its case only guards against a NaN/inf
-//     blow-up for now.
+//     after the #247 fixes it fires with a correct gravity direction and stays
+//     bounded (~19 m, down from ~48 km), but not yet within gate — residual
+//     roll/pitch on the low-excitation start; that case guards bounded-not-
+//     diverging until the refinement lands.
+//   - V2_03_difficult : 1.5 m (strict) — measured ~0.29 m. The #247 scale gate
+//     makes its degenerate early dynamic window decline, so static wins and it
+//     converges (was ~12 km; #244 closed).
 
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
@@ -240,9 +242,17 @@ void run_euroc_replay(
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
     WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
                << " m (gate " << ate_gate << " m)");
+    // Seed gyro bias (#247): a bad bias from the dynamic path's short, noisy
+    // vision-IMU window drifts attitude over the sequence → gravity leaks into
+    // accel → divergence. Compare the diverging dynamic seed against the
+    // converging static seed on the same sequence.
+    WARN(label << ": seed gyro_bias=(" << diag.gyro_bias[0] << ", " << diag.gyro_bias[1] << ", " << diag.gyro_bias[2]
+               << ") rad/s, |bg|=" << branes::math::lie::detail::norm(diag.gyro_bias)
+               << ", grav_residual=" << diag.gravity_residual);
     if (diag.method == bs::InitMethod::Dynamic)
         WARN(label << ": dyn-init scale=" << diag.dyn_scale << ", seed_speed=" << diag.dyn_seed_speed
-                   << " m/s, sfm_keyframes=" << diag.dyn_keyframes << ", grav_residual=" << diag.gravity_residual);
+                   << " m/s, sfm_keyframes=" << diag.dyn_keyframes
+                   << ", roll/pitch err vs accel=" << diag.dyn_tilt_vs_accel_deg << " deg");
     if (prefer_dynamic)
         // Attempt accounting (#247): localizes why dynamic init didn't fire.
         // window_builds=0 ⇒ two-view/PnP SfM is failing on real tracks;
@@ -255,12 +265,15 @@ void run_euroc_replay(
     if (expect_converged) {
         REQUIRE(ate < ate_gate);
     } else {
-        // V2_03_difficult (aggressive acrobatic motion + motion blur) does not
-        // yet converge with this MVP MSCKF — tracked in #244. Guard only against
-        // a NaN/inf blow-up here so a future estimator fix is caught if it
-        // regresses; the real ATE is surfaced in the WARN above. Tighten to
-        // `REQUIRE(ate < ate_gate)` once #244 lands.
+        // Forced-dynamic MH_05: the dynamic VI-init now fires with a correct
+        // gravity direction and stays BOUNDED (~19 m ATE), down from ~48 km
+        // before the gravity-sign fix (#247) — but not yet within the
+        // convergence gate (residual roll/pitch on a low-excitation start + late
+        // firing inflating ATE with pre-init frames). Guard that it neither
+        // blows up to NaN nor re-diverges to km scale; tighten to
+        // `REQUIRE(ate < ate_gate)` once the roll/pitch refinement lands.
         REQUIRE(std::isfinite(ate));
+        REQUIRE(ate < T{100});
     }
 }
 
@@ -276,12 +289,12 @@ TEST_CASE("MH_05_difficult replay (moving start) bootstraps and stays bounded", 
 
 // MH_05 has an early quiet window, so the default run takes the (more accurate)
 // static path. Forcing the dynamic path exercises epic #211's dynamic VI-init
-// on real data: it FIRES (asserted InitMethod::Dynamic) but does NOT yet
-// converge — the seed diverges to ~42 km on a sequence the static path lands at
-// ~0.79 m, so the metric-scale/velocity solve is bad on noisy real SfM. Tracked
-// in #247; for now we only assert the path fires + does not blow up to NaN.
-// Tighten back to expect_converged=true once #247 lands.
-TEST_CASE("MH_05_difficult forced dynamic VI-init fires (convergence tracked in #247)", "[vio][euroc][dataset]") {
+// on real data: it now fires with a correct gravity direction and stays bounded
+// (~19 m ATE, down from ~48 km before the gravity-sign fix in #247), but does
+// not yet reach the convergence gate — residual roll/pitch from the
+// low-excitation start plus late firing. Tighten to expect_converged=true once
+// that refinement lands.
+TEST_CASE("MH_05_difficult forced dynamic VI-init fires + stays bounded (#247)", "[vio][euroc][dataset]") {
     run_euroc_replay("CORTEX_EUROC_MH05",
                      "MH_05_difficult (dynamic)",
                      1.5,
@@ -289,9 +302,10 @@ TEST_CASE("MH_05_difficult forced dynamic VI-init fires (convergence tracked in 
                      /*prefer_dynamic=*/true);
 }
 
-// V2_03_difficult is the most aggressive EuRoC sequence; the MVP MSCKF still
-// diverges on it (ATE ~12 km) — tracked in #244. Until then we only assert it
-// bootstraps and runs to completion without a NaN/inf blow-up.
-TEST_CASE("V2_03_difficult replay (moving start) bootstraps without diverging to NaN", "[vio][euroc][dataset]") {
-    run_euroc_replay("CORTEX_EUROC_V203", "V2_03_difficult", 1.5, /*expect_converged=*/false);
+// V2_03_difficult is the most aggressive EuRoC sequence. The scale-observability
+// gate (#247) makes its degenerate early dynamic window decline, so the static
+// path wins and the sequence converges (~0.29 m) instead of the earlier ~12 km
+// divergence (#244, closed).
+TEST_CASE("V2_03_difficult replay (moving start) converges", "[vio][euroc][dataset]") {
+    run_euroc_replay("CORTEX_EUROC_V203", "V2_03_difficult", 1.5);
 }

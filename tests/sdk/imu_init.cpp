@@ -158,8 +158,8 @@ TEST_CASE("dynamic init recovers gravity, velocities, and gyro bias", "[sdk][imu
         kfs[i].dR_dbg = Mat3::identity();
         // ΔR carries a −bias twist so the GN step recovers bg_true.
         kfs[i].dR = (R[i - 1].inverse() * R[i]) * SO3::exp(bg_true * (-T{1}));
-        kfs[i].dv = Rit * (v[i] - v[i - 1] + g_world * dt);
-        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt + g_world * (T{0.5} * dt * dt));
+        kfs[i].dv = Rit * (v[i] - v[i - 1] - g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt - g_world * (T{0.5} * dt * dt));
     }
 
     bs::ImuInitializer<T> init;
@@ -210,8 +210,8 @@ TEST_CASE("dynamic init recovers metric scale from up-to-scale vision poses", "[
         kfs[i].dt = dt;
         kfs[i].dR_dbg = Mat3::identity();
         kfs[i].dR = R[i - 1].inverse() * R[i];  // no gyro bias here
-        kfs[i].dv = Rit * (v[i] - v[i - 1] + g_world * dt);
-        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt + g_world * (T{0.5} * dt * dt));
+        kfs[i].dv = Rit * (v[i] - v[i - 1] - g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt - g_world * (T{0.5} * dt * dt));
     }
 
     bs::ImuInitializer<T> init;
@@ -270,8 +270,8 @@ TEST_CASE("dynamic init recovers the gyro bias with a non-identity dR_dbg", "[sd
         // ΔR = (Rᵢᵀ Rⱼ)·Exp(−J·bg) ⇒ residual Log(ΔRᵀ Rᵢᵀ Rⱼ) = J·bg,
         // so the GN step solves (Σ JᵀJ) δ = (Σ JᵀJ) bg ⇒ δ = bg_true.
         kfs[i].dR = (R[i - 1].inverse() * R[i]) * SO3::exp(J * bg_true * (-T{1}));
-        kfs[i].dv = Rit * (v[i] - v[i - 1] + g_world * dt);
-        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt + g_world * (T{0.5} * dt * dt));
+        kfs[i].dv = Rit * (v[i] - v[i - 1] - g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt - g_world * (T{0.5} * dt * dt));
     }
 
     bs::ImuInitializer<T> init;
