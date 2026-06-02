@@ -93,10 +93,11 @@ TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[
     const auto r = init.try_dynamic(win.keyframes);
     REQUIRE(r.success);
 
-    // The metric scale of the window: frame-1's metric displacement (frame 0 is
-    // the origin), since the two-view bootstrap fixes a unit baseline there.
-    const T baseline = ld::norm(p[1]);
-    REQUIRE_THAT(r.scale, Catch::Matchers::WithinRel(baseline, 0.05));
+    // Metric scale check, independent of which frame pair the bootstrap chose
+    // for its unit baseline: scale · (vision displacement) = metric displacement.
+    // Frame 1's metric displacement from frame 0 (the origin) is |p[1]|.
+    const Vec3 vis1 = win.keyframes[1].p_world_imu - win.keyframes[0].p_world_imu;
+    REQUIRE_THAT(r.scale * ld::norm(vis1), Catch::Matchers::WithinRel(ld::norm(p[1]), 0.05));
 
     // Gravity recovered (world is gravity-aligned, so directly comparable).
     REQUIRE_THAT(ld::norm(r.gravity_world), Catch::Matchers::WithinAbs(9.81, 1e-2));
