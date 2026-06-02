@@ -22,6 +22,21 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.31.0](https://github.com/branes-ai/cortex/compare/v0.30.2...v0.31.0) (2026-06-02)
+
+
+### Features
+
+* **eval:** add NEES/NIS filter-consistency statistics ([9dc9a1b](https://github.com/branes-ai/cortex/commit/9dc9a1bd5ce278bd2a998951129fe3507466ec1d))
+* **eval:** NEES/NIS filter-consistency statistics ([#264](https://github.com/branes-ai/cortex/issues/264)) ([#271](https://github.com/branes-ai/cortex/issues/271)) ([9dc9a1b](https://github.com/branes-ai/cortex/commit/9dc9a1bd5ce278bd2a998951129fe3507466ec1d))
+* **sdk:** surface per-update NIS for filter-consistency monitoring ([149c127](https://github.com/branes-ai/cortex/commit/149c127c1d4254ea17d64abf684847466ddffde1))
+* **sdk:** surface per-update NIS for filter-consistency monitoring ([#264](https://github.com/branes-ai/cortex/issues/264)) ([#272](https://github.com/branes-ai/cortex/issues/272)) ([149c127](https://github.com/branes-ai/cortex/commit/149c127c1d4254ea17d64abf684847466ddffde1))
+
+
+### Documentation
+
+* **assessment:** VIO diagnostic methodology + instrumentation build list ([#269](https://github.com/branes-ai/cortex/issues/269)) ([b2bf23e](https://github.com/branes-ai/cortex/commit/b2bf23ea0cf4923750f61bda98fc39fbae97f1b3))
+
 ## [0.30.2](https://github.com/branes-ai/cortex/compare/v0.30.1...v0.30.2) (2026-06-02)
 
 
