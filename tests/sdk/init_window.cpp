@@ -76,10 +76,15 @@ TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[
         }
         // Metric IMU preintegration since the previous frame.
         if (f > 0) {
+            // Gravity-free specific-force preintegration, matching
+            // ImuPreintegrator/predict(): Δv = Rᵢᵀ(Δv_world − g Δt),
+            // Δp = Rᵢᵀ(Δp_world − vᵢ Δt − ½ g Δt²). (Earlier this used +g, which
+            // matched a sign bug in solve_alignment and hid the gravity
+            // inversion — #247.)
             const Mat3 Rit = R[f - 1].inverse().matrix();
             frames[f].dR = R[f - 1].inverse() * R[f];
-            frames[f].dv = Rit * (v[f] - v[f - 1] + g_world * dt);
-            frames[f].dp = Rit * (p[f] - p[f - 1] - v[f - 1] * dt + g_world * (0.5 * dt * dt));
+            frames[f].dv = Rit * (v[f] - v[f - 1] - g_world * dt);
+            frames[f].dp = Rit * (p[f] - p[f - 1] - v[f - 1] * dt - g_world * (0.5 * dt * dt));
             frames[f].dR_dbg = Mat3::identity();
             frames[f].dt = dt;
         }
