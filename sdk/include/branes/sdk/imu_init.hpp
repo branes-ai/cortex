@@ -93,6 +93,11 @@ struct ImuInitResult {
     /// multiplied by `scale`. Resolved by `try_dynamic`; 1 on the other paths,
     /// where poses are already metric.
     T scale = T{1};
+    /// Resolved metric motion across the window: `scale · max keyframe
+    /// displacement` in vision units. Set by `try_dynamic` whenever the linear
+    /// solve runs — even when the observability gate then declines — so callers
+    /// can see how close the window came to the `min_dynamic_motion` floor.
+    T resolved_motion = T{0};
 };
 
 /// One keyframe for dynamic initialization. The caller supplies the
@@ -226,7 +231,8 @@ public:
             if (d > vis_span)
                 vis_span = d;
         }
-        if (r.scale * vis_span < cfg_.min_dynamic_motion)
+        r.resolved_motion = r.scale * vis_span;  // recorded even when we decline below
+        if (r.resolved_motion < cfg_.min_dynamic_motion)
             return r;  // unobservable scale ⇒ decline (success stays false)
 
         // The alignment recovers gravity in the (arbitrary) vision world
