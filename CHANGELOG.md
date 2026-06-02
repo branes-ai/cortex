@@ -22,6 +22,19 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.32.0](https://github.com/branes-ai/cortex/compare/v0.31.0...v0.32.0) (2026-06-02)
+
+
+### Features
+
+* **eval:** add NEES-against-ground-truth consistency (closes [#264](https://github.com/branes-ai/cortex/issues/264)) ([#273](https://github.com/branes-ai/cortex/issues/273)) ([a93cc17](https://github.com/branes-ai/cortex/commit/a93cc178edf41630179abad8c2c8d7169dfa2359))
+
+
+### Documentation
+
+* **assessment:** a plain-language tutorial on NEES/NIS filter consistency ([98c1f58](https://github.com/branes-ai/cortex/commit/98c1f586b71d23bda384bf7ed30a4f4f6b216921))
+* **assessment:** plain-language NEES/NIS filter-consistency tutorial ([#274](https://github.com/branes-ai/cortex/issues/274)) ([98c1f58](https://github.com/branes-ai/cortex/commit/98c1f586b71d23bda384bf7ed30a4f4f6b216921))
+
 ## [0.31.0](https://github.com/branes-ai/cortex/compare/v0.30.2...v0.31.0) (2026-06-02)
 
 
