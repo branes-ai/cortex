@@ -61,35 +61,51 @@ TEST_CASE("nav_error recovers a known injected error (convention test)", "[sdk][
         REQUIRE_THAT(x, Catch::Matchers::WithinAbs(0.0, 1e-12));
 }
 
-TEST_CASE("gauge_align anchors the truth pose onto the estimate", "[sdk][eval][nav-consistency]") {
-    // Estimate and truth in different world frames.
-    const SE3 est_pose(SO3::exp(Vec3{{0.1, 0.2, 0.9}}), Vec3{{5.0, -1.0, 2.0}});
-    const SE3 truth_pose(SO3::exp(Vec3{{-0.3, 0.05, 0.4}}), Vec3{{-2.0, 3.0, 1.0}});
+TEST_CASE("gauge_align is yaw-only (4-DoF VIO gauge), preserving roll/pitch", "[sdk][eval][nav-consistency]") {
+    // The estimate attitude carries real roll/pitch (observable, must survive).
+    const SO3 R_e = SO3::exp(Vec3{{0.1, -0.2, 0.6}});
+    const Vec3 p_e{{5.0, -1.0, 2.0}};
 
-    const SE3 T_align = ev::gauge_align<T>(est_pose, truth_pose);
+    // (1) A pure gauge — position + yaw about gravity (+z) — is fully removed.
+    // Build truth = G⁻¹·est for a known gauge G = (Rz(α), t_g); the anchor must
+    // recover exactly G and reproduce the estimate pose.
+    const T alpha = 0.7;
+    const Vec3 t_g{{1.0, 2.0, -3.0}};
+    const SO3 Rz = SO3::exp(Vec3{{0.0, 0.0, alpha}});
+    const SO3 R_t = Rz.inverse() * R_e;
+    const Vec3 p_t = Rz.inverse() * (p_e - t_g);
+
+    const SE3 T_align = ev::gauge_align<T>(SE3(R_e, p_e), SE3(R_t, p_t));
+    const Vec3 a_rot = T_align.rotation().log();
+    REQUIRE_THAT(a_rot[0], Catch::Matchers::WithinAbs(0.0, 1e-12));  // no roll
+    REQUIRE_THAT(a_rot[1], Catch::Matchers::WithinAbs(0.0, 1e-12));  // no pitch
+    REQUIRE_THAT(a_rot[2], Catch::Matchers::WithinAbs(alpha, 1e-9));
 
     ev::NavSample<T> truth;
-    truth.R = truth_pose.rotation();
-    truth.p = truth_pose.translation();
+    truth.R = R_t;
+    truth.p = p_t;
     truth.v = Vec3{{0.3, -0.1, 0.2}};
     truth.bg = Vec3{{0.001, 0.0, -0.001}};
-    truth.ba = Vec3{{0.02, 0.01, 0.0}};
-
     const ev::NavSample<T> aligned = ev::align_truth<T>(T_align, truth);
-
-    // The aligned truth pose must equal the estimate pose at the anchor frame.
-    const Vec3 dtheta = (est_pose.rotation().inverse() * aligned.R).log();
+    const Vec3 dtheta = (R_e.inverse() * aligned.R).log();
     for (std::size_t k = 0; k < 3; ++k) {
-        REQUIRE_THAT(dtheta[k], Catch::Matchers::WithinAbs(0.0, 1e-12));
-        REQUIRE_THAT(aligned.p[k], Catch::Matchers::WithinAbs(est_pose.translation()[k], 1e-12));
+        REQUIRE_THAT(dtheta[k], Catch::Matchers::WithinAbs(0.0, 1e-9));
+        REQUIRE_THAT(aligned.p[k], Catch::Matchers::WithinAbs(p_e[k], 1e-9));
     }
     // Velocity rotates by R_align; biases (IMU-frame) are unchanged.
     const Vec3 v_expect = T_align.rotation() * truth.v;
     for (std::size_t k = 0; k < 3; ++k) {
         REQUIRE_THAT(aligned.v[k], Catch::Matchers::WithinAbs(v_expect[k], 1e-12));
         REQUIRE_THAT(aligned.bg[k], Catch::Matchers::WithinAbs(truth.bg[k], 1e-12));
-        REQUIRE_THAT(aligned.ba[k], Catch::Matchers::WithinAbs(truth.ba[k], 1e-12));
     }
+
+    // (2) For ARBITRARY inputs the alignment rotation is provably yaw-only
+    // (constructed as Rz), so an observable roll/pitch error can never be
+    // absorbed into the gauge — the whole point of posyaw alignment.
+    const SE3 T2 = ev::gauge_align<T>(SE3(R_e, p_e), SE3(SO3::exp(Vec3{{0.2, 0.3, -0.4}}), Vec3{{1, 1, 1}}));
+    const Vec3 a2 = T2.rotation().log();
+    REQUIRE_THAT(a2[0], Catch::Matchers::WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(a2[1], Catch::Matchers::WithinAbs(0.0, 1e-12));
 }
 
 TEST_CASE("nav_error feeds nees as a quadratic form", "[sdk][eval][nav-consistency]") {

@@ -17,8 +17,10 @@
 //   2. Gauge — a VIO solution is only fixed up to a global yaw + position
 //      (the 4 unobservable DoF). The estimate and truth live in different world
 //      frames, so the gauge must be anchored before differencing. `gauge_align`
-//      builds the rigid transform from one matched pose (typically the first
-//      evaluated frame); `align_truth` brings a truth sample into the estimate
+//      builds the yaw-only (position + yaw, the 4-DoF VIO gauge) transform from
+//      one matched pose (typically the first evaluated frame) — roll/pitch are
+//      observable and must NOT be absorbed; `align_truth` brings a truth sample
+//      into the estimate
 //      frame. NEES then measures covariance-vs-error consistency relative to
 //      that anchor — including whether the filter grows its yaw uncertainty
 //      correctly (yaw being unobservable, the error AND the covariance should
@@ -77,13 +79,22 @@ template <math::Scalar T>
     return e;
 }
 
-/// Rigid transform mapping the truth world into the estimate world, fixing the
-/// unobservable global yaw+position gauge at one matched pose pair:
-/// `T_align = T̂_world_imu · T_truth_world_imu⁻¹`. Applying it to the truth pose
-/// at that frame reproduces the estimate pose exactly (zero anchor error).
+/// Transform mapping the truth world into the estimate world, fixing the VIO
+/// gauge from one matched pose pair. The gauge is **4-DoF** — global position
+/// plus **yaw about gravity** — because roll and pitch are *observable* (the
+/// accelerometer measures the gravity direction). So the rotation is yaw-only
+/// (about world up, +z); a full-SE3 anchor would wrongly absorb the observable
+/// roll/pitch error and report an optimistically small NEES (Zhang &
+/// Scaramuzza, "A Tutorial on Quantitative Trajectory Evaluation for VIO",
+/// IROS 2018 — the `posyaw` alignment). Applying the result to the truth pose
+/// reproduces the estimate's position and yaw at that frame, while leaving any
+/// roll/pitch error in the NEES.
 template <math::Scalar T>
 [[nodiscard]] math::lie::SE3<T> gauge_align(const math::lie::SE3<T>& est_pose, const math::lie::SE3<T>& truth_pose) {
-    return est_pose * truth_pose.inverse();
+    const auto R_rel = (est_pose.rotation() * truth_pose.rotation().inverse()).matrix();
+    const T yaw = math::lie::detail::atan2_(R_rel(1, 0), R_rel(0, 0));  // yaw of R_rel about +z
+    const math::lie::SO3<T> R_align = math::lie::SO3<T>::exp(Vec3<T>{{T{0}, T{0}, yaw}});
+    return math::lie::SE3<T>(R_align, est_pose.translation() - R_align * truth_pose.translation());
 }
 
 /// Bring a truth nav sample into the estimate frame via `T_align`: rotation and

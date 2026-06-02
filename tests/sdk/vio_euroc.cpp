@@ -241,6 +241,7 @@ void run_euroc_replay(
     // half of the consistency instrument, complementing the always-on NIS.
     const auto gt_states = bs::euroc::parse_groundtruth_states<T>(std::string(env));
     ev::ConsistencyAccumulator nees_acc;
+    std::size_t nees_skipped = 0;  // frames whose core covariance was not PD
     bool have_anchor = false;
     SE3 anchor;
     std::size_t gi = 0;
@@ -262,7 +263,7 @@ void run_euroc_replay(
         try {
             nees_acc.add(ev::nees<T>(err, ev::core_covariance<T>(st.covariance())), ev::kNavErrorDim);
         } catch (const std::exception&) {
-            // non-positive-definite core covariance (should not happen) — skip
+            ++nees_skipped;  // non-PD core covariance — a filter-health signal, surfaced below
         }
     };
     const auto traj = bs::euroc::replay(std::string(env), est, cfg, on_frame);
@@ -309,8 +310,9 @@ void run_euroc_replay(
         const auto neesr = nees_acc.report();
         WARN(label << ": NEES over " << neesr.samples << " frames: normalized=" << neesr.normalized << " (band ["
                    << neesr.lower << ", " << neesr.upper << "]) — "
-                   << (neesr.consistent() ? "consistent"
-                                          : (neesr.overconfident ? "OVER-confident" : "UNDER-confident")));
+                   << (neesr.consistent() ? "consistent" : (neesr.overconfident ? "OVER-confident" : "UNDER-confident"))
+                   << (nees_skipped > 0 ? " [" + std::to_string(nees_skipped) + " frames skipped: core cov not PD]"
+                                        : ""));
     }
     // Seed gyro bias (#247): a bad bias from the dynamic path's short, noisy
     // vision-IMU window drifts attitude over the sequence → gravity leaks into
