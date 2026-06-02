@@ -30,19 +30,19 @@ directory. The synthetic trajectory-metric and CSV-parser tests in the same file
 
 ```text
    EuRoC mav0/                      sdk/euroc/asl_replay.hpp
-   ┌───────────────────┐           ┌──────────────────────────────────────┐
-   │ imu0/data.csv     │──parse──▶ │ replay(dataset_root, est, cfg):       │
-   │ cam0/data.csv     │──parse──▶ │   for each image frame:               │
-   │ cam0/data/*.png   │──load───▶ │     feed_imu(samples ≤ frame.t)       │
-   │ state_ground-     │           │     feed_image(t, grayscale PNG)      │
-   │  truth_estimate0/ │──parse──▶ │     traj.push_back(current_pose())    │
-   └───────────────────┘  (T_world_body GT)                                │
-                                   └───────────────┬──────────────────────┘
-                                                   │ estimated trajectory
-                                                   ▼
-                          sdk/eval/trajectory_metrics.hpp
-                          associate(est, gt, 0.01 s)  →  ATE / RPE
-                          (Horn rigid SE3 alignment, no scale)
+   ┌───────────────────┐                    ┌──────────────────────────────────────┐
+   │ imu0/data.csv     │------ parse -----> │ replay(dataset_root, est, cfg):      │
+   │ cam0/data.csv     │------ parse -----> │   for each image frame:              │
+   │ cam0/data/*.png   │------ load  -----> │     feed_imu(samples ≤ frame.t)      │
+   │ state_ground-     │                    │     feed_image(t, grayscale PNG)     │
+   │  truth_estimate0/ │------ parse -----> │     traj.push_back(current_pose())   │
+   └───────────────────┘  (T_world_body GT) |                                      │
+                                            └───────────────┬──────────────────────┘
+                                                            │ estimated trajectory
+                                                            ▼
+                                              sdk/eval/trajectory_metrics.hpp
+                                           associate(est, gt, 0.01 s)  →  ATE / RPE
+                                              (Horn rigid SE3 alignment, no scale)
 ```
 
 - **`replay()`** (`asl_replay.hpp`) is the driver. For each camera frame it feeds
@@ -95,7 +95,7 @@ gauge.
 ```text
  feed_image(t, gray)                         sdk/vio_estimator.hpp
    │
-   ├─ track_frame:  FAST detect ⊕ pyramidal KLT track  ──▶ FrontendObservation{ id, cam, u, v }
+   ├─ track_frame:  FAST detect ⊕ pyramidal KLT track  ----> FrontendObservation{ id, cam, u, v }
    │                (re-detect when tracked < 150; suppress within 15 px)
    │
    └─ backend_.process_camera(t, observations)          sdk/msckf_backend.hpp
@@ -105,12 +105,60 @@ gauge.
         └─ marginalize oldest clone to keep window ≤ max_clones (11)
 ```
 
-- **Front end** (`branes::cv`): FAST corners + pyramidal KLT, producing a stable
-  feature id per track and pixel coordinates. It never sees the backend's
-  representation choice (triangulate / anchor / null-space).
+- **Front end** (`branes::cv`): FAST corner detection + **pyramidal KLT** tracking
+  (described below), producing a stable feature id per track and its pixel
+  coordinates. It never sees the backend's representation choice (triangulate /
+  anchor / null-space).
 - **Backend** (`MsckfBackend<T>`): IMU propagation + a sliding window of cloned
   poses + the null-space (left-null-space of the feature Jacobian) camera update.
   `current_pose()` returns `T_world_imu`.
+
+### What "pyramidal KLT" means
+
+**KLT** is the Kanade–Lucas–Tomasi feature tracker. To follow a corner from one
+frame to the next it takes the small image patch around the point in the
+*previous* frame (the *template*) and finds the translation `(dx, dy)` that best
+aligns it with the *current* frame — i.e. it minimizes the sum-of-squared
+intensity differences over the patch. That objective is solved by Gauss–Newton:
+each step uses the patch's spatial image gradients, whose outer product summed
+over the window is the 2×2 *structure tensor* `H` (the same matrix whose
+eigenvalues define a "good corner" — Shi–Tomasi). Tracking is just repeatedly
+solving `H · δ = −(gradient · residual)` for a sub-pixel step `δ` and warping by
+it until it converges.
+
+That linearization is only valid when the true motion is **sub-pixel** — so on
+its own it fails for the multi-pixel displacements a 20 Hz camera sees under
+fast motion. **"Pyramidal"** fixes that with a coarse-to-fine strategy over a
+Gaussian image pyramid (`cv/pyramid.hpp`): repeatedly anti-alias-blur and
+halve the image into a stack of levels (default 3 levels, octave/×2 scale). The
+tracker estimates the displacement at the **coarsest** level first — where a
+large real motion is only a pixel or two — then propagates that estimate down,
+refining at each finer level. This is what lets it lock onto features across the
+large inter-frame jumps EuRoC's aggressive sequences produce.
+
+Implementation specifics (`cv/klt.hpp`, clean-room from Baker & Matthews,
+*"Lucas-Kanade 20 Years On"*, and Bouguet's pyramidal LK):
+- **Inverse-compositional** formulation: the template patch, its gradient, and
+  `H` are computed **once** on the previous image and reused across all
+  iterations (the warp is composed onto the *template* side), which removes the
+  per-iteration Hessian recomputation of the naive forward solver.
+- **Bilinear sub-pixel sampling** of each level for fractional warps.
+- **Conditioning gate**: a point is dropped (`TrackStatus::Lost`) when the
+  minimum eigenvalue of `H` falls below `min_eigenvalue` (1e-3) — i.e. the patch
+  is too low-texture / one-dimensional (the aperture problem) to localize
+  reliably; points that leave the image are `OutOfBounds`.
+- **Bounds**: an 11×11 window (`window_half = 5`), ≤ 30 iterations per level,
+  converged when `|δ| < 0.01` px.
+
+Per frame, `VioEstimator::track_frame` builds the new image's pyramid, tracks the
+previous frame's surviving points coarse-to-fine, and emits one
+`FrontendObservation` per survivor. When the live track count drops below
+`target_features` (150), FAST re-detects to top up, suppressing new detections
+within `min_feature_distance` (15 px) of existing tracks so coverage stays
+spread out. Track quality matters downstream: a drifting or prematurely-lost
+track corrupts the SfM init geometry (the two-view/PnP bootstrap, §5) and the
+MSCKF updates — the kind of real-data degradation the failure-mode notes call
+out.
 
 ---
 
@@ -219,7 +267,8 @@ easy static-start case.
 |---|---|
 | `tests/sdk/vio_euroc.cpp` | the benchmark + gates (this doc's subject) |
 | `sdk/include/branes/sdk/euroc/asl_replay.hpp` | dataset parsing + replay driver |
-| `sdk/include/branes/sdk/vio_estimator.hpp` | lifecycle + front end (FAST/KLT) |
+| `sdk/include/branes/sdk/vio_estimator.hpp` | lifecycle + front end driver (FAST/KLT) |
+| `cv/include/branes/cv/{klt,pyramid,fast}.hpp` | pyramidal KLT tracker, Gaussian pyramid, FAST corners |
 | `sdk/include/branes/sdk/msckf_backend.hpp` | MSCKF backend + init decision (§5) |
 | `sdk/include/branes/sdk/imu_init.hpp` | static / gravity / dynamic alignment + scale gate |
 | `sdk/include/branes/sdk/sfm/{two_view,pnp,init_window}.hpp` | clean-room SfM for dynamic init |
