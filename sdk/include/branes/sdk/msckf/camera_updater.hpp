@@ -64,6 +64,19 @@ struct FeatureTrack {
     std::vector<CameraObservation<T>> observations;
 };
 
+/// Per-update innovation telemetry: the Normalized Innovation Squared
+/// `value = νᵀ S⁻¹ ν` and its degrees of freedom `dof` (the projected residual
+/// dimension). `valid` is false when the innovation covariance was
+/// ill-conditioned (no usable NIS). Kept here in `msckf` (a plain struct, no
+/// `eval` dependency) so the backend can bridge it into a consistency
+/// accumulator without a layering cycle. See issue #264.
+template <math::Scalar T>
+struct NisSample {
+    T value = T{0};
+    std::size_t dof = 0;
+    bool valid = false;
+};
+
 template <math::Scalar T>
 struct CameraUpdaterOptions {
     T normalized_sigma = T{1} / T{100};  ///< measurement σ in normalized image coords
@@ -102,7 +115,7 @@ public:
     /// updated. Tracks that are too short, triangulate behind a camera, or
     /// fail the Mahalanobis gate are skipped (the filter is unchanged).
     template <class Cov>
-    bool update(State<T, Cov>& s, const FeatureTrack<T>& track) const {
+    bool update(State<T, Cov>& s, const FeatureTrack<T>& track, NisSample<T>* nis_out = nullptr) const {
         const auto& obs = track.observations;
         const std::size_t m = obs.size();
         if (m < 2)
@@ -154,8 +167,18 @@ public:
         const T r2 = opts_.normalized_sigma * opts_.normalized_sigma;
         std::vector<T> R_diag(proj.rows, r2);
 
-        if (opts_.enable_gating && !passes_gate(s, H, proj.r, r2))
-            return false;
+        // Innovation NIS (γ = rᵀ S⁻¹ r, dof = proj.rows), computed once (only
+        // when needed) and used for both the optional consistency telemetry and
+        // the Mahalanobis gate.
+        T gamma = T{0};
+        bool nis_valid = false;
+        if (nis_out != nullptr || opts_.enable_gating) {
+            nis_valid = s.cov.mahalanobis(H, std::span<const T>{proj.r}, r2, gamma);
+            if (nis_out != nullptr)
+                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid};
+        }
+        if (opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(proj.rows)))
+            return false;  // ill-conditioned innovation or gated out
 
         StateHelper<T>::ekf_update(s, H, std::span<const T>{proj.r}, std::span<const T>{R_diag});
         return true;
@@ -282,19 +305,6 @@ private:
             p_f = p_f + Vec3{{dx(0, 0), dx(1, 0), dx(2, 0)}};
         }
         return true;
-    }
-
-    // Mahalanobis gate: γ = rᵀ (H P Hᵀ + R)⁻¹ r, accepted when
-    // γ ≤ chi2_per_dof · rows. The covariance policy computes γ in whichever
-    // representation it carries (and reports an ill-conditioned innovation,
-    // which is rejected).
-    template <class Cov>
-    bool passes_gate(const State<T, Cov>& s, const DynMat<T>& H, const std::vector<T>& r, T r2) const {
-        const std::size_t k = H.rows;
-        T gamma = T{0};
-        if (!s.cov.mahalanobis(H, std::span<const T>{r}, r2, gamma))
-            return false;  // ill-conditioned innovation ⇒ reject
-        return gamma <= opts_.chi2_per_dof * static_cast<T>(k);
     }
 
     std::vector<Extrinsics> cameras_;

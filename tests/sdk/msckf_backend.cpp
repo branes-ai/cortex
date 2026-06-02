@@ -173,6 +173,14 @@ TEST_CASE("the backend runs end-to-end and stays stable under motion", "[sdk][ms
     const double p1x = backend.current_state().T_world_imu.translation()[0];
     REQUIRE(p1x > p0x + 0.05);
     REQUIRE(std::isfinite(backend.current_state().velocity_world[0]));
+
+    // The per-update NIS telemetry (#264) accumulated over the run's camera
+    // updates and reports without throwing. (The consistency *value* is not
+    // asserted here: the synthetic observations are projected through the
+    // current pose, so residuals — and NIS — are ~0 by construction; a
+    // meaningful consistency number needs the noisy real-data EuRoC run.)
+    REQUIRE(backend.nis_consistency().samples() > 0);
+    REQUIRE_NOTHROW(backend.nis_consistency().report());
 }
 
 TEST_CASE("the backend rejects an empty calibration and out-of-range cameras", "[sdk][msckf][backend]") {

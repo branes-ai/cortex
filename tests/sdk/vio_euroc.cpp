@@ -251,6 +251,16 @@ void run_euroc_replay(
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
     WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
                << " m (gate " << ate_gate << " m)");
+    // Filter-consistency telemetry (#264): the run's NIS (innovation
+    // consistency). normalized ≈ 1 is consistent; > 1 over-confident (covariance
+    // too small / wrong Jacobian / biased residual — a #212 lead); < 1
+    // under-confident. The always-on, ground-truth-free instrument.
+    if (est.backend().nis_consistency().samples() > 0) {
+        const auto nis = est.backend().nis_consistency().report();
+        WARN(label << ": NIS over " << nis.samples << " updates: normalized=" << nis.normalized << " (band ["
+                   << nis.lower << ", " << nis.upper << "]) — "
+                   << (nis.consistent() ? "consistent" : (nis.overconfident ? "OVER-confident" : "UNDER-confident")));
+    }
     // Seed gyro bias (#247): a bad bias from the dynamic path's short, noisy
     // vision-IMU window drifts attitude over the sequence → gravity leaks into
     // accel → divergence. Compare the diverging dynamic seed against the

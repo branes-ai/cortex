@@ -29,6 +29,7 @@
 #define BRANES_SDK_MSCKF_BACKEND_HPP
 
 #include <branes/math/cameras/pinhole_radtan.hpp>
+#include <branes/sdk/eval/consistency.hpp>
 #include <branes/sdk/imu_init.hpp>
 #include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
@@ -176,6 +177,7 @@ public:
         init_have_imu_t_ = false;
         init_last_imu_t_ = 0.0;
         tracks_.clear();
+        nis_ = eval::ConsistencyAccumulator{};
     }
 
     void process_imu(const ImuMeasurement<T>& imu) override {
@@ -285,6 +287,16 @@ public:
     /// the attitude seed is wrong and the filter will diverge.
     [[nodiscard]] const InitDiagnostics<T>& init_diagnostics() const noexcept {
         return init_diag_;
+    }
+
+    /// Filter-consistency telemetry: every camera update's NIS (νᵀS⁻¹ν) is
+    /// accumulated here. `nis_consistency().report()` gives the chi-square
+    /// run-consistency verdict — a normalized average persistently > 1 means the
+    /// filter is over-confident (covariance too small / a wrong Jacobian / a
+    /// biased residual); < 1 means under-confident. The always-on, ground-truth-
+    /// free half of the consistency instrument (#264).
+    [[nodiscard]] const eval::ConsistencyAccumulator& nis_consistency() const noexcept {
+        return nis_;
     }
 
     /// Read-only view of the full filter state (covariance, clone window,
@@ -560,8 +572,12 @@ private:
             if (ci != kNoClone)
                 track.observations.push_back({ci, rec.camera_id, rec.xy});
         }
-        if (track.observations.size() >= 2)
-            updater_.update(state_, track);
+        if (track.observations.size() >= 2) {
+            msckf::NisSample<T> ns;
+            updater_.update(state_, track, &ns);
+            if (ns.valid)  // record the innovation NIS even if it was gated out
+                nis_.add(static_cast<double>(ns.value), static_cast<int>(ns.dof));
+        }
         tracks_.erase(it);
     }
 
@@ -598,6 +614,7 @@ private:
 
     std::vector<CameraCalibration> cameras_;
     msckf::CameraUpdater<T> updater_;
+    eval::ConsistencyAccumulator nis_{};  // per-update NIS, accumulated over the run
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};
