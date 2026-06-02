@@ -38,7 +38,10 @@ TEST_CASE("Allan deviation is ~zero for a constant series", "[sdk][eval][allan]"
     REQUIRE_THROWS_AS(ev::white_noise_density<T>(x, -1.0), std::invalid_argument);
 }
 
-TEST_CASE("white noise has the σ_A = N/√τ (−1/2 slope) signature", "[sdk][eval][allan]") {
+// NOTE: keep TEST_CASE names ASCII-only — Unicode in a case name survives Linux
+// ctest but the MSVC console codepage mangles it (σ→s, √τ→vt), so ctest's
+// name filter matches nothing and the test reports as failed.
+TEST_CASE("white noise has the N/sqrt(tau) (minus-half slope) signature", "[sdk][eval][allan]") {
     const T sigma_w = 0.01;  // per-sample standard deviation
     const T dt = 0.005;      // 200 Hz, EuRoC-like
     std::mt19937 gen(20240602u);
