@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.30.2](https://github.com/branes-ai/cortex/compare/v0.30.1...v0.30.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **test:** make the vio_latency budget informational on CI ([#240](https://github.com/branes-ai/cortex/issues/240)) ([#259](https://github.com/branes-ai/cortex/issues/259)) ([9edb5ed](https://github.com/branes-ai/cortex/commit/9edb5edf179afb8c294a1c981ffe9484a54c7a79))
+
 ## [0.30.1](https://github.com/branes-ai/cortex/compare/v0.30.0...v0.30.1) (2026-06-02)
 
 
