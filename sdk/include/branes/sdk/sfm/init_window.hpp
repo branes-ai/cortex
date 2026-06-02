@@ -121,15 +121,36 @@ template <math::Scalar T>
         if (f.ids.size() != f.obs.size())
             return out;
 
-    // 1) Two-view bootstrap on frames 0–1 fixes the points (cam-0 frame, up to
-    //    scale). cam0 is the world origin; cam1's world pose is the inverse of
-    //    the recovered cam0→cam1 transform.
+    // 1) Two-view bootstrap fixes the points (cam-0 frame, up to scale). cam0 is
+    //    the world origin; the second view's world pose is the inverse of the
+    //    recovered cam0→cam_b transform. Pick the WIDEST baseline that yields a
+    //    usable solution rather than the adjacent frame: at camera rates (e.g.
+    //    20 Hz) consecutive frames have near-zero parallax, a degenerate
+    //    essential matrix, and the up-to-scale geometry — hence the whole
+    //    window's scale gauge — collapses (#247). Walk from the widest pair
+    //    (0, n−1) inward to the first frame with enough parallax/inliers.
     std::vector<Vec2<T>> x0, x1;
     std::vector<std::uint64_t> ids01;
-    detail::shared<T>(frames[0], frames[1], x0, x1, ids01);
-    const auto tv = estimate_relative_pose<T>(x0, x1);
-    if (!tv.success)
-        return out;
+    TwoViewResult<T> tv;
+    std::size_t b = 0;  // chosen second bootstrap view (0 = none found)
+    for (std::size_t f = n - 1; f >= 1; --f) {
+        std::vector<Vec2<T>> a0, a1;
+        std::vector<std::uint64_t> ids;
+        detail::shared<T>(frames[0], frames[f], a0, a1, ids);
+        if (ids.size() < 8)
+            continue;  // too few correspondences for the 8-point estimate
+        auto cand = estimate_relative_pose<T>(a0, a1);
+        if (cand.success) {
+            tv = std::move(cand);
+            x0 = std::move(a0);
+            x1 = std::move(a1);
+            ids01 = std::move(ids);
+            b = f;
+            break;
+        }
+    }
+    if (b == 0)
+        return out;  // no baseline in the window had enough parallax/inliers
 
     // World landmarks (cam-0 frame), keyed by track id.
     std::vector<std::uint64_t> land_ids;
@@ -141,18 +162,24 @@ template <math::Scalar T>
     if (land_pts.size() < 6)
         return out;  // PnP needs ≥ 6 landmarks for the later frames
 
-    // Camera→world poses (world = cam0). cam0 = identity.
+    // Camera→world poses (world = cam0). cam0 = identity; the bootstrap view b
+    // from the two-view solve; every other frame by PnP below.
     std::vector<SO3> R_w_cam(n);
     std::vector<Vec3<T>> p_w_cam(n);
+    std::vector<bool> placed(n, false);
     R_w_cam[0] = SO3{};
     p_w_cam[0] = Vec3<T>{};
-    // cam1: X_c1 = R_1_0 X_c0 + t ⇒ world←cam1 = (R_1_0ᵀ, −R_1_0ᵀ t).
+    placed[0] = true;
+    // cam_b: X_cb = R_b_0 X_c0 + t ⇒ world←cam_b = (R_b_0ᵀ, −R_b_0ᵀ t).
     const Mat3<T> R10t = math::lie::detail::transpose(tv.R_1_0);
-    R_w_cam[1] = so3_from_matrix<T>(R10t);
-    p_w_cam[1] = R10t * tv.t_1_0_unit * (-T{1});
+    R_w_cam[b] = so3_from_matrix<T>(R10t);
+    p_w_cam[b] = R10t * tv.t_1_0_unit * (-T{1});
+    placed[b] = true;
 
-    // 2) PnP each later frame against the world landmarks it observes.
-    for (std::size_t f = 2; f < n; ++f) {
+    // 2) PnP every remaining frame against the world landmarks it observes.
+    for (std::size_t f = 1; f < n; ++f) {
+        if (placed[f])
+            continue;
         std::vector<Vec3<T>> P;
         std::vector<Vec2<T>> obs;
         for (std::size_t i = 0; i < frames[f].ids.size(); ++i)
