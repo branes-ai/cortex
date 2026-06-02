@@ -28,7 +28,7 @@ directory. The synthetic trajectory-metric and CSV-parser tests in the same file
 
 ## 2. Data flow
 
-```
+```text
    EuRoC mav0/                      sdk/euroc/asl_replay.hpp
    ┌───────────────────┐           ┌──────────────────────────────────────┐
    │ imu0/data.csv     │──parse──▶ │ replay(dataset_root, est, cfg):       │
@@ -68,7 +68,7 @@ Three frames, and the calibration that relates them:
 — `R_imu_cam` rotates camera axes into the IMU frame, `p_imu_cam` is the camera
 origin expressed in the IMU frame. A point transforms camera → world as:
 
-```
+```text
 p_world = T_world_imu · ( R_imu_cam · p_cam + p_imu_cam )
 ```
 
@@ -92,7 +92,7 @@ gauge.
 
 ## 4. The estimator pipeline (per `feed_image`)
 
-```
+```text
  feed_image(t, gray)                         sdk/vio_estimator.hpp
    │
    ├─ track_frame:  FAST detect ⊕ pyramidal KLT track  ──▶ FrontendObservation{ id, cam, u, v }
@@ -119,7 +119,7 @@ gauge.
 Until the filter has a valid attitude/velocity, every camera/IMU sample feeds
 init. `InitMethod` (surfaced in `InitDiagnostics`, WARN'd by the benchmark):
 
-```
+```text
  process_imu / process_camera while uninitialized
    │
    ├─ STATIC  : a stationary window (≤ kInitSamples) passes the std/gravity gates
