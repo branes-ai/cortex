@@ -41,6 +41,7 @@
 //     converges (was ~12 km; #244 closed).
 
 #include <branes/sdk/euroc/asl_replay.hpp>
+#include <branes/sdk/eval/nav_consistency.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
 #include <branes/sdk/sfm/init_window.hpp>  // so3_from_matrix (extrinsics rotation)
 #include <branes/sdk/vio_estimator.hpp>
@@ -53,6 +54,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -155,8 +157,9 @@ TEST_CASE("ASL CSV parsers read the EuRoC layout", "[vio][euroc]") {
     }
     {
         std::ofstream f(root / "state_groundtruth_estimate0" / "data.csv");
-        f << "#timestamp,p_x,p_y,p_z,q_w,q_x,q_y,q_z\n";
-        f << "1000000000,1.0,2.0,3.0,1.0,0.0,0.0,0.0\n";
+        f << "#timestamp,p_x,p_y,p_z,q_w,q_x,q_y,q_z,v_x,v_y,v_z,b_w_x,b_w_y,b_w_z,b_a_x,b_a_y,b_a_z\n";
+        // full 17-column ASL row: p, q(wxyz), v, b_w, b_a
+        f << "1000000000,1.0,2.0,3.0,1.0,0.0,0.0,0.0,0.5,-0.6,0.7,0.01,0.02,0.03,0.1,0.2,0.3\n";
     }
 
     const std::string r = root.string();
@@ -173,6 +176,15 @@ TEST_CASE("ASL CSV parsers read the EuRoC layout", "[vio][euroc]") {
     const auto gt = bs::euroc::parse_groundtruth<T>(r);
     REQUIRE(gt.size() == 1);
     REQUIRE_THAT(gt[0].pose.translation()[0], Catch::Matchers::WithinAbs(1.0, 1e-9));
+
+    // Full nav-state GT parse (#264): velocity + gyro/accel bias columns.
+    const auto gts = bs::euroc::parse_groundtruth_states<T>(r);
+    REQUIRE(gts.size() == 1);
+    REQUIRE_THAT(gts[0].nav.p[1], Catch::Matchers::WithinAbs(2.0, 1e-9));
+    REQUIRE_THAT(gts[0].nav.v[0], Catch::Matchers::WithinAbs(0.5, 1e-9));
+    REQUIRE_THAT(gts[0].nav.v[2], Catch::Matchers::WithinAbs(0.7, 1e-9));
+    REQUIRE_THAT(gts[0].nav.bg[1], Catch::Matchers::WithinAbs(0.02, 1e-9));
+    REQUIRE_THAT(gts[0].nav.ba[2], Catch::Matchers::WithinAbs(0.3, 1e-9));
 
     fs::remove_all(root);
 }
@@ -221,7 +233,45 @@ void run_euroc_replay(
     // sequence with an early quiet window — exercises the epic #211 dynamic
     // path on real data.
     cfg.prefer_dynamic_init = prefer_dynamic;
-    const auto traj = bs::euroc::replay(std::string(env), est, cfg);
+
+    // NEES consistency vs ground truth (#264): per frame, sample the live nav
+    // state + core covariance, anchor the unobservable yaw+position gauge at the
+    // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests
+    // whether the covariance tracks the *actual* error (normalized ≈ 1
+    // consistent; > 1 over-confident; < 1 under-confident) — the ground-truth
+    // half of the consistency instrument, complementing the always-on NIS.
+    const auto gt_states = bs::euroc::parse_groundtruth_states<T>(std::string(env));
+    ev::ConsistencyAccumulator nees_acc;
+    std::size_t nees_skipped = 0;  // frames whose core covariance was not PD
+    bool have_anchor = false;
+    SE3 anchor;
+    std::size_t gi = 0;
+    const auto on_frame = [&](double t, const Estimator& e) {
+        if (!e.backend().initialized() || gt_states.empty())
+            return;
+        while (gi + 1 < gt_states.size() && std::abs(gt_states[gi + 1].t_s - t) <= std::abs(gt_states[gi].t_s - t))
+            ++gi;
+        if (std::abs(gt_states[gi].t_s - t) > 0.01)
+            return;  // no ground-truth state within 10 ms of this frame
+        const auto& st = e.backend().state();
+        const ev::NavSample<T> est_nav{st.R, st.p, st.v, st.bg, st.ba};
+        if (!have_anchor) {
+            anchor = ev::gauge_align<T>(SE3(st.R, st.p), SE3(gt_states[gi].nav.R, gt_states[gi].nav.p));
+            have_anchor = true;
+        }
+        const auto truth = ev::align_truth<T>(anchor, gt_states[gi].nav);
+        const auto err = ev::nav_error<T>(est_nav, truth);
+        try {
+            nees_acc.add(ev::nees<T>(err, ev::core_covariance<T>(st.covariance())), ev::kNavErrorDim);
+        } catch (const std::domain_error&) {
+            // ONLY the expected non-positive-definite core covariance — a
+            // filter-health signal, surfaced below. A shape mismatch
+            // (invalid_argument) or any other failure is a real bug and
+            // propagates rather than being silently counted as a skip.
+            ++nees_skipped;
+        }
+    };
+    const auto traj = bs::euroc::replay(std::string(env), est, cfg, on_frame);
     REQUIRE(traj.size() > 100);
 
     // Init must resolve a real attitude (static, dynamic VI alignment, or
@@ -260,6 +310,14 @@ void run_euroc_replay(
         WARN(label << ": NIS over " << nis.samples << " updates: normalized=" << nis.normalized << " (band ["
                    << nis.lower << ", " << nis.upper << "]) — "
                    << (nis.consistent() ? "consistent" : (nis.overconfident ? "OVER-confident" : "UNDER-confident")));
+    }
+    if (nees_acc.samples() > 0) {
+        const auto neesr = nees_acc.report();
+        WARN(label << ": NEES over " << neesr.samples << " frames: normalized=" << neesr.normalized << " (band ["
+                   << neesr.lower << ", " << neesr.upper << "]) — "
+                   << (neesr.consistent() ? "consistent" : (neesr.overconfident ? "OVER-confident" : "UNDER-confident"))
+                   << (nees_skipped > 0 ? " [" + std::to_string(nees_skipped) + " frames skipped: core cov not PD]"
+                                        : ""));
     }
     // Seed gyro bias (#247): a bad bias from the dynamic path's short, noisy
     // vision-IMU window drifts attitude over the sequence → gravity leaks into
