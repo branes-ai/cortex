@@ -22,6 +22,40 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.30.0](https://github.com/branes-ai/cortex/compare/v0.29.0...v0.30.0) (2026-06-02)
+
+
+### Features
+
+* **sdk:** force-dynamic VI-init validation on MH_05 (real-data [#211](https://github.com/branes-ai/cortex/issues/211)) ([#246](https://github.com/branes-ai/cortex/issues/246)) ([f80fa63](https://github.com/branes-ai/cortex/commit/f80fa638b3846cf0210c716b5f289bb3b7dd1adb))
+
+
+### Bug Fixes
+
+* **sdk:** bootstrap dynamic-init SfM on the widest baseline ([445f1bb](https://github.com/branes-ai/cortex/commit/445f1bbe79a945d3c71d85bc4c4e654528f52da3))
+* **sdk:** bootstrap dynamic-init SfM on the widest baseline ([#247](https://github.com/branes-ai/cortex/issues/247)) ([#251](https://github.com/branes-ai/cortex/issues/251)) ([445f1bb](https://github.com/branes-ai/cortex/commit/445f1bbe79a945d3c71d85bc4c4e654528f52da3))
+* **sdk:** correct dynamic-init gravity sign — real-data divergence → bounded ([#247](https://github.com/branes-ai/cortex/issues/247)) ([#252](https://github.com/branes-ai/cortex/issues/252)) ([84cc8ba](https://github.com/branes-ai/cortex/commit/84cc8ba458d3dcccd5e96a367559e1676375e53d))
+* **sdk:** correct dynamic-init gravity sign + widest-parallax bootstrap ([84cc8ba](https://github.com/branes-ai/cortex/commit/84cc8ba458d3dcccd5e96a367559e1676375e53d))
+* **test:** split euroc-moving-start local decls (set -u unbound var) ([#243](https://github.com/branes-ai/cortex/issues/243)) ([4737ebf](https://github.com/branes-ai/cortex/commit/4737ebff64a471bbcc6613002d4cb94f2435735e))
+
+
+### Documentation
+
+* **test:** explain pyramidal KLT + add the numerical failure-mode taxonomy ([49f77d2](https://github.com/branes-ai/cortex/commit/49f77d230dede5b19c35886e31af9cc39e51ffc5))
+* **test:** pyramidal KLT explainer + EuRoC numerical failure-mode taxonomy ([#255](https://github.com/branes-ai/cortex/issues/255)) ([49f77d2](https://github.com/branes-ai/cortex/commit/49f77d230dede5b19c35886e31af9cc39e51ffc5))
+* **test:** vio_euroc goal & architecture ([#249](https://github.com/branes-ai/cortex/issues/249)) ([b0b75d2](https://github.com/branes-ai/cortex/commit/b0b75d2a584fa4cf99002c4fc7d44b78f010017a))
+
+
+### Tests
+
+* **sdk:** dataset-gated MH_05/V2_03 moving-start dynamic-init validation ([#241](https://github.com/branes-ai/cortex/issues/241)) ([b5a0df3](https://github.com/branes-ai/cortex/commit/b5a0df3d4831e3d28cfc4718132c0f778faba09b))
+* **sdk:** dynamic-init diagnostics to localize the real-data divergence ([#247](https://github.com/branes-ai/cortex/issues/247)) ([#248](https://github.com/branes-ai/cortex/issues/248)) ([48be50e](https://github.com/branes-ai/cortex/commit/48be50e27d0a5c38d48402382446fa0f9d1570a2))
+* **sdk:** instrument dynamic-init attempts ([#247](https://github.com/branes-ai/cortex/issues/247) localization) ([#250](https://github.com/branes-ai/cortex/issues/250)) ([972015d](https://github.com/branes-ai/cortex/commit/972015d0544e8f5b86c99ad0c1f609918bb20ac4))
+* **sdk:** instrument dynamic-init attempts to localize why it won't fire ([972015d](https://github.com/branes-ai/cortex/commit/972015d0544e8f5b86c99ad0c1f609918bb20ac4))
+* **sdk:** real EuRoC extrinsics — MH_05 moving-start ATE validated (~0.79 m) ([#245](https://github.com/branes-ai/cortex/issues/245)) ([7f35ebb](https://github.com/branes-ai/cortex/commit/7f35ebbe219b9972ae16475e535e9c8028c83fd6))
+* **sdk:** score EuRoC ATE from initialization onward ([#253](https://github.com/branes-ai/cortex/issues/253)) ([8304d67](https://github.com/branes-ai/cortex/commit/8304d67105f605a4a137f602a94e3f80ad64986b))
+* **sdk:** score EuRoC ATE only from initialization onward ([8304d67](https://github.com/branes-ai/cortex/commit/8304d67105f605a4a137f602a94e3f80ad64986b))
+
 ## [0.29.0](https://github.com/branes-ai/cortex/compare/v0.28.0...v0.29.0) (2026-06-01)
 
 
