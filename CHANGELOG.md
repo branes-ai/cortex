@@ -32,6 +32,8 @@ generates entries automatically from Conventional Commits on `main`.
 
 ### Bug Fixes
 
+* **docs:** re-anchor EuRoC gate extraction (unbreak Deploy Documentation) ([#256](https://github.com/branes-ai/cortex/issues/256)) ([f99c4e1](https://github.com/branes-ai/cortex/commit/f99c4e12d0d604e4ef5f93f1f0c5e65a56f7d198))
+* **docs:** re-anchor the EuRoC gate extraction to the run_euroc_replay call ([f99c4e1](https://github.com/branes-ai/cortex/commit/f99c4e12d0d604e4ef5f93f1f0c5e65a56f7d198))
 * **sdk:** bootstrap dynamic-init SfM on the widest baseline ([df517c4](https://github.com/branes-ai/cortex/commit/df517c4a9bec74659f72ec880aeb72105be329aa))
 * **sdk:** bootstrap dynamic-init SfM on the widest baseline ([#247](https://github.com/branes-ai/cortex/issues/247)) ([#251](https://github.com/branes-ai/cortex/issues/251)) ([df517c4](https://github.com/branes-ai/cortex/commit/df517c4a9bec74659f72ec880aeb72105be329aa))
 * **sdk:** correct dynamic-init gravity sign — real-data divergence → bounded ([#247](https://github.com/branes-ai/cortex/issues/247)) ([#252](https://github.com/branes-ai/cortex/issues/252)) ([1876ba0](https://github.com/branes-ai/cortex/commit/1876ba064efce0f0cfef26f0e7cd6ef384053b54))
