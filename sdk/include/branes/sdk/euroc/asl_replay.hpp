@@ -17,6 +17,7 @@
 
 #include <branes/cv/image.hpp>
 #include <branes/cv/image_io.hpp>
+#include <branes/sdk/eval/nav_consistency.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
 #include <branes/sdk/vio_backend.hpp>
 
@@ -147,12 +148,65 @@ template <math::Scalar T>
     return out;
 }
 
+/// One ground-truth nav state (full state, not just the pose) — the columns the
+/// pose-only `parse_groundtruth` ignores (velocity, gyro bias, accel bias) are
+/// needed for NEES consistency evaluation.
+template <math::Scalar T>
+struct GroundTruthState {
+    double t_s = 0.0;
+    eval::NavSample<T> nav{};  ///< R, p, v, bg, ba (body in the GT world frame)
+};
+
+/// Parse `state_groundtruth_estimate0/data.csv` → full nav states. The ASL row
+/// is `ts, p(3), q_wxyz(4), v(3), b_w(3), b_a(3)`; rows without the bias/velocity
+/// columns are skipped. Ascending by timestamp.
+template <math::Scalar T>
+[[nodiscard]] std::vector<GroundTruthState<T>> parse_groundtruth_states(const std::string& dataset_root) {
+    using Vec3 = math::lie::detail::Vec<T, 3>;
+    auto v3 = [](const std::vector<std::string>& f, std::size_t i) {
+        return Vec3{{static_cast<T>(detail::parse_finite(f[i])),
+                     static_cast<T>(detail::parse_finite(f[i + 1])),
+                     static_cast<T>(detail::parse_finite(f[i + 2]))}};
+    };
+    std::vector<GroundTruthState<T>> out;
+    for (const auto& ln : detail::data_lines(dataset_root + "/state_groundtruth_estimate0/data.csv")) {
+        const auto f = detail::split_csv(ln);
+        if (f.size() < 17)
+            continue;  // needs p, q, v, b_w, b_a
+        const double qw = detail::parse_finite(f[4]), qx = detail::parse_finite(f[5]);
+        const double qy = detail::parse_finite(f[6]), qz = detail::parse_finite(f[7]);
+        if (!(qw * qw + qx * qx + qy * qy + qz * qz > 0.0))
+            throw std::runtime_error("asl_replay: zero-norm ground-truth quaternion");
+        const typename math::lie::SO3<T>::Quaternion q{
+            {static_cast<T>(qw), static_cast<T>(qx), static_cast<T>(qy), static_cast<T>(qz)}};
+        GroundTruthState<T> g;
+        g.t_s = detail::ns_to_s(f[0]);
+        g.nav.R = math::lie::SO3<T>(q);
+        g.nav.p = v3(f, 1);
+        g.nav.v = v3(f, 8);
+        g.nav.bg = v3(f, 11);
+        g.nav.ba = v3(f, 14);
+        out.push_back(g);
+    }
+    std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.t_s < b.t_s; });
+    return out;
+}
+
 /// Drive `est` through the sequence and return its estimated trajectory.
-/// The estimator is configured and activated here. Images are loaded as
-/// grayscale PNGs on demand.
-template <class Estimator>
+/// `on_frame(t_s, est)` is invoked after each processed image (default no-op) —
+/// the hook the NEES consistency evaluation uses to sample the live state +
+/// covariance per frame. The estimator is configured and activated here; images
+/// are loaded as grayscale PNGs on demand.
+namespace detail {
+struct NoOpOnFrame {
+    template <class E>
+    void operator()(double, const E&) const {}
+};
+}  // namespace detail
+
+template <class Estimator, class OnFrame = detail::NoOpOnFrame>
 [[nodiscard]] std::vector<eval::StampedPose<typename Estimator::Scalar>>
-replay(const std::string& dataset_root, Estimator& est, const VioConfig& config) {
+replay(const std::string& dataset_root, Estimator& est, const VioConfig& config, OnFrame on_frame = {}) {
     using T = typename Estimator::Scalar;
     const auto imu = parse_imu<T>(dataset_root);
     const auto images = parse_images(dataset_root);
@@ -186,6 +240,8 @@ replay(const std::string& dataset_root, Estimator& est, const VioConfig& config)
         sp.t_s = frame.t_s;
         sp.pose = est.current_pose();
         traj.push_back(sp);
+
+        on_frame(frame.t_s, est);
     }
     return traj;
 }
