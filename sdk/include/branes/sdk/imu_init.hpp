@@ -434,27 +434,31 @@ private:
             const T dt = kfs[i].dt;
             const Vec3 dp_world = kfs[i].p_world_imu - kfs[i - 1].p_world_imu;
 
-            // Position: vᵢ Δt − ½ g Δt² − s (pⱼ − pᵢ) = −Rᵢ Δp.
+            // Position: vᵢ Δt + ½ g Δt² − s (pⱼ − pᵢ) = −Rᵢ Δp. The
+            // ImuPreintegrator Δp is gravity-free (matches predict()), so
+            // Rᵢ Δp = s·dp − vᵢ Δt − ½ g Δt² — note the +½g (not −½g): a sign
+            // mismatch here inverts the recovered gravity (#247).
             diag(vi, dt);
             col(s0, dp_world * (-T{1}));
             if (constrained) {
-                col(g0, w1 * (-T{0.5} * dt * dt));
-                col(g0 + 1, w2 * (-T{0.5} * dt * dt));
-                flush(R_i * kfs[i].dp * (-T{1}) + base * (T{0.5} * dt * dt));
+                col(g0, w1 * (T{0.5} * dt * dt));
+                col(g0 + 1, w2 * (T{0.5} * dt * dt));
+                flush(R_i * kfs[i].dp * (-T{1}) - base * (T{0.5} * dt * dt));
             } else {
-                diag(g0, -T{0.5} * dt * dt);
+                diag(g0, T{0.5} * dt * dt);
                 flush(R_i * kfs[i].dp * (-T{1}));
             }
 
-            // Velocity: vⱼ − vᵢ + g Δt = Rᵢ Δv (scale-free).
+            // Velocity: vⱼ − vᵢ − g Δt = Rᵢ Δv (scale-free). Gravity-free Δv ⇒
+            // Rᵢ Δv = vⱼ − vᵢ − g Δt (predict() convention).
             diag(vj, T{1});
             diag(vi, -T{1});
             if (constrained) {
-                col(g0, w1 * dt);
-                col(g0 + 1, w2 * dt);
-                flush(R_i * kfs[i].dv - base * dt);
+                col(g0, w1 * (-dt));
+                col(g0 + 1, w2 * (-dt));
+                flush(R_i * kfs[i].dv + base * dt);
             } else {
-                diag(g0, dt);
+                diag(g0, -dt);
                 flush(R_i * kfs[i].dv);
             }
         }

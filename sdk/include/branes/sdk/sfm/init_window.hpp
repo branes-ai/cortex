@@ -123,34 +123,40 @@ template <math::Scalar T>
 
     // 1) Two-view bootstrap fixes the points (cam-0 frame, up to scale). cam0 is
     //    the world origin; the second view's world pose is the inverse of the
-    //    recovered cam0→cam_b transform. Pick the WIDEST baseline that yields a
-    //    usable solution rather than the adjacent frame: at camera rates (e.g.
-    //    20 Hz) consecutive frames have near-zero parallax, a degenerate
-    //    essential matrix, and the up-to-scale geometry — hence the whole
-    //    window's scale gauge — collapses (#247). Walk from the widest pair
-    //    (0, n−1) inward to the first frame with enough parallax/inliers.
+    //    recovered cam0→cam_b transform. Pick the bootstrap view by the LARGEST
+    //    parallax with frame 0 rather than the adjacent frame: at camera rates
+    //    (e.g. 20 Hz) consecutive frames have near-zero parallax, a degenerate
+    //    essential matrix, and the up-to-scale geometry — hence the window's
+    //    scale gauge — collapses (#247). Select by a cheap mean-disparity scan,
+    //    then run the essential-matrix RANSAC ONCE on the best pair (running it
+    //    on every candidate is far too slow for a per-frame init retry).
     std::vector<Vec2<T>> x0, x1;
     std::vector<std::uint64_t> ids01;
-    TwoViewResult<T> tv;
     std::size_t b = 0;  // chosen second bootstrap view (0 = none found)
-    for (std::size_t f = n - 1; f >= 1; --f) {
+    T best_par = T{0};
+    for (std::size_t f = 1; f < n; ++f) {
         std::vector<Vec2<T>> a0, a1;
         std::vector<std::uint64_t> ids;
         detail::shared<T>(frames[0], frames[f], a0, a1, ids);
         if (ids.size() < 8)
             continue;  // too few correspondences for the 8-point estimate
-        auto cand = estimate_relative_pose<T>(a0, a1);
-        if (cand.success) {
-            tv = std::move(cand);
+        T par = T{0};
+        for (std::size_t k = 0; k < a0.size(); ++k)
+            par += math::lie::detail::norm(a0[k] - a1[k]);
+        par /= static_cast<T>(a0.size());  // mean feature disparity
+        if (par > best_par) {
+            best_par = par;
+            b = f;
             x0 = std::move(a0);
             x1 = std::move(a1);
             ids01 = std::move(ids);
-            b = f;
-            break;
         }
     }
     if (b == 0)
-        return out;  // no baseline in the window had enough parallax/inliers
+        return out;  // no frame shares enough features with frame 0
+    const auto tv = estimate_relative_pose<T>(x0, x1);
+    if (!tv.success)
+        return out;
 
     // World landmarks (cam-0 frame), keyed by track id.
     std::vector<std::uint64_t> land_ids;
