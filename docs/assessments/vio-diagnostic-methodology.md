@@ -74,7 +74,7 @@ the component boundary**.
 | Failure class | Diagnostic | Would have caught |
 |---|---|---|
 | **F1** frame / extrinsics | **Kalibr** for true `T_BS`; one-line assert loaded `T_BS` ≠ identity = `sensor.yaml`; Jacobian shows a negated/rotated block | identity-extrinsics 21 km — *before a frame runs* |
-| **F2** unobservable / rank | **excitation detector** (windowed accel-−g / gyro std); **observability-Gramian nullspace** — VIO ideal nullity is exactly **4** (3 pos + 1 yaw); threshold the singular-value gap (Hesch/Huang OC-VINS) | excitation-limited 19 m drift; the enabler of scale collapse |
+| **F2** unobservable / rank | **excitation detector** (windowed std of specific-force and gyro rate); **observability-Gramian nullspace** — VIO ideal nullity is exactly **4** (3 pos + 1 yaw); threshold the singular-value gap (Hesch/Huang OC-VINS) | excitation-limited 19 m drift; the enabler of scale collapse |
 | **F4** ill-conditioning | **cond-number / σ_min monitor** on the init/two-view Hessian (MTL5 exposes it; ~5 lines via SVD); the smallest singular vector names the bad DoF | scale collapse to 1e-8 — at the near-singular solve, not via divergence |
 | **F3/F4** degenerate two-view | **parallax gate** (median > ~1° / 20 px) + **E singular-value ratio** + **cheirality** (standard in ORB-SLAM / VINS-Mono) | low-parallax adjacent-frame bootstrap — a ~10-line precondition |
 | **F5** sign / convention | **analytic-vs-numerical Jacobian check** (Ceres `GradientChecker` analog); **static-IMU invariant** (accel mean = −g in body); **preintegration known-answer test** | the 178° gravity inversion — **at unit-test level, no dataset** |
