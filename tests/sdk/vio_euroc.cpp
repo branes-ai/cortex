@@ -243,6 +243,14 @@ void run_euroc_replay(
     if (diag.method == bs::InitMethod::Dynamic)
         WARN(label << ": dyn-init scale=" << diag.dyn_scale << ", seed_speed=" << diag.dyn_seed_speed
                    << " m/s, sfm_keyframes=" << diag.dyn_keyframes << ", grav_residual=" << diag.gravity_residual);
+    if (prefer_dynamic)
+        // Attempt accounting (#247): localizes why dynamic init didn't fire.
+        // window_builds=0 ⇒ two-view/PnP SfM is failing on real tracks;
+        // builds>0 but best_motion < ~0.05 m ⇒ vision trajectory inconsistent
+        // with the IMU (scale collapses).
+        WARN(label << ": dyn-attempts=" << diag.dyn_attempts << ", window_builds=" << diag.dyn_window_builds
+                   << ", best_keyframes=" << diag.dyn_best_keyframes
+                   << ", best_metric_motion=" << diag.dyn_best_metric_motion << " m");
     INFO(label << " ATE = " << ate << " m (gate " << ate_gate << " m)");
     if (expect_converged) {
         REQUIRE(ate < ate_gate);

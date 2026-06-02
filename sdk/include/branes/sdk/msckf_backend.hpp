@@ -90,6 +90,18 @@ struct InitDiagnostics {
     double dyn_scale = 0.0;
     double dyn_seed_speed = 0.0;
     int dyn_keyframes = 0;
+    // Dynamic-init attempt accounting, accumulated across every try while
+    // uninitialized — populated even when dynamic never fires, to localize why
+    // (#247). dyn_attempts: tries past kMinDynFrames; dyn_window_builds: how
+    // many produced a valid SfM window (else the two-view/PnP bootstrap is
+    // failing on real tracks); dyn_best_keyframes / dyn_best_metric_motion: the
+    // best window size and resolved metric motion (scale · displacement) seen —
+    // if builds succeed but the motion stays below min_dynamic_motion, the
+    // vision trajectory is inconsistent with the IMU (scale collapses).
+    int dyn_attempts = 0;
+    int dyn_window_builds = 0;
+    int dyn_best_keyframes = 0;
+    double dyn_best_metric_motion = 0.0;
 };
 
 /// The MSCKF backend, generic over the covariance representation `Cov`
@@ -436,11 +448,19 @@ private:
     void try_dynamic_init(double t) {
         if (init_frames_.size() < kMinDynFrames)
             return;
+        ++init_diag_.dyn_attempts;
         const auto win =
             sfm::build_init_window<T>(std::span<const sfm::InitFrame<T>>{init_frames_}, cameras_[0].extrinsics);
         if (!win.success)
-            return;
+            return;  // two-view/PnP bootstrap failed on these tracks
+        ++init_diag_.dyn_window_builds;
+        if (static_cast<int>(win.keyframes.size()) > init_diag_.dyn_best_keyframes)
+            init_diag_.dyn_best_keyframes = static_cast<int>(win.keyframes.size());
         const auto r = initializer_.try_dynamic(win.keyframes);
+        // Record the resolved metric motion even on decline, so a run shows how
+        // close the best window came to the observability floor (#247).
+        if (static_cast<double>(r.resolved_motion) > init_diag_.dyn_best_metric_motion)
+            init_diag_.dyn_best_metric_motion = static_cast<double>(r.resolved_motion);
         if (!r.success)
             return;
         apply_dynamic_init(r, win, t);
