@@ -62,10 +62,18 @@ function latencyBudget(spec) {
 const latencyDouble = inRange(latencyBudget('double'), 0, 10000, 'double latency budget (ms)');
 const latencyFloat = inRange(latencyBudget('float'), 0, 10000, 'float latency budget (ms)');
 
-// EuRoC ATE gate: anchor on the REQUIRE assertion, not the INFO log line.
+// EuRoC V1_01_easy ATE gate: the per-sequence gate is now the third argument to
+// the run_euroc_replay(env, label, gate, …) helper (the REQUIRE inside uses the
+// `ate_gate` parameter, not a literal), so anchor on the V1_01 call site.
 const eurocTest = stripCppComments(read('tests/sdk/vio_euroc.cpp'));
 const ateGate = inRange(
-  Number(extract(eurocTest, /REQUIRE\(\s*ate\s*<\s*([0-9.]+)\s*\)/, 'EuRoC V1_01_easy ATE gate (REQUIRE(ate < …))')),
+  Number(
+    extract(
+      eurocTest,
+      /run_euroc_replay\(\s*"CORTEX_EUROC_V101"\s*,\s*"V1_01_easy"\s*,\s*([0-9.]+)/,
+      'EuRoC V1_01_easy ATE gate (run_euroc_replay("CORTEX_EUROC_V101", "V1_01_easy", …))',
+    ),
+  ),
   0,
   100,
   'EuRoC ATE gate (m)',
