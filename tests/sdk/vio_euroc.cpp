@@ -236,8 +236,17 @@ void run_euroc_replay(
     // dynamic init is confirmed to fire AND converge on this sequence.
     (void)prefer_dynamic;
 
+    // Score only post-initialization poses. Before init fires the backend
+    // returns a placeholder origin pose, not an estimate; including those — ~50
+    // frames for an early static init, but ~170 for a late dynamic init —
+    // directly inflates ATE and biases the rigid alignment toward the origin.
+    // A VIO trajectory is meaningful from initialization onward.
+    std::vector<ev::StampedPose<T>> post;
+    for (const auto& sp : traj)
+        if (sp.t_s >= diag.t_s)
+            post.push_back(sp);
     const auto gt = bs::euroc::parse_groundtruth<T>(std::string(env));
-    const auto matched = ev::associate(traj, gt, 0.01);
+    const auto matched = ev::associate(post, gt, 0.01);
     REQUIRE(matched.estimated.size() > 100);
     const T ate = ev::ate_rmse(matched.estimated, matched.reference);
     WARN(label << ": init=" << bs::to_string(diag.method) << ", frames=" << traj.size() << ", ATE=" << ate
