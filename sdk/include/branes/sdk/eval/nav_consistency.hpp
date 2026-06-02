@@ -91,8 +91,15 @@ template <math::Scalar T>
 /// roll/pitch error in the NEES.
 template <math::Scalar T>
 [[nodiscard]] math::lie::SE3<T> gauge_align(const math::lie::SE3<T>& est_pose, const math::lie::SE3<T>& truth_pose) {
-    const auto R_rel = (est_pose.rotation() * truth_pose.rotation().inverse()).matrix();
-    const T yaw = math::lie::detail::atan2_(R_rel(1, 0), R_rel(0, 0));  // yaw of R_rel about +z
+    // Extract each pose's yaw about +z independently and difference them. Taking
+    // the yaw of the relative rotation R_est·R_truth⁻¹ instead would mix in the
+    // observable roll/pitch error (its terms are contaminated when the attitude
+    // error is non-zero); the per-pose yaw difference isolates the gauge.
+    auto yaw_of = [](const math::lie::SO3<T>& R) {
+        const auto M = R.matrix();
+        return math::lie::detail::atan2_(M(1, 0), M(0, 0));
+    };
+    const T yaw = yaw_of(est_pose.rotation()) - yaw_of(truth_pose.rotation());
     const math::lie::SO3<T> R_align = math::lie::SO3<T>::exp(Vec3<T>{{T{0}, T{0}, yaw}});
     return math::lie::SE3<T>(R_align, est_pose.translation() - R_align * truth_pose.translation());
 }

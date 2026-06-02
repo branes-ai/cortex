@@ -54,6 +54,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -262,8 +263,12 @@ void run_euroc_replay(
         const auto err = ev::nav_error<T>(est_nav, truth);
         try {
             nees_acc.add(ev::nees<T>(err, ev::core_covariance<T>(st.covariance())), ev::kNavErrorDim);
-        } catch (const std::exception&) {
-            ++nees_skipped;  // non-PD core covariance — a filter-health signal, surfaced below
+        } catch (const std::domain_error&) {
+            // ONLY the expected non-positive-definite core covariance — a
+            // filter-health signal, surfaced below. A shape mismatch
+            // (invalid_argument) or any other failure is a real bug and
+            // propagates rather than being silently counted as a skip.
+            ++nees_skipped;
         }
     };
     const auto traj = bs::euroc::replay(std::string(env), est, cfg, on_frame);
