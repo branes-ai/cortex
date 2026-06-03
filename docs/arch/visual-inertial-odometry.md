@@ -194,3 +194,119 @@ The practical upshot for tuning: treat accel bias as your least-trustworthy stat
 
 That closes the loop from the raw measurement model through preintegration to the estimator. The natural next step, if you want it, is how this 15-D state and its factor plug into the sliding-window graph — what gets marginalized, and how the marginalization prior interacts with the FEJ requirement to keep the whole thing consistent.
 
+## Sliding-window graph
+
+Now you're at the part where the architecture actually has to commit. The 15-D state and its factor are just two of several node and factor types living in one graph, and the interesting engineering is in how you keep that graph from growing without quietly poisoning it.
+
+## What's in the graph
+
+The **nodes** (optimization variables) are:
+
+The per-keyframe **15-D navigation state** $\mathbf{x}_k = [\mathbf{R}_k, \mathbf{p}_k, \mathbf{v}_k, \mathbf{b}_{g,k}, \mathbf{b}_{a,k}]$ — pose (6) + velocity (3) + the two biases (6). In GTSAM this is a `NavState` (pose+velocity, 9-D) plus an `imuBias::ConstantBias` (6-D). The window holds a fixed number of these, typically ~10 keyframes in VINS-Mono.
+
+The **landmarks** — usually inverse-depth parameterized and anchored to the keyframe that first observed them (one scalar per feature plus the host frame), which is numerically better-conditioned than raw XYZ for the far-away, low-parallax points that dominate VIO. Optionally the **camera–IMU extrinsic** $\mathbf{T}_{bc}$ and the **time offset** $t_d$ are nodes too if you estimate them online.
+
+The **factors** (edges) are:
+
+The **15-D preintegration factor** between consecutive keyframes — the `CombinedImuFactor` carrying everything from the last two turns, constraining relative pose, velocity, *and* the bias change with its accumulated $\boldsymbol{\Sigma}_{ij}$. The **reprojection factors** — each landmark observation in a keyframe is a 2-D residual touching that pose (and the extrinsic, and the landmark / its host frame). And the **marginalization prior** — a single dense linear-Gaussian factor summarizing every state and measurement that has already left the window. Optionally a gauge-anchoring prior on the first state and, in full SLAM, loop-closure factors (usually offloaded to a separate pose graph). Each new keyframe triggers a nonlinear least-squares solve (Gauss-Newton / LM) over the whole window.
+
+## Bounding the window: Schur-complement marginalization
+
+You can't just delete the oldest keyframe when a new one arrives — it carries IMU and visual constraints, and dropping them loses real information. You **marginalize** it: integrate it out of the joint Gaussian. Linearize the window to the normal equations $\mathbf{H}\,\delta\mathbf{x} = \mathbf{b}$ (with $\mathbf{H} = \mathbf{J}^\top\boldsymbol{\Sigma}^{-1}\mathbf{J}$), partition variables into those to marginalize ($m$) and those to keep ($r$), and take the Schur complement on the $m$ block:
+
+$$\mathbf{H}_p = \mathbf{H}_{rr} - \mathbf{H}_{rm}\mathbf{H}_{mm}^{-1}\mathbf{H}_{mr}, \qquad \mathbf{b}_p = \mathbf{b}_r - \mathbf{H}_{rm}\mathbf{H}_{mm}^{-1}\mathbf{b}_m$$
+
+$(\mathbf{H}_p, \mathbf{b}_p)$ *is* the marginalization prior — a Gaussian factor over the surviving variables that were connected to the removed one (its Markov blanket). The defining property, and the cost, is **fill-in**: variables that were only indirectly related through the marginalized node become directly, densely coupled afterward.
+
+![marginization fillin](sliding_window_marginalization_fillin.svg)
+
+The little squares are factors, the circles variables; the coral factor is what's left after the oldest keyframe is gone. (The inner state glyphs didn't render cleanly — read them off the "KF" labels underneath.) Note that the prior now couples `KF k−1` and `l₁` directly, on top of their existing reprojection factor. Marginalizing landmarks is the main source of fill-in, which is why some lightweight systems *drop* old landmarks instead of marginalizing them — trading information for a sparser, cheaper prior. That's a real design knob, not a detail.
+
+## Two-way marginalization
+
+VINS-Mono's policy is worth copying because it respects the asymmetry between the two sensors. When the second-newest frame is a keyframe, it marginalizes the **oldest** keyframe and the landmarks anchored to it — sliding the window forward while preserving parallax. When the second-newest frame is *not* a keyframe (low parallax, redundant view), it throws away that frame's **visual** measurements but keeps its IMU by re-propagating the preintegration across it, so the inertial chain stays unbroken. The principle: you can afford to discard a redundant image, but you must never silently drop an IMU segment, because that's metric scale and gravity information you can't recover from vision.
+
+## Where it goes wrong: the prior is frozen, everything else relinearizes
+
+Here is the subtle failure, and the reason FEJ exists. The marginalization prior $(\mathbf{H}_p, \mathbf{b}_p)$ is a *quadratic* — it was linearized once, at the state estimate that existed at the moment of marginalization. But the variables it touches are still live in the window, and every subsequent solve **relinearizes** the IMU and reprojection factors on those same variables at the latest, improved estimate. So one factor on $\mathbf{x}_{k-1}$ encodes Jacobians from an old linearization point and its neighbors encode Jacobians from a new one.
+
+That mismatch is not benign. The system's four unobservable directions (global position, and yaw about gravity) correspond to the shared nullspace of the measurement Jacobians. When different factors on a shared variable linearize at different points, their individual nullspaces no longer align, so the *intersection* shrinks and the stacked system appears to have fewer unobservable DoF than it truly has. The estimator gains information along a gauge direction that should carry none, becomes overconfident, and drifts — and the covariance reports tighter bounds than the error actually satisfies. This is the classic VIO inconsistency, and it's invisible without checking NEES/consistency against ground truth.
+
+**First-Estimate Jacobians** is the fix: for any variable that has entered the marginalization prior, freeze its linearization point, and require *every* factor touching it — the prior and the new live factors alike — to evaluate its **Jacobian** at that fixed first estimate. The *residual* is still evaluated at the current estimate, so you keep the correction; only the Jacobian, which sets the information geometry, is held. Concretely the prior residual is carried as
+
+$$\mathbf{r}_p(\mathbf{x}_r) = \mathbf{r}_p^0 + \mathbf{J}_p\,(\mathbf{x}_r \boxminus \bar{\mathbf{x}}_r^{0})$$
+
+with $\mathbf{J}_p$ frozen at the first estimate $\bar{\mathbf{x}}_r^0$ and updated only through how far $\mathbf{x}_r$ has moved from it. This realigns all the nullspaces, preserves the true 4-D unobservable subspace, and stops the spurious information gain. VINS-Mono's `MarginalizationFactor` (in Ceres) and OKVIS both implement exactly this. The honest cost: linearizing at an older, slightly worse point introduces some linearization error — but inconsistency hurts far more than that small penalty, so the trade is almost always worth it.
+
+## The architectural choice you're implicitly making
+
+Marginalization-plus-FEJ is one answer to "keep the problem bounded." It's worth knowing the alternatives, because the right one depends on your platform:
+
+The **observability-constrained** family (OC-EKF / OC-VINS, Hesch et al.) enforces the correct nullspace directly by projecting Jacobians or updates onto the observable subspace, rather than relying on frozen linearization points. More principled, a bit more machinery.
+
+**Incremental full smoothing** (GTSAM's iSAM2) sidesteps marginalization inconsistency entirely by *not marginalizing* — it keeps the whole graph and relinearizes fluidly only where the estimate has moved enough to matter. Because the VIO graph is sparse, this stays near-constant-time in practice, though worst-case it grows, so it's the choice when you can tolerate occasional latency spikes for better accuracy. By contrast, GTSAM's `IncrementalFixedLagSmoother` marginalizes to hold a strict bound and inherits the same FEJ concerns as the hand-rolled approach.
+
+And there's the **gauge** question underneath all of it: those 4 unobservable DoF mean the Hessian is singular along the gauge directions. You either anchor the gauge (fix or strongly prior the first pose) or run a free gauge and accept the rank deficiency — and whichever you choose, the marginalization prior must *not* constrain the gauge directions, which is another thing FEJ is quietly protecting.
+
+So in practice: VINS-Mono / OKVIS give you the explicit Ceres path — preintegration factor, reprojection factors, hand-built marginalization with FEJ — and total control at the price of writing the marginalization yourself. GTSAM gives you `CombinedImuFactor` and a fixed-lag smoother out of the box, faster to stand up, but you need to be deliberate about linearization-point handling to get the same consistency the bespoke path gives you. For a compute-constrained target the bounded sliding window wins; if you can spare cycles, incremental smoothing usually edges it out on accuracy.
+
+If you want to keep going, the next layer down is the actual linear-algebra solve inside each iteration — the sparse structure of $\mathbf{H}$, why you Schur-complement the landmarks out first (the same operation, used for *speed* rather than for marginalization), and how that interacts with the marginalization you're also doing.
+
+## Solve the graph
+
+You're now at the level where "solve the graph" stops being a black box and becomes a specific exploitation of structure. Each Gauss-Newton (or LM) iteration linearizes every factor and forms the normal equations
+
+$$\mathbf{H}\,\delta\mathbf{x} = -\mathbf{b}, \qquad \mathbf{H} = \mathbf{J}^\top\boldsymbol{\Sigma}^{-1}\mathbf{J}, \quad \mathbf{b} = \mathbf{J}^\top\boldsymbol{\Sigma}^{-1}\mathbf{r}$$
+
+where $\delta\mathbf{x}$ is the update in the *tangent space* of the manifold and $\mathbf{H}$ is the Gauss-Newton approximation to the Hessian. Solving this system is the per-iteration cost, and if you build $\mathbf{H}$ naively and factorize it dense, you pay $O(n^3)$ in a problem where $n$ is dominated by hundreds of landmarks. The entire art is in not doing that.
+
+## The structure of H
+
+There are two populations of variables with wildly different cardinality. The **frame variables** $\boldsymbol{\xi}$ — the 15-D nav states (plus extrinsics) — number perhaps 150 dimensions across a ~10-keyframe window. The **landmark variables** $\boldsymbol{\ell}$ — inverse depths or 3D points — number in the hundreds or thousands. Order $\mathbf{H}$ as frames-then-landmarks and it takes a bordered block-diagonal ("arrowhead") form:
+
+$$\mathbf{H} = \begin{bmatrix} \mathbf{H}_{\xi\xi} & \mathbf{H}_{\xi\ell} \\ \mathbf{H}_{\ell\xi} & \mathbf{H}_{\ell\ell} \end{bmatrix}$$
+
+The decisive fact is what each factor touches. A reprojection factor connects exactly **one frame and one landmark** — never two landmarks. So $\mathbf{H}_{\ell\ell}$ has *no off-diagonal coupling between distinct landmarks*: it's block-diagonal, one tiny block per landmark (3×3 for XYZ, scalar 1×1 for inverse depth). The frame block $\mathbf{H}_{\xi\xi}$ is dense by comparison — IMU factors couple consecutive states tridiagonally, and the marginalization prior couples the whole window densely — but it's *small*. The cross block $\mathbf{H}_{\xi\ell}$ is sparse, nonzero only on observed (frame, landmark) pairs.
+
+![Hessian arrow structure](ba_hessian_arrow_structure_schur.svg)
+
+### Eliminate the landmarks — the same algebra, opposite intent
+
+Because $\mathbf{H}_{\ell\ell}$ is block-diagonal, $\mathbf{H}_{\ell\ell}^{-1}$ is computed block-by-block almost for free. So you Schur-complement the *landmarks* out, exactly as you did for marginalization, but for a different reason — to shrink the system you actually factorize:
+
+$$\mathbf{S} = \mathbf{H}_{\xi\xi} - \mathbf{H}_{\xi\ell}\mathbf{H}_{\ell\ell}^{-1}\mathbf{H}_{\ell\xi}, \qquad \mathbf{g} = \mathbf{b}_\xi - \mathbf{H}_{\xi\ell}\mathbf{H}_{\ell\ell}^{-1}\mathbf{b}_\ell$$
+
+$\mathbf{S}$ is the **reduced camera system** — frame-dimensioned, on the order of 150×150, effectively dense in a small window. Solve $\mathbf{S}\,\delta\boldsymbol{\xi} = -\mathbf{g}$ by Cholesky, then recover the landmarks by **back-substitution**:
+
+$$\delta\boldsymbol{\ell} = -\mathbf{H}_{\ell\ell}^{-1}\big(\mathbf{b}_\ell + \mathbf{H}_{\ell\xi}\,\delta\boldsymbol{\xi}\big)$$
+
+This is the central point you asked about: **the per-iteration landmark elimination and the marginalization from the last turn are the identical Schur-complement operation, used with opposite intent.** Marginalization eliminates a variable and *keeps the resulting prior permanently* — the variable is gone from the problem forever, its information frozen into a factor. The per-iteration reduction eliminates the landmarks only to solve this linear system cheaply, then *back-substitutes them right back* — they remain full variables, relinearized next iteration. Same matrix algebra; one is a permanent change to the problem, the other is a transient solve trick. Confusing the two (e.g. accidentally persisting a per-iteration Schur term) is a real source of bugs.
+
+## How the two interact
+
+They compose cleanly, and the interaction is entirely through $\mathbf{H}_{\xi\xi}$. The marginalization prior is a dense factor over the frame variables, so it simply *adds into* $\mathbf{H}_{\xi\xi}$ before you form $\mathbf{S}$ — the prior's information is already present in the reduced camera system, no special handling. The order of operations matters, though: you marginalize old *keyframes* (a permanent reduction that densifies the frame block) but you Schur-reduce *landmarks* every iteration (transient). You never want to permanently marginalize a live landmark just because it's convenient for the solve — that conflates the two roles and either loses information or corrupts the prior.
+
+One structural footnote: eliminating landmarks induces fill-in among frames that *co-observe* a landmark — that's where the off-diagonal density in $\mathbf{S}$ comes from. In a 10-keyframe window with heavy co-visibility, $\mathbf{S}$ is dense and you just factorize it dense. In large-scale global BA, $\mathbf{S}$ stays sparse (the co-visibility graph) and you'd reach for sparse Cholesky with a fill-reducing ordering (AMD/COLAMD); for the VIO sliding window that machinery is overkill.
+
+## The traps in the solve
+
+**Gauge and rank.** The four unobservable directions mean $\mathbf{S}$ is rank-deficient by four (global position and yaw) unless something pins the gauge — an anchored first pose, a prior on the oldest state, or the marginalization prior. If nothing does, plain Cholesky on $\mathbf{S}$ fails. LM damping ($\mathbf{S} + \lambda\mathbf{D}$) regularizes it into something invertible, which is one reason LM is the robust default over pure Gauss-Newton here — but damping the gauge is masking the problem, not fixing it. The clean fix is to fix the gauge explicitly and let the prior carry the rest, which is exactly what FEJ is protecting from spurious constraint.
+
+**The manifold.** $\delta\mathbf{x}$ lives in the tangent space, so the Jacobians must be the *minimal* Jacobians with respect to the local perturbation (a right perturbation $\mathbf{R}\,\mathrm{Exp}(\delta\boldsymbol{\phi})$ for rotation), not derivatives with respect to an over-parameterized quaternion. If you build $\mathbf{H}$ from 4-parameter quaternion Jacobians without the manifold projection, $\mathbf{H}$ is rank-deficient in a way that has nothing to do with observability and the solve misbehaves. After solving, you retract: $\mathbf{x} \leftarrow \mathbf{x} \boxplus \delta\mathbf{x}$ ($\mathrm{Exp}$ for the rotation part, addition for the rest). This is precisely the job of Ceres's `Manifold` (formerly `LocalParameterization`) and GTSAM's `retract`/`localCoordinates`.
+
+**Robust losses.** Visual outliers that survived RANSAC still leak in, so reprojection factors carry a robust kernel (Huber, Cauchy). The kernel rescales each residual's weight per iteration — iteratively reweighted least squares — modifying the effective $\boldsymbol{\Sigma}^{-1}$ when you form $\mathbf{H}$ and $\mathbf{b}$. IMU factors are usually left Gaussian, since their noise model is trustworthy; robustifying them tends to do more harm than good unless you're guarding against gross bias jumps.
+
+**Conditioning.** Frame variables (meters, radians) and inverse depths live on very different scales; without variable scaling, $\mathbf{S}$ is ill-conditioned. Inverse-depth parameterization is itself partly a conditioning choice — it keeps near-infinite points well-behaved where XYZ blows up — at the cost that each landmark's Jacobian touches both its host frame and the observing frame, and that you must re-anchor or marginalize a landmark when its host keyframe leaves the window.
+
+## What this means in practice
+
+For a VIO sliding window the numbers are friendly: after the landmark Schur reduction the system you actually factorize is ~150-dimensional and dense, so the Cholesky itself is microseconds. The real cost is *forming* things — evaluating all the Jacobians and computing the Schur product $\mathbf{H}_{\xi\ell}\mathbf{H}_{\ell\ell}^{-1}\mathbf{H}_{\ell\xi}$ over every observation — which is why backends parallelize factor linearization and the Schur accumulation across threads, and why VIO hits real-time despite the per-keyframe nonlinear solve.
+
+In the libraries: Ceres does this when you mark the landmarks as the eliminated set (its Schur-based solvers — `DENSE_SCHUR` for a small window, `SPARSE_SCHUR`/`ITERATIVE_SCHUR` at scale), and you supply the manifold and robust loss; VINS-Mono drives Ceres exactly this way. GTSAM expresses the same thing through its elimination ordering — put landmarks first so they're eliminated first — with `Cholesky`/`LDL` under the hood, and iSAM2 generalizes it incrementally by re-eliminating only the affected part of the Bayes tree. The thing to internalize is that "bundle adjustment is slow" is false for VIO specifically *because* of this structure; lose the arrowhead exploitation and the same problem becomes intractable.
+
+The next layer down splits two ways, depending on what you care about. One direction is the frontend feeding all this — how features are selected and tracked so the reprojection factors are well-conditioned in the first place (parallax, keyframe selection, two-point RANSAC with the IMU prior). The other is the numerical-robustness layer — how Ceres/GTSAM actually factorize $\mathbf{S}$, ordering heuristics, and when iterative solvers (preconditioned conjugate gradient on the reduced system) beat direct Cholesky. Which way do you want to go?
+
+## Feature Selection
+
+
+## Numerical robustness

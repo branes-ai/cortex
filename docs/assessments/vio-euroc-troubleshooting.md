@@ -390,58 +390,178 @@ first-estimates-Jacobians / observability-constrained update, a code change in t
 Watch what ATE does too: if NEES drops toward 1 and ATE holds or improves, that's a clean win for #212. If raising Q tanks ATE while fixing NEES, that
 tension itself is diagnostic (the filter was trading consistency for accuracy).
 
-```bash
-(p311) stillwater@sw-21:~/dev/branes/clones/cortex$ for k in 1 3 10 30; do
->    echo "===================== Q_SCALE=$k ====================="
->  CORTEX_Q_SCALE=$k ./build/sitl-release/tests/vio_euroc "[dataset]" 2>&1 \
->    | grep -E 'init=static.*ATE|: NIS over|: NEES over|per-block NEES'
-> done
-===================== Q_SCALE=1 =====================
-  V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
-  V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
-  V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
-  V2_03_difficult: per-block NEES (normalized, want ~1): attitude=168.608784
-  MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
-  MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
-  MH_05_difficult (dynamic): per-block NEES (normalized, want ~1): attitude=
-  MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
-  MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
-  MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
-  MH_05_difficult: per-block NEES (normalized, want ~1): attitude=7.175059
-===================== Q_SCALE=3 =====================
-  MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
-  MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
-  MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
-  MH_05_difficult: per-block NEES (normalized, want ~1): attitude=7.175059
-  MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
-  MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
-  MH_05_difficult (dynamic): per-block NEES (normalized, want ~1): attitude=
-  V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
-  V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
-  V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
-  V2_03_difficult: per-block NEES (normalized, want ~1): attitude=168.608784
-===================== Q_SCALE=10 =====================
-  MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
-  MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
-  MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
-  MH_05_difficult: per-block NEES (normalized, want ~1): attitude=7.175059
-  MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
-  MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
-  MH_05_difficult (dynamic): per-block NEES (normalized, want ~1): attitude=
-  V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
-  V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
-  V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
-  V2_03_difficult: per-block NEES (normalized, want ~1): attitude=168.608784
-===================== Q_SCALE=30 =====================
-  MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
-  MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
-  MH_05_difficult (dynamic): per-block NEES (normalized, want ~1): attitude=
-  MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
-  MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
-  MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
-  MH_05_difficult: per-block NEES (normalized, want ~1): attitude=7.175059
-  V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
-  V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
-  V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
-  V2_03_difficult: per-block NEES (normalized, want ~1): attitude=168.608784
-```
+Background command "Bounded Q-scale sweep with per-run timeout guards" completed (exit code 0)
+
+Sweep complete — and it's a clean, decisive result. Here's the full curve:
+
+### V2_03 (aggressive):
+
+  ┌─────────┬───────┬───────┬───────┬──────────┐
+  │ Q_SCALE │  ATE  │  NIS  │ NEES  │ attitude │
+  ├─────────┼───────┼───────┼───────┼──────────┤
+  │ 1       │ 0.293 │ 14.80 │ 115.3 │ 168.6    │
+  ├─────────┼───────┼───────┼───────┼──────────┤
+  │ 3       │ 0.346 │ 14.32 │ 41.5  │ 95.4     │
+  ├─────────┼───────┼───────┼───────┼──────────┤
+  │ 10      │ 0.378 │ 12.93 │ 7.95  │ 19.6     │
+  ├─────────┼───────┼───────┼───────┼──────────┤
+  │ 30      │ 1.066 │ 11.32 │ 17.7  │ 60.5     │
+  └─────────┴───────┴───────┴───────┴──────────┘
+
+### MH_05 (mild):
+
+  ┌─────────┬───────┬──────┬──────┬──────────┐
+  │ Q_SCALE │  ATE  │ NIS  │ NEES │ attitude │
+  ├─────────┼───────┼──────┼──────┼──────────┤
+  │ 1       │ 0.785 │ 2.18 │ 10.1 │ 7.2      │
+  ├─────────┼───────┼──────┼──────┼──────────┤
+  │ 3       │ 0.702 │ 2.20 │ 12.4 │ 24.2     │
+  ├─────────┼───────┼──────┼──────┼──────────┤
+  │ 10      │ 0.822 │ 1.93 │ 4.86 │ 12.8     │
+  ├─────────┼───────┼──────┼──────┼──────────┤
+  │ 30      │ 2.085 │ 1.92 │ 7.17 │ 24.1     │
+  └─────────┴───────┴──────┴──────┴──────────┘
+
+Three findings, all robust:
+
+1. Process noise is ~10× too small. NEES has a clear minimum at Q ≈ 10 (V2_03: 115 → 8; MH_05: 10 → 5), then climbs again at Q=30. That minimum is a genuine
+bias/variance sweet spot — below it P is too tight, above it the estimate itself degrades. So VioConfig's IMU densities are roughly an order of magnitude
+under-sized.
+
+2. But you cannot tune your way out — there's a second, independent fault. NIS is nearly invariant to Q: V2_03 stays ~14× over-confident (14.8 → 11.3) even
+at 30× process noise; MH_05 stays ~2×. Since S = HPHᵀ + R, the only way inflating P (via Q) fails to grow S is if R dominates S and R is too small — i.e.
+the visual update is over-confident in a way the IMU process noise can't touch. The innovation over-confidence also scales with aggressiveness (14× on
+V2_03 vs 2× on MH_05), pointing at a motion-dependent measurement error (feature-tracking residual, camera–IMU time-sync, or rolling shutter) that the
+fixed R ignores.
+
+3. The current config's good ATE is "lucky over-confidence." ATE is best at Q=1 (the most dishonest covariance) and degrades as the filter becomes honest.
+The filter is overfitting these sequences with a meaningless covariance — exactly the brittleness behind #212.
+
+The decisive next experiment is the mirror knob: CORTEX_R_SCALE (scale the visual measurement noise). 
+It discriminates the two remaining hypotheses for
+Fault B:
+- NIS drops proportionally with R → R is simply under-tuned (a noise-calibration fix).
+- NIS stays stubborn to R too → it's the deeper EKF observability / Jacobian inconsistency (spurious information gain on the update), which needs
+first-estimates-Jacobians, not a config change.
+
+Want me to add the CORTEX_R_SCALE knob (same pattern as Q_SCALE, on feat/q-scale-sweep) and run that sweep? That's the read that tells us whether #212's
+fix is a re-tune or an estimator-code change.
+
+## R Sweep
+
+ Now build the Release binary and sanity-check that R_SCALE=1 reproduces the baseline (confirming the wiring is neutral when unscaled):
+
+● R_SCALE=1 reproduces the baseline exactly (NEES=115.312, NIS=14.8014) — the wiring is neutral when unscaled, so the new R-from-config path didn't perturb
+  anything. Now the R sweep (finer low end, since if it's pure under-tuned R the NIS response should be sharp — S≈R means NIS≈1/k²). Same bounded harness
+  with 240 s guards:
+
+● R sweep running (~12 min, 240 s guard per run). This is the discriminating experiment:
+
+- NIS falls sharply with R (e.g. ~14.8 → ~1 by R≈3–4) → the visual measurement noise R is simply under-tuned. Fault B is a config fix, and #212 is "re-tune
+both Q and R" — no estimator surgery.
+- NIS stays stubbornly high even at R=10 → it's not noise calibration; it's the EKF observability / Jacobian inconsistency on the update (spurious
+information gain), which needs first-estimates-Jacobians — an estimator-code change.
+
+● Background command "Bounded R-scale sweep with timeout guards" completed (exit code 0)
+
+● This is the decisive result — and it's not what a simple "re-tune R" would predict. The R sweep:
+
+### V2_03 (aggressive):
+
+  ┌─────────┬───────┬───────┬──────┐
+  │ R_SCALE │  ATE  │  NIS  │ NEES │
+  ├─────────┼───────┼───────┼──────┤
+  │ 1       │ 0.293 │ 14.80 │ 115  │
+  ├─────────┼───────┼───────┼──────┤
+  │ 2       │ 0.502 │ 3.94  │ 130  │
+  ├─────────┼───────┼───────┼──────┤
+  │ 4       │ 2.07  │ 1.08  │ 444  │
+  ├─────────┼───────┼───────┼──────┤
+  │ 10      │ 278 m │ 0.36  │ 1542 │
+  └─────────┴───────┴───────┴──────┘
+
+### MH_05 (mild):
+
+  ┌─────────┬────────┬──────┬──────┐
+  │ R_SCALE │  ATE   │ NIS  │ NEES │
+  ├─────────┼────────┼──────┼──────┤
+  │ 1       │ 0.785  │ 2.18 │ 10   │
+  ├─────────┼────────┼──────┼──────┤
+  │ 2       │ 1.19   │ 0.57 │ 37   │
+  ├─────────┼────────┼──────┼──────┤
+  │ 4       │ 3.44   │ 0.15 │ 26   │
+  ├─────────┼────────┼──────┼──────┤
+  │ 10      │ 2185 m │ 0.04 │ 7019 │
+  └─────────┴────────┴──────┴──────┘
+
+### Two things are now proven:
+
+1. The NIS over-confidence is genuinely under-tuned R — not an observability wall. NIS scales as a near-perfect 1/R_SCALE² (V2_03: 14.8 → 3.9 → 1.08, i.e.
+÷4 ÷16; MH_05: 2.18 → 0.57 → 0.15). That clean quadratic is the signature of a measurement-noise calibration error: the real normalized image/tracking
+noise is ~√14.8 ≈ 3.8× larger than the assumed 0.01 on V2_03, ~1.5× on MH_05. An observability/Jacobian fault would not scale away cleanly like this. So
+Fault B is a noise number, not an estimator bug — good news.
+
+2. But you cannot fix R in isolation — the filter is held together by the wrong R. The instant you make R honest, everything else diverges: NEES explodes
+(115→444→1542), and ATE goes from 0.29 m to 278 m at R=10. The over-tight R is supplying the correction authority that keeps the trajectory bounded; remove
+it and the filter dead-reckons off a cliff. That's why the default config has good ATE but a lying covariance — the two errors (Q too small, R too small)
+are mutually compensating.
+
+So the real question: is the joint setting — Q×~10 (honest NEES) and R×~3–4 (honest NIS) together — both consistent and still accurate? If yes → #212 is a
+pure noise re-tune (config). If the joint setting is consistent but ATE stays bad → the filter structurally can't be both honest and accurate, which is the
+observability/FEJ fault.
+
+Both knobs already exist, so I can test the joint grid with no new code. Running Q∈{5,10} × R∈{2,4} on both sequences now (bounded, ~12 min):
+
+While the joint sweep runs, let me commit the R_SCALE knob + the VioConfig wiring (it's a genuine improvement — R was previously un-configurable — and
+R_SCALE=1 reproduced the baseline to 6 digits, confirming the wiring is neutral):
+
+● Pushed to feat/q-scale-sweep (PR #279 now carries both knobs + the R config wiring; CI will run the full suite). Waiting on the joint sweep — that's the
+  one that answers "config re-tune vs estimator surgery." I'll report the grid the moment it lands.
+
+● Background command "Joint Q×R grid sweep, bounded" completed (exit code 0)
+
+● Joint grid is in — and it's conclusive. No combination gives consistent and accurate.
+
+  ┌─────┬─────┬───────┬──────┬──────┬──────┐
+  │  Q  │  R  │  seq  │ ATE  │ NIS  │ NEES │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 1   │ 1   │ V2_03 │ 0.29 │ 14.8 │ 115  │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 10  │ 2   │ V2_03 │ 0.83 │ 3.6  │ 10.1 │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 10  │ 4   │ V2_03 │ 6.22 │ 1.06 │ 42   │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 5   │ 4   │ V2_03 │ 3.12 │ 1.05 │ 53   │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 1   │ 1   │ MH_05 │ 0.79 │ 2.2  │ 10   │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 10  │ 2   │ MH_05 │ 1.43 │ 0.56 │ 7.1  │
+  ├─────┼─────┼───────┼──────┼──────┼──────┤
+  │ 10  │ 4   │ MH_05 │ 3.04 │ 0.15 │ 3.6  │
+  └─────┴─────┴───────┴──────┴──────┴──────┘
+
+Read it down the ATE column: every step toward an honest covariance costs accuracy. The most accurate config (Q1R1, ATE 0.29) is the most over-confident;
+the most consistent configs (R=4, NIS≈1) have ATE of 3–6 m. The best balance, Q10R2, still leaves V2_03 at NEES=10 / NIS=3.6 and triples the ATE.
+
+That trade-off is the diagnosis. In a correctly-modeled filter, the true noise values give both consistency and optimal accuracy — that's what optimality
+means. Here, accuracy requires over-confident noise. So the over-confidence isn't a mistuned dial — it's compensating for a structural error elsewhere.
+This rules out "just re-tune Q and R." The two noise findings are real (true R≈4×, Q≈10×) but they're symptoms, not the disease.
+
+And the disease is motion-dependent — the throughline of the whole investigation: attitude NEES (7→169), NIS (2.2→14.8), and now the residual inconsistency
+at honest noise (MH_05 NEES 3.6 vs V2_03 42) all scale with aggressiveness. That fingerprints a linearization / observability inconsistency (the classic
+MSCKF spurious-information-gain, worst under fast rotation — the FEJ / OC-EKF problem), possibly with a motion-correlated systematic in the visual update.
+
+So #212 is an estimator fix, not a config fix. Before committing to the FEJ implementation, there's one clean discriminator left: is the innovation
+zero-mean-but-inflated (→ observability/Jacobian) or biased (→ a systematic, e.g. extrinsics/triangulation)? That's a mean/whiteness test on the normalized
+innovations — the next small instrument.
+
+Where I'd take it:
+- (a) Add the innovation-mean/whiteness diagnostic (small, ~like the NIS accumulator) — pins observability vs systematic before we write FEJ.
+- (b) Skip straight to implementing FEJ / observability-constrained MSCKF (the odds-on fix) and re-run the instrument — success = honest noise finally
+gives consistent and accurate.
+- (c) Write this whole chain up in docs/assessments/ and open the #212 root-cause issue (observability inconsistency) with the sweep evidence, so the
+diagnosis is on record before any estimator surgery.
+
+My recommendation: (c) then (a) — capture the hard-won evidence, then run the one discriminator that could still redirect us away from FEJ, rather than
+committing estimator code on a strong-but-unconfirmed hypothesis. Which do you want?
+
