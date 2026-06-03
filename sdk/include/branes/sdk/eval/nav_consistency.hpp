@@ -132,6 +132,38 @@ template <math::Scalar T>
     return c;
 }
 
+/// The five core nav-state blocks, in error-state order: [δθ δp δv δbg δba].
+enum NavBlock { kAttitude = 0, kPosition, kVelocity, kGyroBias, kAccelBias, kNumNavBlocks };
+
+/// Per-block NEES of the five core states — each the 3-DoF `e_bᵀ P_bb⁻¹ e_b`
+/// using only that block's 3×3 diagonal covariance. Localizes *which* state the
+/// filter is over/under-confident about (attitude/yaw worst ⇒ observability
+/// inconsistency; velocity/bias worst ⇒ process-noise / bias model). Ignores
+/// cross-block covariance — a standard localization approximation, not the full
+/// 15-DoF NEES. `P` must have a ≥ 15×15 core. A non-PD block throws (via `nees`).
+template <math::Scalar T>
+[[nodiscard]] std::array<T, kNumNavBlocks> nav_block_nees(const std::array<T, kNavErrorDim>& e, const DynMat<T>& P) {
+    if (P.rows < kNavErrorDim || P.cols < kNavErrorDim)
+        throw std::invalid_argument("nav_block_nees: covariance smaller than the 15-D core");
+    std::array<T, kNumNavBlocks> out{};
+    for (std::size_t b = 0; b < kNumNavBlocks; ++b) {
+        const std::size_t o = b * 3;
+        DynMat<T> Pb(3, 3);
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                Pb(i, j) = P(o + i, o + j);
+        const std::array<T, 3> eb{e[o], e[o + 1], e[o + 2]};
+        out[b] = nees<T>(eb, Pb);
+    }
+    return out;
+}
+
+/// Short labels for the five blocks (parallel to `NavBlock`).
+[[nodiscard]] inline const char* nav_block_name(std::size_t b) {
+    static const char* names[] = {"attitude", "position", "velocity", "gyro_bias", "accel_bias"};
+    return b < kNumNavBlocks ? names[b] : "?";
+}
+
 }  // namespace branes::sdk::eval
 
 #endif  // BRANES_SDK_EVAL_NAV_CONSISTENCY_HPP
