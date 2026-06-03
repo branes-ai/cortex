@@ -37,6 +37,7 @@
 #include <branes/sdk/sfm/init_window.hpp>
 #include <branes/sdk/vio_backend.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -272,6 +273,11 @@ public:
         for (const auto& [id, recs] : tracks_)
             if (seen.find(id) == seen.end())
                 ended.push_back(id);
+        // Process in a deterministic (feature-id) order: tracks_ is an
+        // unordered_map, so its iteration order is hash-driven and varies across
+        // STL implementations. Sorting keeps the EKF update sequence — and the
+        // order-dependent innovation-whiteness lag-1 telemetry — reproducible.
+        std::sort(ended.begin(), ended.end());
         for (const std::uint64_t id : ended)
             update_and_erase(id);
     }
@@ -614,6 +620,7 @@ private:
                     touching.push_back(id);
                     break;
                 }
+        std::sort(touching.begin(), touching.end());  // deterministic update order (see process_camera)
         for (const std::uint64_t id : touching)
             update_and_erase(id);
 
