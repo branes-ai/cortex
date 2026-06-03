@@ -565,3 +565,46 @@ diagnosis is on record before any estimator surgery.
 My recommendation: (c) then (a) — capture the hard-won evidence, then run the one discriminator that could still redirect us away from FEJ, rather than
 committing estimator code on a strong-but-unconfirmed hypothesis. Which do you want?
 
+Do (c) then (a):
+
+Both (c) and (a) are complete. Here's where it landed.
+
+The diagnosis is closed — #212 is an observability fault (FEJ)
+
+The innovation discriminator gave the deciding read:
+
+┌────────────────────┬────────────────────────────────────────────┬─────────────────────────────┐
+│      sequence      │                mean (bias)                 │          whiteness          │
+├────────────────────┼────────────────────────────────────────────┼─────────────────────────────┤
+│ V2_03 (aggressive) │ −0.013σ (~0.1 px) — flagged but negligible │ lag-1 z = +14.2 → non-white │
+├────────────────────┼────────────────────────────────────────────┼─────────────────────────────┤
+│ MH_05 (mild)       │ zero-mean (not flagged)                    │ lag-1 z = −10.3 → non-white │
+└────────────────────┴────────────────────────────────────────────┴─────────────────────────────┘
+
+- Innovations are strongly non-white on both runs → the filter is leaving temporal structure in its residuals → the observability/linearization signature.
+This is the positive confirmation the sweeps could only imply.
+- Innovations are effectively zero-mean → there is no gross systematic (no swapped extrinsic, no large time offset). The one flagged bias is ~0.3% of the
+over-confidence and motion-dependent — a minor secondary, not the cause.
+
+So the discriminator does not redirect us. The full chain — over-confident → compensating (honest noise diverges ATE) → motion-dependent → zero-mean but
+non-white — all points one way: First-Estimates Jacobians / OC-EKF, tracked in #280.
+
+What's on the branch (PR #279)
+
+1. CORTEX_Q_SCALE + CORTEX_R_SCALE diagnostic knobs (and R is now configurable via VioConfig::camera_noise_normalized — it was hardcoded).
+2. eval/innovation_whiteness.hpp — the zero-mean/whiteness instrument, unit-tested against oracles (i.i.d.→white, constant→biased, alternation→correlated),
+wired into the backend + benchmark WARN.
+3. docs/assessments/vio-consistency-sweep-diagnosis.md — the complete Q/R/joint/innovation evidence and conclusion.
+4. Issue #280 opened (FEJ, full cortex defaults) with the sweep + discriminator evidence; memory updated.
+
+Local tests green (innovation_whiteness 19 assertions; msckf_backend 314; consistency/nav_consistency pass). I'll let CI + CodeRabbit finish on #279 and
+merge when green per your standing rule (not before the async review, per the review-gate convention) — unless you want to look first.
+
+Decision point
+
+The instrumentation program has done its job: "it drifts 18%" is now "the attitude covariance is observability-inconsistent; here's the proof." The next
+move is the actual fix — (b): implement FEJ / OC-EKF (#280) — which is real estimator surgery in the propagation/update Jacobians, the success test already
+defined (honest noise → consistent NEES+NIS+ATE, innovations whiten).
+
+Want me to start #280 (FEJ), or pause here while #279 goes through review?
+

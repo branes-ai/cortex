@@ -308,5 +308,83 @@ The next layer down splits two ways, depending on what you care about. One direc
 
 ## Feature Selection
 
+The frontend is where most real-world VIO actually fails, and it fails *unrecoverably* — every elegant thing in the last three turns assumes the 2D observations feeding the reprojection factors are correct, and there is no backend trick that repairs a confidently-wrong correspondence. So the design goal isn't "detect lots of features," it's "produce measurements whose Jacobians constrain the pose well and whose outliers are gone before the optimizer ever sees them." Everything below serves that.
+
+## What to detect, and why corners
+
+You track corners, not arbitrary pixels, because of the aperture problem. KLT recovers 2D motion by minimizing photometric error over a patch, and that's only well-posed when the patch's gradient structure tensor (second-moment matrix of image gradients) has two strong eigenvalues. A corner has gradient in two directions — both eigenvalues large — so its 2D position is pinned. An edge has one strong eigenvalue; the patch can slide *along* the edge with no photometric penalty, so its motion is ambiguous in one direction and it contributes a degenerate, half-rank constraint. A flat region has neither. The Shi-Tomasi detector ("Good Features to Track") literally scores a pixel by the *minimum* eigenvalue of that tensor — it's selecting the points KLT can actually track. FAST corners plus binary descriptors (the ORB-SLAM lineage) are the alternative when you match-by-descriptor instead of tracking by flow; faster to extract, but less reliable for the sub-pixel flow that tight reprojection needs.
+
+## Where you detect matters as much as what
+
+A frontend that detects 200 corners all clustered in one image region produces a pose that's well-constrained in some DoF and nearly free in others — a feature cluster in one corner can't distinguish a small rotation from a translation. You want **uniform spatial coverage**, so production frontends bucket the image into a grid, cap features per cell, and enforce a minimum pixel distance (VINS-Mono masks ~30 px around each existing feature before detecting new ones). Coverage across the frame conditions the rotational DoF; the next section handles the translational and scale DoF, which depend on something coverage can't give you.
+
+## Tracking, with the IMU as an active participant
+
+Frame-to-frame you either run pyramidal Lucas-Kanade (the pyramid handles motion too large for the small-displacement assumption) or match descriptors. Either way you add a **forward-backward consistency check** — track forward, track back, reject any feature whose round trip doesn't land near its origin — which cheaply removes a large fraction of bad tracks before geometry even enters.
+
+The part people underuse: the IMU is not just a backend factor, it's a frontend tool. The preintegrated **gyro rotation** between frames predicts where each feature should reproject, so you initialize the KLT search there instead of at the previous location. That's what lets tracking survive aggressive rotation that otherwise violates the small-motion assumption and breaks optical flow outright. The same rotation prior collapses outlier rejection: with relative rotation known from the gyro, the epipolar geometry has only the translation *direction* left (2 DoF up to scale), so the minimal RANSAC solver needs **two points** instead of the five (Nistér) or eight a vision-only essential-matrix estimate requires. Fewer points per hypothesis means dramatically fewer RANSAC iterations for the same outlier ratio — faster and more robust rejection.
+
+## The outlier you can't RANSAC away
+
+RANSAC on the epipolar constraint removes mismatches and most static-scene outliers. The case it doesn't handle is **dynamic objects**: features on a moving body produce tracks that are *geometrically self-consistent* — consistent with the object's motion, not the camera's. If a moving object fills enough of the frame, RANSAC can lock onto *its* motion as the dominant model and reject the true static background as outliers. This is a genuine, common failure (a passing truck, a person walking close), and pure geometric rejection cannot fix it; you need semantic masking or explicit motion segmentation in dynamic environments. Flag this as a known limitation rather than assuming RANSAC has you covered.
+
+## Parallax: the conditioning of the whole thing
+
+The single most important geometric quantity is parallax — the angle subtended at a landmark between the rays from two views. It governs triangulation, and triangulation quality governs how tightly the landmark (and therefore the poses observing it) is constrained.
+
+![Parallax](parallax_triangulation_conditioning.svg)
+
+This is also where the monocular degeneracies live. Under **pure rotation** there's no baseline, parallax is zero for every feature, nothing triangulates, and visual scale is completely unobservable — this is exactly the regime where the IMU has to carry the estimate, and it's why a frontend should *recognize* low-parallax stretches rather than feed the backend ill-conditioned triangulations. **All-distant features** (everything near infinity) give tiny parallax and weak translation observability even with motion. A **planar scene** degenerates the essential matrix into a homography and the decomposition becomes ambiguous. A frontend that selects for depth and parallax diversity — not just corner count — is what keeps the reprojection factors full-rank. New landmarks are initialized by triangulating once parallax crosses a threshold, and parameterized as inverse depth precisely because that stays well-conditioned for the far points where XYZ would blow up.
+
+## Keyframe selection closes the loop to the backend
+
+The frontend decides *which* frames become the keyframe nodes the backend optimizes and marginalizes, and the criteria are the same quantities above: insert a keyframe when median parallax to the last keyframe exceeds a threshold (enough baseline to triangulate and constrain translation), or when the tracked-feature count drops too low (you're about to lose the overlap that links the window), with a time cap so the IMU preintegration interval doesn't stretch until the factor goes soft. This directly feeds the marginalization policy from two turns ago — good keyframe spacing is what makes the sliding window span useful parallax instead of redundant near-duplicate views. Track management runs underneath: features carry IDs across frames, tracks that fail forward-backward or RANSAC are dropped, lifetimes are bounded so stale tracks don't accumulate drift, and a landmark whose host keyframe is being marginalized must be re-anchored or marginalized with it.
+
+The throughline: the backend's conditioning is *manufactured by the frontend*. Corner quality determines per-feature Jacobian rank, spatial distribution determines rotational observability, parallax and depth diversity determine translational and scale observability, RANSAC plus robust kernels determine whether $\mathbf{H}$ is clean, and keyframe selection determines whether the window is well-spread. A backend can't recover what the frontend didn't deliver.
+
+That covers feature selection and tracking. Do you want me to go on to the second item — numerical robustness: how Ceres/GTSAM actually factorize the reduced camera system $\mathbf{S}$, ordering heuristics, and when preconditioned conjugate gradient on $\mathbf{S}$ beats direct Cholesky?
 
 ## Numerical robustness
+
+Here the question stops being "what's the math" and becomes "will this solve in 5 ms, every keyframe, without silently producing garbage near a singularity." The reduced camera system $\mathbf{S}$ from two turns ago is symmetric positive (semi-)definite once the gauge is handled, and that single property drives every choice below.
+
+## Cholesky, and the price of the normal equations
+
+Because $\mathbf{S}$ is SPD, you factorize it with **Cholesky** ($\mathbf{S} = \mathbf{L}\mathbf{L}^\top$, or $\mathbf{L}\mathbf{D}\mathbf{L}^\top$ to avoid square roots). Cholesky is roughly twice as cheap as LU and numerically stable for SPD systems without pivoting, which is why it's the default everywhere. For a VIO sliding window $\mathbf{S}$ is on the order of 150×150 and dense, so this is a dense Cholesky that runs in microseconds — Ceres's `DENSE_SCHUR`, GTSAM's batch elimination with a dense leaf.
+
+The caveat worth internalizing: forming the normal equations $\mathbf{H} = \mathbf{J}^\top\boldsymbol{\Sigma}^{-1}\mathbf{J}$ *squares the condition number*, $\kappa(\mathbf{H}) = \kappa(\mathbf{J})^2$. For a well-conditioned, well-scaled problem this is harmless and you happily pay it for the speed. For an ill-conditioned one it can cost you precision. The numerically purer route is QR on $\mathbf{J}$ directly (Ceres `DENSE_QR`), which never squares $\kappa$ — but it's ~2× the cost and doesn't compose as cleanly with the Schur elimination. So the honest rule is: use Cholesky on the Schur-reduced normal equations by default, and if you see precision or convergence trouble, suspect *scaling* (next section) before reaching for QR or a fancier solver. Reaching for an exotic solver to paper over an unscaled inverse-depth variable is a classic misdiagnosis.
+
+## Ordering — critical at scale, a non-issue for your window
+
+When $\mathbf{S}$ is large and *sparse* (global BA, loop-closure-time full optimization over thousands of cameras), the cost of Cholesky is dominated not by arithmetic but by **fill-in** — the new nonzeros the factorization creates. A bad variable ordering turns a sparse $\mathbf{S}$ into a nearly dense factor and the solve explodes; a good fill-reducing ordering keeps the factor sparse. That's the entire job of AMD (approximate minimum degree), COLAMD, and nested dissection (METIS), and it's why Ceres exposes `SPARSE_SCHUR` over SuiteSparse/CHOLMOD and GTSAM picks an elimination ordering (COLAMD by default, or a constrained ordering when you need certain variables eliminated last — exactly how it keeps the marginalization/incremental structure intact). The Bayes tree GTSAM builds *is* the ordering made explicit.
+
+For a bounded VIO sliding window, though, none of this matters: $\mathbf{S}$ is small and effectively dense, so any ordering produces the same trivial factorization. Know which regime you're in — ordering is make-or-break for global maps and irrelevant for the real-time window, and conflating the two leads people to either neglect ordering where it's fatal or over-engineer it where it's pointless.
+
+## Direct vs. iterative, and why PCG is the wrong default for VIO
+
+The iterative alternative is preconditioned conjugate gradient on $\mathbf{S}\,\delta\boldsymbol{\xi} = -\mathbf{g}$, which never factorizes $\mathbf{S}$ — each iteration is a matrix-vector product. Its decisive trick at scale is being **matrix-free**: you never materialize the dense Schur complement at all, because you can apply the operator implicitly,
+
+$$\mathbf{S}\mathbf{v} = \mathbf{H}_{\xi\xi}\mathbf{v} - \mathbf{H}_{\xi\ell}\big(\mathbf{H}_{\ell\ell}^{-1}(\mathbf{H}_{\ell\xi}\mathbf{v})\big)$$
+
+with every piece sparse. That's Ceres's `ITERATIVE_SCHUR`, and on a problem with thousands of cameras where the dense $\mathbf{S}$ would be enormous and the dense Schur product the bottleneck, it's the only thing that fits in memory and time. But CG's convergence rate is governed by $\kappa(\mathbf{S})$, so it lives or dies by its preconditioner — block-Jacobi, Schur-Jacobi (block-diagonal of $\mathbf{S}$ by camera), or visibility/cluster preconditioners (`CLUSTER_JACOBI`, `CLUSTER_TRIDIAGONAL`) that approximate the camera-camera coupling.
+
+For your VIO window this is the wrong tool. A ~150-dimensional dense $\mathbf{S}$ factorizes exactly by Cholesky faster than CG would even run a handful of iterations, with no preconditioner tuning and no convergence uncertainty. Iterative methods are a large-scale and global-BA technique; deploying `ITERATIVE_SCHUR` on a real-time sliding window is a common premature optimization that buys nothing and adds a tuning surface. Direct Cholesky is the correct default for the window; switch to iterative only when you actually do offline or loop-closure-time optimization over a large map.
+
+## Damping, gauge, and why LM is more than convergence insurance
+
+The solve isn't $\mathbf{S}\delta\boldsymbol{\xi} = -\mathbf{g}$ exactly — it's the damped system inside a trust region. Levenberg-Marquardt solves $(\mathbf{S} + \lambda\mathbf{D})\,\delta\boldsymbol{\xi} = -\mathbf{g}$ with $\mathbf{D}$ typically $\mathrm{diag}(\mathbf{S})$ (Marquardt's scaling), adapting $\lambda$ up after a rejected step (more steepest-descent-like, robust far from the optimum) and down after a good one (more Gauss-Newton, fast near it). Powell's dogleg is the alternative trust-region scheme and is sometimes more efficient. Beyond convergence, the damping has a second role that ties back to the gauge problem: those four unobservable directions make $\mathbf{S}$ rank-deficient, and $\lambda\mathbf{D}$ regularizes the null space so Cholesky succeeds even without an explicit gauge anchor. That's convenient, but leaning on it is sloppy — damping *masks* the gauge singularity rather than resolving it, and the cleaner design fixes or priors the gauge and lets $\lambda$ do only its real job. If Cholesky on $\mathbf{S}$ ever fails outright, an unfixed gauge with insufficient damping is the first suspect.
+
+## Conditioning hygiene
+
+The most common real source of numerical trouble in VIO isn't the algorithm, it's **variable scaling**. Poses live in meters and radians; inverse depths in inverse-meters; these differ by orders of magnitude, so the columns of $\mathbf{J}$ have wildly different norms and $\kappa$ balloons. The fix is column normalization — Ceres's `jacobi_scaling` does this automatically, and it matters far more than solver choice. Always run the solve in double precision. And remember that robust kernels reweight residuals every iteration (IRLS), so each iteration genuinely rebuilds and re-factorizes — the robust loss isn't free, it's a per-iteration cost that also affects how cleanly you converge.
+
+## Two real-time philosophies
+
+There's a deeper architectural split underneath all this. The Ceres/VINS-Mono path **re-linearizes and re-factorizes the whole window from scratch every keyframe** — affordable precisely because the window is small and bounded. GTSAM's iSAM2 instead **maintains the factorization** (the Bayes tree) and on each new keyframe re-eliminates only the cliques the new measurements touch, with fluid relinearization triggered only where the estimate has shifted enough to matter. For a growing graph that's a large amortized win and is why iSAM2 underpins full smoothing in near-constant time. The cost is honesty about worst case: when a new factor or a large relinearization forces a variable reordering, iSAM2 can do a partial-to-full re-elimination and spike in latency — which matters if your platform has a hard real-time deadline. Bounded-window batch re-solve has predictable cost; incremental smoothing has lower average cost but a longer tail. Pick based on whether you optimize for the average or the worst case.
+
+So the practical prescription for a real-time VIO sliding window: dense Cholesky on the Schur-reduced system (`DENSE_SCHUR`), LM or dogleg trust region, Jacobi column scaling, robust loss on the visual factors, an explicitly fixed or priored gauge, double precision — and you reserve sparse orderings and iterative Schur for any offline or global optimization you bolt on later.
+
+That's the bottom of the linear-algebra stack. You now have the full vertical slice — sensor models, preintegration and its covariance, bias observability, the sliding-window graph and marginalization with FEJ, the structured solve, the frontend that conditions it, and the numerics underneath. The remaining pieces are integrative rather than deeper: loop closure and global pose-graph optimization (turning the odometry into SLAM), and rigorous evaluation (ATE/RPE, consistency/NEES checks, the EuRoC protocol). Want either of those, or would a concrete from-scratch implementation plan that sequences all of this be more useful now?
+
+## VIO pipeline graph
+
