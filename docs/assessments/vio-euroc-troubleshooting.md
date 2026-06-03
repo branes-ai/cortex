@@ -1,86 +1,87 @@
-# VIO EuRoC MAV benchmark trouble shooting
+# VIO EuRoC MAV benchmark troubleshooting
 
-The vio_euroc benchmarks produces these results: 
+The vio_euroc benchmark produces these results:
+
 ```text
 -------------------------------------------------------------------------------
 V1_01_easy replay keeps ATE under threshold
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:359
+tests/sdk/vio_euroc.cpp:359
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:205: SKIPPED:
+tests/sdk/vio_euroc.cpp:205: SKIPPED:
 explicitly with message:
 set CORTEX_EUROC_V101 to the V1_01_easy/mav0 directory to run this benchmark
 
 -------------------------------------------------------------------------------
 MH_05_difficult forced dynamic VI-init fires + stays bounded (#247)
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:374
+tests/sdk/vio_euroc.cpp:374
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:302: warning:
+tests/sdk/vio_euroc.cpp:302: warning:
 MH_05_difficult (dynamic): init=dynamic, frames=2273, ATE=19.8789 m (gate 1.5
 m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:310: warning:
+tests/sdk/vio_euroc.cpp:310: warning:
 MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
 [0.996002, 1.004]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
 MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
 [0.984296, 1.0157]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:326: warning:
+tests/sdk/vio_euroc.cpp:326: warning:
 MH_05_difficult (dynamic): seed gyro_bias=(0.0217551, 0.0176564, 0.0773316)
 rad/s, |bg|=0.0822508, grav_residual=2.33588e-14
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:330: warning:
+tests/sdk/vio_euroc.cpp:330: warning:
 MH_05_difficult (dynamic): dyn-init scale=0.0607451, seed_speed=0.120572 m/s,
 sfm_keyframes=20, roll/pitch err vs accel=2.32865 deg
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:338: warning:
+tests/sdk/vio_euroc.cpp:338: warning:
 MH_05_difficult (dynamic): dyn-attempts=170, window_builds=11,
 best_keyframes=20, best_metric_motion=0.0614133 m
 
 -------------------------------------------------------------------------------
 MH_05_difficult replay (moving start) bootstraps and stays bounded
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:363
+tests/sdk/vio_euroc.cpp:363
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:302: warning:
+tests/sdk/vio_euroc.cpp:302: warning:
 MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:310: warning:
+tests/sdk/vio_euroc.cpp:310: warning:
 MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
 1.00386]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
 MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
 1.01519]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:326: warning:
+tests/sdk/vio_euroc.cpp:326: warning:
 MH_05_difficult: seed gyro_bias=(-0.00194081, 0.0202039, 0.0778975) rad/s,
 |bg|=0.0804984, grav_residual=0.0026452
 
 -------------------------------------------------------------------------------
 V2_03_difficult replay (moving start) converges
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:386
+tests/sdk/vio_euroc.cpp:386
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:302: warning:
+tests/sdk/vio_euroc.cpp:302: warning:
 V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:310: warning:
+tests/sdk/vio_euroc.cpp:310: warning:
 V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
 1.00496]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
 V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
 1.0165]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:326: warning:
+tests/sdk/vio_euroc.cpp:326: warning:
 V2_03_difficult: seed gyro_bias=(-0.0023178, 0.0243927, 0.0813882) rad/s, |bg
 |=0.0849966, grav_residual=0.00309173
 
@@ -139,16 +140,17 @@ Here's the exact sequence. The dataset case is gated on CORTEX_EUROC_V101, but t
 at any mav0 you already have extracted — MH_05's path was confirmed in your earlier runs:
 
 ```bash
-cd ~/dev/branes/clones/cortex
+cd <repo>
 git checkout main && git pull                    # get the Allan instrument (#276)
 cmake --preset sitl-release                       # re-glob to pick up the new test target
 cmake --build --preset sitl-release --target allan_variance
 
-CORTEX_EUROC_V101=/srv/samba/sw-21/EuRoC-MAV-dataset/machine_hall/MH_05_difficult/mav0 \
+CORTEX_EUROC_V101=$EUROC_ROOT/machine_hall/MH_05_difficult/mav0 \
 ./build/sitl-release/tests/allan_variance "[dataset]"
 ```
 
 You're looking for this WARN line:
+
 ```text
 EuRoC IMU @ 200 Hz: gyro N=… rad/s/√Hz (filter Q 0.00016), accel N=… m/s²/√Hz (filter Q 0.002) — …
 ```
@@ -162,7 +164,7 @@ Either result is decisive. Send me the line and I'll fold it into the diagnosis 
 is the worst offender.
 
 ```bash
-(p311) stillwater@sw-21:~/dev/branes/clones/cortex$ CORTEX_EUROC_V101=/srv/samba/sw-21/EuRoC-MAV-dataset/machine_hall/MH_05_difficult/mav0 ./build/sitl-release/tests/allan_variance "[dataset]"
+$ CORTEX_EUROC_V101=$EUROC_ROOT/machine_hall/MH_05_difficult/mav0 ./build/sitl-release/tests/allan_variance "[dataset]"
 Filters: [dataset]
 Randomness seeded to: 3305577977
 
@@ -173,10 +175,10 @@ Run with -? for options
 -------------------------------------------------------------------------------
 EuRoC IMU noise density vs the filter's configured Q
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/allan_variance.cpp:88
+tests/sdk/allan_variance.cpp:88
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/allan_variance.cpp:112: warning:
+tests/sdk/allan_variance.cpp:112: warning:
   EuRoC IMU @ 200 Hz: gyro N=0.0047129 rad/s/√Hz (filter Q 0.00016), accel N=0.
   0498006 m/s²/√Hz (filter Q 0.002) — large mismatch ⇒ retune Q before chasing
   #212
@@ -188,12 +190,13 @@ All tests passed (5 assertions in 1 test case)
 Issue #278 merged (176aa94) — per-block NEES is on main. Re-run to get the decisive read:
 
 ```bash
-  cd ~/dev/branes/clones/cortex
+  cd <repo>
   git checkout main && git pull
   scripts/euroc-moving-start.sh
 ```
 
 Each case now prints an extra line:
+
 ```text
 …: per-block NEES (normalized, want ~1): attitude=… position=… velocity=… gyro_bias=… accel_bias=…
 ```
@@ -213,10 +216,10 @@ N×, here's why."
 
 
 ```bash
-(p311) stillwater@sw-21:~/dev/branes/clones/cortex$ scripts/euroc-moving-start.sh
-== locating sequences under /srv/samba/sw-21/EuRoC-MAV-dataset ==
-  MH_05 mav0: /srv/samba/sw-21/EuRoC-MAV-dataset/machine_hall/MH_05_difficult/mav0
-  V2_03 mav0: /srv/samba/sw-21/EuRoC-MAV-dataset/vicon_room2/V2_03_difficult/mav0
+$ scripts/euroc-moving-start.sh
+== locating sequences under $EUROC_ROOT ==
+  MH_05 mav0: $EUROC_ROOT/machine_hall/MH_05_difficult/mav0
+  V2_03 mav0: $EUROC_ROOT/vicon_room2/V2_03_difficult/mav0
 == building sitl-release / vio_euroc ==
 
   __  __ _____ _     ____
@@ -242,95 +245,95 @@ Run with -? for options
 -------------------------------------------------------------------------------
 V2_03_difficult replay (moving start) converges
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:400
+tests/sdk/vio_euroc.cpp:400
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:308: warning:
+tests/sdk/vio_euroc.cpp:308: warning:
   V2_03_difficult: init=static, frames=1922, ATE=0.293417 m (gate 1.5 m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
   V2_03_difficult: NIS over 21627 updates: normalized=14.8014 (band [0.995038,
   1.00496]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:322: warning:
+tests/sdk/vio_euroc.cpp:322: warning:
   V2_03_difficult: NEES over 1882 frames: normalized=115.312 (band [0.983503,
   1.0165]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:334: warning:
+tests/sdk/vio_euroc.cpp:334: warning:
   V2_03_difficult: per-block NEES (normalized, want ~1): attitude=168.608784
   position=3.508583 velocity=25.906302 gyro_bias=16.377613 accel_bias=30.205153
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:340: warning:
+tests/sdk/vio_euroc.cpp:340: warning:
   V2_03_difficult: seed gyro_bias=(-0.0023178, 0.0243927, 0.0813882) rad/s, |bg
   |=0.0849966, grav_residual=0.00309173
 
 -------------------------------------------------------------------------------
 MH_05_difficult forced dynamic VI-init fires + stays bounded (#247)
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:388
+tests/sdk/vio_euroc.cpp:388
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:308: warning:
+tests/sdk/vio_euroc.cpp:308: warning:
   MH_05_difficult (dynamic): init=dynamic, frames=2273, ATE=19.8789 m (gate 1.5
   m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
   MH_05_difficult (dynamic): NIS over 27173 updates: normalized=1.20953 (band
   [0.996002, 1.004]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:322: warning:
+tests/sdk/vio_euroc.cpp:322: warning:
   MH_05_difficult (dynamic): NEES over 2077 frames: normalized=130.444 (band
   [0.984296, 1.0157]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:334: warning:
+tests/sdk/vio_euroc.cpp:334: warning:
   MH_05_difficult (dynamic): per-block NEES (normalized, want ~1): attitude=
   133.781601 position=70.680571 velocity=80.902497 gyro_bias=71.285316
   accel_bias=38.288993
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:340: warning:
+tests/sdk/vio_euroc.cpp:340: warning:
   MH_05_difficult (dynamic): seed gyro_bias=(0.0217551, 0.0176564, 0.0773316)
   rad/s, |bg|=0.0822508, grav_residual=2.33588e-14
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:344: warning:
+tests/sdk/vio_euroc.cpp:344: warning:
   MH_05_difficult (dynamic): dyn-init scale=0.0607451, seed_speed=0.120572 m/s,
   sfm_keyframes=20, roll/pitch err vs accel=2.32865 deg
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:352: warning:
+tests/sdk/vio_euroc.cpp:352: warning:
   MH_05_difficult (dynamic): dyn-attempts=170, window_builds=11,
   best_keyframes=20, best_metric_motion=0.0614133 m
 
 -------------------------------------------------------------------------------
 V1_01_easy replay keeps ATE under threshold
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:373
+tests/sdk/vio_euroc.cpp:373
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:206: SKIPPED:
+tests/sdk/vio_euroc.cpp:206: SKIPPED:
 explicitly with message:
   set CORTEX_EUROC_V101 to the V1_01_easy/mav0 directory to run this benchmark
 
 -------------------------------------------------------------------------------
 MH_05_difficult replay (moving start) bootstraps and stays bounded
 -------------------------------------------------------------------------------
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:377
+tests/sdk/vio_euroc.cpp:377
 ...............................................................................
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:308: warning:
+tests/sdk/vio_euroc.cpp:308: warning:
   MH_05_difficult: init=static, frames=2273, ATE=0.785467 m (gate 1.5 m)
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:316: warning:
+tests/sdk/vio_euroc.cpp:316: warning:
   MH_05_difficult: NIS over 29225 updates: normalized=2.17971 (band [0.99614,
   1.00386]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:322: warning:
+tests/sdk/vio_euroc.cpp:322: warning:
   MH_05_difficult: NEES over 2221 frames: normalized=10.0786 (band [0.984814,
   1.01519]) — OVER-confident
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:334: warning:
+tests/sdk/vio_euroc.cpp:334: warning:
   MH_05_difficult: per-block NEES (normalized, want ~1): attitude=7.175059
   position=9.879716 velocity=9.632311 gyro_bias=2.749590 accel_bias=5.335078
 
-/home/stillwater/dev/branes/clones/cortex/tests/sdk/vio_euroc.cpp:340: warning:
+tests/sdk/vio_euroc.cpp:340: warning:
   MH_05_difficult: seed gyro_bias=(-0.00194081, 0.0202039, 0.0778975) rad/s,
   |bg|=0.0804984, grav_residual=0.0026452
 
@@ -365,12 +368,12 @@ PR #279 open. The knob is read at runtime, so you build once and run the binary 
 V2_03 attitude number — it's the cleanest signal at 169):
 
 ```bash
-cd ~/dev/branes/clones/cortex
+cd <repo>
 git fetch origin feat/q-scale-sweep
 git checkout origin/feat/q-scale-sweep -- tests/sdk/vio_euroc.cpp
 cmake --build --preset sitl-release --target vio_euroc
-export CORTEX_EUROC_MH05=/srv/samba/sw-21/EuRoC-MAV-dataset/machine_hall/MH_05_difficult/mav0
-export CORTEX_EUROC_V203=/srv/samba/sw-21/EuRoC-MAV-dataset/vicon_room2/V2_03_difficult/mav0
+export CORTEX_EUROC_MH05=$EUROC_ROOT/machine_hall/MH_05_difficult/mav0
+export CORTEX_EUROC_V203=$EUROC_ROOT/vicon_room2/V2_03_difficult/mav0
 for k in 1 3 10 30; do
 echo "===================== Q_SCALE=$k ====================="
 CORTEX_Q_SCALE=$k ./build/sitl-release/tests/vio_euroc "[dataset]" 2>&1 \
