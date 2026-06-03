@@ -235,6 +235,48 @@ void run_euroc_replay(
     // path on real data.
     cfg.prefer_dynamic_init = prefer_dynamic;
 
+    // Process-noise sweep knob (#212 diagnosis): CORTEX_Q_SCALE multiplies the
+    // IMU noise densities. Per-block NEES localized the over-confidence to the
+    // attitude state (worst under fast rotation), pointing at under-tuned process
+    // noise; sweeping this factor and watching the attitude NEES fall toward 1
+    // quantifies how under-tuned Q is, and distinguishes a Q deficit (NEES
+    // drops) from an observability/linearization fault (NEES stays high).
+    // Parse a positive-float sweep knob with end-pointer validation, so a
+    // malformed value fails loudly (atof would silently coerce "abc" → 0.0 and
+    // skip the sweep). Trailing whitespace is tolerated; anything else is rejected.
+    auto parse_scale = [](const char* s, double& out) {
+        char* end = nullptr;
+        out = std::strtod(s, &end);
+        while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')
+            ++end;
+        return end != s && *end == '\0' && out > 0.0;
+    };
+    if (const char* qs = std::getenv("CORTEX_Q_SCALE")) {
+        double k = 0.0;
+        if (parse_scale(qs, k)) {
+            cfg.gyro_noise_density *= k;
+            cfg.accel_noise_density *= k;
+            cfg.gyro_bias_random_walk *= k;
+            cfg.accel_bias_random_walk *= k;
+            WARN(label << ": CORTEX_Q_SCALE=" << k << " — IMU noise densities scaled for the consistency sweep");
+        } else {
+            WARN(label << ": CORTEX_Q_SCALE='" << qs << "' ignored — not a positive number");
+        }
+    }
+    // Mirror knob (#212): CORTEX_R_SCALE multiplies the visual measurement noise.
+    // The NIS over-confidence is nearly invariant to Q, so sweeping R discriminates
+    // an under-tuned R (NIS falls with R) from an observability/Jacobian fault on
+    // the update (NIS stays high regardless).
+    if (const char* rs = std::getenv("CORTEX_R_SCALE")) {
+        double k = 0.0;
+        if (parse_scale(rs, k)) {
+            cfg.camera_noise_normalized *= k;
+            WARN(label << ": CORTEX_R_SCALE=" << k << " — visual measurement noise scaled for the consistency sweep");
+        } else {
+            WARN(label << ": CORTEX_R_SCALE='" << rs << "' ignored — not a positive number");
+        }
+    }
+
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the
     // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests
@@ -316,6 +358,16 @@ void run_euroc_replay(
         WARN(label << ": NIS over " << nis.samples << " updates: normalized=" << nis.normalized << " (band ["
                    << nis.lower << ", " << nis.upper << "]) — "
                    << (nis.consistent() ? "consistent" : (nis.overconfident ? "OVER-confident" : "UNDER-confident")));
+    }
+    if (est.backend().innovation_whiteness().updates() > 0) {
+        // #280 discriminator: a biased mean ⇒ systematic error (extrinsics /
+        // triangulation / time-sync); temporal correlation ⇒ unmodelled dynamics
+        // or observability inconsistency. Zero-mean + white ⇒ the over-confidence
+        // is pure covariance mistune (R/Jacobian), the FEJ hypothesis.
+        const auto iw = est.backend().innovation_whiteness().report();
+        WARN(label << ": innovation over " << iw.updates << " updates: mean_z=" << iw.mean_z
+                   << (iw.biased ? " (BIASED)" : " (zero-mean)") << ", lag1_z=" << iw.lag1_z
+                   << (iw.correlated ? " (CORRELATED)" : " (white)") << " — |z|>" << iw.z_crit << " flags");
     }
     if (nees_acc.samples() > 0) {
         const auto neesr = nees_acc.report();
