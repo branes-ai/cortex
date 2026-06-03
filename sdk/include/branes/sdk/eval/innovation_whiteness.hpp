@@ -43,7 +43,7 @@ struct InnovationWhitenessReport {
     std::size_t dof_total = 0;  ///< total residual components seen
     double mean = 0.0;          ///< mean normalized innovation component
     double mean_z = 0.0;        ///< zero-mean z-score: mean·√dof_total (~N(0,1) under H0)
-    double lag1 = 0.0;          ///< lag-1 autocorrelation of the standardized per-update sums
+    double lag1 = 0.0;          ///< mean-centered lag-1 autocorrelation of the standardized per-update sums
     double lag1_z = 0.0;        ///< whiteness z-score: lag1·√(updates−1)
     double z_crit = 0.0;        ///< two-sided |z| threshold for the chosen α
     bool biased = false;        ///< |mean_z| > z_crit ⇒ systematic (non-zero-mean) innovation
@@ -64,12 +64,13 @@ public:
         dof_total_ += dof;
         ++updates_;
         const double u = innov_sum / std::sqrt(static_cast<double>(dof));
-        if (have_prev_) {
-            cross_ += prev_u_ * u;
-            ++cross_n_;
-        }
+        if (have_prev_)
+            cross_ += prev_u_ * u;  // Σ u_t u_{t−1}
+        else
+            u_first_ = u;
+        su_ += u;
         usq_ += u * u;
-        prev_u_ = u;
+        prev_u_ = u;  // after the run, holds u_last
         have_prev_ = true;
     }
 
@@ -88,9 +89,23 @@ public:
             return rep;
         rep.mean = sum_ / static_cast<double>(dof_total_);
         rep.mean_z = rep.mean * std::sqrt(static_cast<double>(dof_total_));
-        if (cross_n_ > 0 && usq_ > 0.0) {
-            rep.lag1 = cross_ / usq_;  // Σ u_t u_{t−1} / Σ u_t²
-            rep.lag1_z = rep.lag1 * std::sqrt(static_cast<double>(cross_n_));
+        // Whiteness: lag-1 autocorrelation of the MEAN-CENTERED u_t sequence, so a
+        // pure bias (a constant offset) does not masquerade as correlation — the
+        // `biased` and `correlated` verdicts stay independent axes. Expanded from
+        // the streaming sums: γ₁ = Σ_{t≥2}(u_t−ū)(u_{t−1}−ū), γ₀ = Σ(u_t−ū)².
+        if (updates_ >= 2) {
+            const double n = static_cast<double>(updates_);
+            const double ubar = su_ / n;
+            const double g0 = usq_ - n * ubar * ubar;  // Σ(u_t−ū)²
+            // Relative guard: a (near-)constant sequence has g0 ≈ 0 vs usq_, where
+            // both g0 and the centered numerator are floating-point noise and their
+            // ratio is meaningless — its autocorrelation is undefined, so report it
+            // white (a constant offset is biased, not correlated).
+            if (usq_ > 0.0 && g0 > 1e-9 * usq_) {
+                const double g1 = cross_ - ubar * (su_ - u_first_) - ubar * (su_ - prev_u_) + (n - 1.0) * ubar * ubar;
+                rep.lag1 = g1 / g0;
+                rep.lag1_z = rep.lag1 * std::sqrt(n - 1.0);
+            }
         }
         rep.z_crit = detail::inverse_normal_cdf(1.0 - alpha / 2.0);
         rep.biased = std::abs(rep.mean_z) > rep.z_crit;
@@ -102,11 +117,12 @@ private:
     double sum_ = 0.0;  ///< Σ_t S_t  (= Σ over all components of r_k/σ)
     std::size_t dof_total_ = 0;
     std::size_t updates_ = 0;
-    double prev_u_ = 0.0;
+    double prev_u_ = 0.0;  ///< last u_t added (= u_last at report)
     bool have_prev_ = false;
-    double cross_ = 0.0;  ///< Σ u_t u_{t−1}
-    std::size_t cross_n_ = 0;
-    double usq_ = 0.0;  ///< Σ u_t²
+    double u_first_ = 0.0;  ///< first u_t added
+    double su_ = 0.0;       ///< Σ u_t
+    double cross_ = 0.0;    ///< Σ u_t u_{t−1}
+    double usq_ = 0.0;      ///< Σ u_t²
 };
 
 }  // namespace branes::sdk::eval
