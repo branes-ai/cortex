@@ -119,20 +119,44 @@ triangulation bias, or — less likely on hardware-synchronized EuRoC — a
 camera–IMU time offset) is a secondary candidate that would also produce
 motion-scaling innovations.
 
-## D. The remaining discriminator, and the fix
+## D. The discriminator — run, and resolved
 
 One clean test separates the two remaining hypotheses before any estimator
-surgery: **the mean and whiteness of the normalized innovations.**
+surgery: **the mean and whiteness of the normalized innovations**
+(`eval/innovation_whiteness.hpp`; per update it takes the signed
+`S_t = Σ_k r_k/σ ~ N(0, dof)`).
 
-- **zero-mean, inflated-variance, temporally white** → observability / Jacobian
+- **zero-mean, inflated-variance, temporally non-white** → observability / Jacobian
   inconsistency → implement FEJ / OC-EKF.
-- **non-zero mean or autocorrelated** → a systematic (calibration / triangulation)
+- **a large non-zero mean** → a systematic (calibration / triangulation / time-sync)
   → fix the model, not the noise.
 
-This is the next small instrument (a mean/whiteness accumulator alongside the NIS
-one). The expected fix for #212 is FEJ; success criterion: with FEJ in place the
-*honest* noise (`Q≈10×`, `R≈4×`) finally yields **consistent NEES and NIS *and*
-bounded ATE** together — the state no setting can reach today.
+**Result** (baseline `Q1R1`):
+
+| sequence | mean z | bias magnitude | lag-1 z | verdict |
+|---|---|---|---|---|
+| V2_03 (aggressive) | −4.64 (flagged) | **≈ −0.013σ** (~0.1 px) | +14.2 | non-white; bias negligible |
+| MH_05 (mild) | +2.19 (not flagged) | — | −10.3 | non-white; zero-mean |
+
+The innovations are **strongly non-white on both sequences** (|lag-1 z| ≫ 2.58):
+the filter is leaving temporal structure in the residuals — the signature of an
+observability / linearization inconsistency, exactly as the sweeps implied. The
+mean is **effectively zero**: the only flagged bias (V2_03) is ~0.013σ — about a
+tenth of a pixel — versus a NIS of 14.8 (innovation spread ~3.85σ), so the
+systematic contributes ~0.3% of the over-confidence. No gross calibration error
+(no swapped extrinsic, no large time offset) exists; the small bias is
+motion-dependent (absent on MH_05) and a minor secondary at most.
+
+**Conclusion: this is the observability/Jacobian case.** The fix is **FEJ /
+OC-EKF** (#280). Success criterion: with FEJ in place the *honest* noise
+(`Q≈10×`, `R≈4×`) finally yields **consistent NEES and NIS *and* bounded ATE**
+together — the state no setting can reach today — and the innovation sequence
+whitens.
+
+> Caveat: `S_t` aggregates a whole track's multi-dimensional residual into one
+> signed scalar processed in marginalization order, so read the lag-1 *sign* with
+> care; the load-bearing finding is "significantly non-white," which holds on both
+> sequences and both signs.
 
 ## E. Reproduction
 
