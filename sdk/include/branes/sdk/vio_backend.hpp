@@ -42,6 +42,9 @@ struct VioConfig {
     double gyro_noise_density = 1.6e-4;   ///< continuous-time σ_g
     double accel_bias_random_walk = 3.0e-3;
     double gyro_bias_random_walk = 1.9e-5;
+    /// Visual measurement σ in normalized image coordinates — the MSCKF camera
+    /// update's R. Default matches the updater's historical hardcoded value.
+    double camera_noise_normalized = 1.0e-2;
     int num_cameras = 1;  ///< 1 = mono, 2 = stereo
     int max_clones = 11;  ///< MSCKF sliding-window length
     /// Skip the stationary-window static init and bootstrap from the dynamic

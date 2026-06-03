@@ -75,6 +75,11 @@ struct NisSample {
     T value = T{0};
     std::size_t dof = 0;
     bool valid = false;
+    /// Signed innovation statistic Σ_k (r_k / σ) over the projected residual.
+    /// Under a consistent, zero-mean filter this is ~N(0, dof); its run mean
+    /// tests for a *systematic* (biased) innovation, which NIS (a magnitude)
+    /// cannot see.
+    T innov_sum = T{0};
 };
 
 template <math::Scalar T>
@@ -174,8 +179,12 @@ public:
         bool nis_valid = false;
         if (nis_out != nullptr || opts_.enable_gating) {
             nis_valid = s.cov.mahalanobis(H, std::span<const T>{proj.r}, r2, gamma);
-            if (nis_out != nullptr)
-                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid};
+            if (nis_out != nullptr) {
+                T isum{0};
+                for (std::size_t k = 0; k < proj.rows; ++k)
+                    isum += proj.r[k];
+                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid, isum / opts_.normalized_sigma};
+            }
         }
         if (opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(proj.rows)))
             return false;  // ill-conditioned innovation or gated out

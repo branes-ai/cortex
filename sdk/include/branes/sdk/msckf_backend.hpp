@@ -30,12 +30,14 @@
 
 #include <branes/math/cameras/pinhole_radtan.hpp>
 #include <branes/sdk/eval/consistency.hpp>
+#include <branes/sdk/eval/innovation_whiteness.hpp>
 #include <branes/sdk/imu_init.hpp>
 #include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
 #include <branes/sdk/sfm/init_window.hpp>
 #include <branes/sdk/vio_backend.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -160,6 +162,12 @@ public:
         const DVec3 gravity{{T{0}, T{0}, -static_cast<T>(config.gravity_magnitude)}};
         prop_ = msckf::Propagator<T>(noise, gravity);
 
+        // Wire the visual measurement noise R from config so it is tunable
+        // alongside the IMU process noise (the camera update's normalized σ).
+        typename msckf::CameraUpdater<T>::Options uopts;
+        uopts.normalized_sigma = static_cast<T>(config.camera_noise_normalized);
+        updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
+
         ImuInitConfig<T> icfg;
         icfg.gravity_magnitude = static_cast<T>(config.gravity_magnitude);
         initializer_ = ImuInitializer<T>(icfg);
@@ -178,6 +186,7 @@ public:
         init_last_imu_t_ = 0.0;
         tracks_.clear();
         nis_ = eval::ConsistencyAccumulator{};
+        innov_ = eval::InnovationWhitenessAccumulator{};
     }
 
     void process_imu(const ImuMeasurement<T>& imu) override {
@@ -264,6 +273,11 @@ public:
         for (const auto& [id, recs] : tracks_)
             if (seen.find(id) == seen.end())
                 ended.push_back(id);
+        // Process in a deterministic (feature-id) order: tracks_ is an
+        // unordered_map, so its iteration order is hash-driven and varies across
+        // STL implementations. Sorting keeps the EKF update sequence — and the
+        // order-dependent innovation-whiteness lag-1 telemetry — reproducible.
+        std::sort(ended.begin(), ended.end());
         for (const std::uint64_t id : ended)
             update_and_erase(id);
     }
@@ -297,6 +311,15 @@ public:
     /// free half of the consistency instrument (#264).
     [[nodiscard]] const eval::ConsistencyAccumulator& nis_consistency() const noexcept {
         return nis_;
+    }
+
+    /// Innovation zero-mean + whiteness telemetry (#280 discriminator): tests the
+    /// *direction* and *temporal structure* of the innovation, which NIS (a
+    /// magnitude) cannot. A biased mean ⇒ a systematic error (extrinsics /
+    /// triangulation / time-sync); temporal correlation ⇒ unmodelled dynamics or
+    /// an observability/linearization inconsistency.
+    [[nodiscard]] const eval::InnovationWhitenessAccumulator& innovation_whiteness() const noexcept {
+        return innov_;
     }
 
     /// Read-only view of the full filter state (covariance, clone window,
@@ -575,8 +598,10 @@ private:
         if (track.observations.size() >= 2) {
             msckf::NisSample<T> ns;
             updater_.update(state_, track, &ns);
-            if (ns.valid)  // record the innovation NIS even if it was gated out
+            if (ns.valid) {  // record the innovation NIS even if it was gated out
                 nis_.add(static_cast<double>(ns.value), static_cast<int>(ns.dof));
+                innov_.add(static_cast<double>(ns.innov_sum), ns.dof);
+            }
         }
         tracks_.erase(it);
     }
@@ -595,6 +620,7 @@ private:
                     touching.push_back(id);
                     break;
                 }
+        std::sort(touching.begin(), touching.end());  // deterministic update order (see process_camera)
         for (const std::uint64_t id : touching)
             update_and_erase(id);
 
@@ -614,7 +640,8 @@ private:
 
     std::vector<CameraCalibration> cameras_;
     msckf::CameraUpdater<T> updater_;
-    eval::ConsistencyAccumulator nis_{};  // per-update NIS, accumulated over the run
+    eval::ConsistencyAccumulator nis_{};            // per-update NIS, accumulated over the run
+    eval::InnovationWhitenessAccumulator innov_{};  // per-update innovation mean/whiteness
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};
