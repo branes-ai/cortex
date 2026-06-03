@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.34.0](https://github.com/branes-ai/cortex/compare/v0.33.0...v0.34.0) (2026-06-03)
+
+
+### Features
+
+* **sdk:** Q/R consistency-sweep knobs + [#212](https://github.com/branes-ai/cortex/issues/212) root-cause diagnosis ([#279](https://github.com/branes-ai/cortex/issues/279)) ([b718e5e](https://github.com/branes-ai/cortex/commit/b718e5e92cc177f06ae1de391824777388d12788))
+
 ## [0.33.0](https://github.com/branes-ai/cortex/compare/v0.32.0...v0.33.0) (2026-06-03)
 
 
