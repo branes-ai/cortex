@@ -251,6 +251,17 @@ void run_euroc_replay(
             WARN(label << ": CORTEX_Q_SCALE=" << k << " — IMU noise densities scaled for the consistency sweep");
         }
     }
+    // Mirror knob (#212): CORTEX_R_SCALE multiplies the visual measurement noise.
+    // The NIS over-confidence is nearly invariant to Q, so sweeping R discriminates
+    // an under-tuned R (NIS falls with R) from an observability/Jacobian fault on
+    // the update (NIS stays high regardless).
+    if (const char* rs = std::getenv("CORTEX_R_SCALE")) {
+        const double k = std::atof(rs);
+        if (k > 0.0) {
+            cfg.camera_noise_normalized *= k;
+            WARN(label << ": CORTEX_R_SCALE=" << k << " — visual measurement noise scaled for the consistency sweep");
+        }
+    }
 
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the

@@ -160,6 +160,12 @@ public:
         const DVec3 gravity{{T{0}, T{0}, -static_cast<T>(config.gravity_magnitude)}};
         prop_ = msckf::Propagator<T>(noise, gravity);
 
+        // Wire the visual measurement noise R from config so it is tunable
+        // alongside the IMU process noise (the camera update's normalized σ).
+        typename msckf::CameraUpdater<T>::Options uopts;
+        uopts.normalized_sigma = static_cast<T>(config.camera_noise_normalized);
+        updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
+
         ImuInitConfig<T> icfg;
         icfg.gravity_magnitude = static_cast<T>(config.gravity_magnitude);
         initializer_ = ImuInitializer<T>(icfg);
