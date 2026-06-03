@@ -235,6 +235,23 @@ void run_euroc_replay(
     // path on real data.
     cfg.prefer_dynamic_init = prefer_dynamic;
 
+    // Process-noise sweep knob (#212 diagnosis): CORTEX_Q_SCALE multiplies the
+    // IMU noise densities. Per-block NEES localized the over-confidence to the
+    // attitude state (worst under fast rotation), pointing at under-tuned process
+    // noise; sweeping this factor and watching the attitude NEES fall toward 1
+    // quantifies how under-tuned Q is, and distinguishes a Q deficit (NEES
+    // drops) from an observability/linearization fault (NEES stays high).
+    if (const char* qs = std::getenv("CORTEX_Q_SCALE")) {
+        const double k = std::atof(qs);
+        if (k > 0.0) {
+            cfg.gyro_noise_density *= k;
+            cfg.accel_noise_density *= k;
+            cfg.gyro_bias_random_walk *= k;
+            cfg.accel_bias_random_walk *= k;
+            WARN(label << ": CORTEX_Q_SCALE=" << k << " — IMU noise densities scaled for the consistency sweep");
+        }
+    }
+
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the
     // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests
