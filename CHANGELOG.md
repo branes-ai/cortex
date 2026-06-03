@@ -22,6 +22,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.33.0](https://github.com/branes-ai/cortex/compare/v0.32.0...v0.33.0) (2026-06-03)
+
+
+### Features
+
+* **eval:** add IMU Allan-variance noise characterization ([#268](https://github.com/branes-ai/cortex/issues/268)) ([#276](https://github.com/branes-ai/cortex/issues/276)) ([4eafd31](https://github.com/branes-ai/cortex/commit/4eafd316ba2d69fde7bf392af872b4cd443d0a06))
+
+
+### Documentation
+
+* process documentation ([441810a](https://github.com/branes-ai/cortex/commit/441810a715bb1e2eb4e7a80d106affeece4919d2))
+
 ## [0.32.0](https://github.com/branes-ai/cortex/compare/v0.31.0...v0.32.0) (2026-06-02)
 
 
