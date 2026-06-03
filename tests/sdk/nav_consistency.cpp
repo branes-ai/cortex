@@ -120,6 +120,21 @@ TEST_CASE("nav_error feeds nees as a quadratic form", "[sdk][eval][nav-consisten
     REQUIRE_THAT(ev::nees<T>(e, P), Catch::Matchers::WithinAbs(0.09, 1e-12));
 }
 
+TEST_CASE("nav_block_nees splits the 15-D NEES into per-state blocks", "[sdk][eval][nav-consistency]") {
+    // Distinct per-block errors; identity covariance ⇒ each block NEES = ‖e_b‖².
+    const std::array<T, ev::kNavErrorDim> e{1, 2, 2, 3, 0, 4, 0, 0, 0, 1, 1, 1, 2, 0, 0};
+    DynMat<T> P(ev::kNavErrorDim, ev::kNavErrorDim);
+    for (std::size_t i = 0; i < ev::kNavErrorDim; ++i)
+        P(i, i) = 1.0;
+    const auto blk = ev::nav_block_nees<T>(e, P);
+    REQUIRE_THAT(blk[ev::kAttitude], Catch::Matchers::WithinAbs(9.0, 1e-12));   // 1+4+4
+    REQUIRE_THAT(blk[ev::kPosition], Catch::Matchers::WithinAbs(25.0, 1e-12));  // 9+0+16
+    REQUIRE_THAT(blk[ev::kVelocity], Catch::Matchers::WithinAbs(0.0, 1e-12));   // 0
+    REQUIRE_THAT(blk[ev::kGyroBias], Catch::Matchers::WithinAbs(3.0, 1e-12));   // 1+1+1
+    REQUIRE_THAT(blk[ev::kAccelBias], Catch::Matchers::WithinAbs(4.0, 1e-12));  // 4+0+0
+    REQUIRE_THROWS_AS(ev::nav_block_nees<T>(e, DynMat<T>(10, 10)), std::invalid_argument);
+}
+
 TEST_CASE("core_covariance extracts the top-left block", "[sdk][eval][nav-consistency]") {
     DynMat<T> full(18, 18);  // 15 core + one 3-dim clone-ish tail
     for (std::size_t i = 0; i < 18; ++i)

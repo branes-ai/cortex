@@ -109,9 +109,16 @@ TEST_CASE("EuRoC IMU noise density vs the filter's configured Q", "[sdk][eval][a
     accel_n /= 3.0;
 
     const bs::VioConfig cfg;  // the filter's configured noise densities
-    WARN("EuRoC IMU @ " << 1.0 / dt << " Hz: gyro N=" << gyro_n << " rad/s/√Hz (filter Q " << cfg.gyro_noise_density
-                        << "), accel N=" << accel_n << " m/s²/√Hz (filter Q " << cfg.accel_noise_density
-                        << ") — large mismatch ⇒ retune Q before chasing #212");
+    // CAVEAT: this runs on a FLIGHT sequence, so the small-tau Allan deviation is
+    // contaminated by the platform's high-frequency motion (sigma_A^2 ~= sigma_w^2
+    // + 0.5*mean((alpha*dt)^2)). The reported N is therefore an UPPER BOUND on the
+    // true sensor white-noise density, badly inflated on the aggressive
+    // sequences. A clean measurement of Q needs a long STATIC IMU log; EuRoC's
+    // published static value (gyro ~1.7e-4) already matches cfg.gyro_noise_density,
+    // so treat N>>Q here as "needs a static log to confirm", not "retune Q".
+    WARN("EuRoC IMU @ " << 1.0 / dt << " Hz (FLIGHT, motion-contaminated — upper bound): gyro N=" << gyro_n
+                        << " rad/s/sqrt(Hz) (filter Q " << cfg.gyro_noise_density << "), accel N=" << accel_n
+                        << " m/s^2/sqrt(Hz) (filter Q " << cfg.accel_noise_density << ")");
     // Sanity only (the measurement runs on a flight sequence, so the white-noise
     // density is the meaningful number; bias terms need a static log): the
     // densities are positive and within a few orders of magnitude of the config.

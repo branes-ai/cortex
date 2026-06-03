@@ -49,6 +49,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -242,7 +243,8 @@ void run_euroc_replay(
     // half of the consistency instrument, complementing the always-on NIS.
     const auto gt_states = bs::euroc::parse_groundtruth_states<T>(std::string(env));
     ev::ConsistencyAccumulator nees_acc;
-    std::size_t nees_skipped = 0;  // frames whose core covariance was not PD
+    std::array<ev::ConsistencyAccumulator, ev::kNumNavBlocks> nees_block;  // per-state localization
+    std::size_t nees_skipped = 0;                                          // frames whose core covariance was not PD
     bool have_anchor = false;
     SE3 anchor;
     std::size_t gi = 0;
@@ -262,7 +264,11 @@ void run_euroc_replay(
         const auto truth = ev::align_truth<T>(anchor, gt_states[gi].nav);
         const auto err = ev::nav_error<T>(est_nav, truth);
         try {
-            nees_acc.add(ev::nees<T>(err, ev::core_covariance<T>(st.covariance())), ev::kNavErrorDim);
+            const auto core = ev::core_covariance<T>(st.covariance());
+            nees_acc.add(ev::nees<T>(err, core), ev::kNavErrorDim);
+            const auto blk = ev::nav_block_nees<T>(err, core);  // localize per state
+            for (std::size_t b = 0; b < ev::kNumNavBlocks; ++b)
+                nees_block[b].add(blk[b], 3);
         } catch (const std::domain_error&) {
             // ONLY the expected non-positive-definite core covariance — a
             // filter-health signal, surfaced below. A shape mismatch
@@ -318,6 +324,14 @@ void run_euroc_replay(
                    << (neesr.consistent() ? "consistent" : (neesr.overconfident ? "OVER-confident" : "UNDER-confident"))
                    << (nees_skipped > 0 ? " [" + std::to_string(nees_skipped) + " frames skipped: core cov not PD]"
                                         : ""));
+        // Per-block NEES localizes WHICH state is over-confident: attitude worst
+        // ⇒ observability inconsistency; velocity/bias worst ⇒ Q / bias model.
+        std::string blocks;
+        for (std::size_t b = 0; b < ev::kNumNavBlocks; ++b)
+            if (nees_block[b].samples() > 0)
+                blocks +=
+                    std::string(ev::nav_block_name(b)) + "=" + std::to_string(nees_block[b].report().normalized) + " ";
+        WARN(label << ": per-block NEES (normalized, want ~1): " << blocks);
     }
     // Seed gyro bias (#247): a bad bias from the dynamic path's short, noisy
     // vision-IMU window drifts attitude over the sequence → gravity leaks into
