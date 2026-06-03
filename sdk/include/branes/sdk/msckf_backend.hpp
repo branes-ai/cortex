@@ -30,6 +30,7 @@
 
 #include <branes/math/cameras/pinhole_radtan.hpp>
 #include <branes/sdk/eval/consistency.hpp>
+#include <branes/sdk/eval/innovation_whiteness.hpp>
 #include <branes/sdk/imu_init.hpp>
 #include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
@@ -184,6 +185,7 @@ public:
         init_last_imu_t_ = 0.0;
         tracks_.clear();
         nis_ = eval::ConsistencyAccumulator{};
+        innov_ = eval::InnovationWhitenessAccumulator{};
     }
 
     void process_imu(const ImuMeasurement<T>& imu) override {
@@ -303,6 +305,15 @@ public:
     /// free half of the consistency instrument (#264).
     [[nodiscard]] const eval::ConsistencyAccumulator& nis_consistency() const noexcept {
         return nis_;
+    }
+
+    /// Innovation zero-mean + whiteness telemetry (#280 discriminator): tests the
+    /// *direction* and *temporal structure* of the innovation, which NIS (a
+    /// magnitude) cannot. A biased mean ⇒ a systematic error (extrinsics /
+    /// triangulation / time-sync); temporal correlation ⇒ unmodelled dynamics or
+    /// an observability/linearization inconsistency.
+    [[nodiscard]] const eval::InnovationWhitenessAccumulator& innovation_whiteness() const noexcept {
+        return innov_;
     }
 
     /// Read-only view of the full filter state (covariance, clone window,
@@ -581,8 +592,10 @@ private:
         if (track.observations.size() >= 2) {
             msckf::NisSample<T> ns;
             updater_.update(state_, track, &ns);
-            if (ns.valid)  // record the innovation NIS even if it was gated out
+            if (ns.valid) {  // record the innovation NIS even if it was gated out
                 nis_.add(static_cast<double>(ns.value), static_cast<int>(ns.dof));
+                innov_.add(static_cast<double>(ns.innov_sum), ns.dof);
+            }
         }
         tracks_.erase(it);
     }
@@ -620,7 +633,8 @@ private:
 
     std::vector<CameraCalibration> cameras_;
     msckf::CameraUpdater<T> updater_;
-    eval::ConsistencyAccumulator nis_{};  // per-update NIS, accumulated over the run
+    eval::ConsistencyAccumulator nis_{};            // per-update NIS, accumulated over the run
+    eval::InnovationWhitenessAccumulator innov_{};  // per-update innovation mean/whiteness
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};

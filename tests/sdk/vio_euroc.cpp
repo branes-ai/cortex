@@ -345,6 +345,16 @@ void run_euroc_replay(
                    << nis.lower << ", " << nis.upper << "]) — "
                    << (nis.consistent() ? "consistent" : (nis.overconfident ? "OVER-confident" : "UNDER-confident")));
     }
+    if (est.backend().innovation_whiteness().updates() > 0) {
+        // #280 discriminator: a biased mean ⇒ systematic error (extrinsics /
+        // triangulation / time-sync); temporal correlation ⇒ unmodelled dynamics
+        // or observability inconsistency. Zero-mean + white ⇒ the over-confidence
+        // is pure covariance mistune (R/Jacobian), the FEJ hypothesis.
+        const auto iw = est.backend().innovation_whiteness().report();
+        WARN(label << ": innovation over " << iw.updates << " updates: mean_z=" << iw.mean_z
+                   << (iw.biased ? " (BIASED)" : " (zero-mean)") << ", lag1_z=" << iw.lag1_z
+                   << (iw.correlated ? " (CORRELATED)" : " (white)") << " — |z|>" << iw.z_crit << " flags");
+    }
     if (nees_acc.samples() > 0) {
         const auto neesr = nees_acc.report();
         WARN(label << ": NEES over " << neesr.samples << " frames: normalized=" << neesr.normalized << " (band ["
