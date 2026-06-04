@@ -60,14 +60,15 @@ inline const StageInfo kS1{
      "|g| within tolerance of local gravity (9.78–9.83)",
      "dynamic: scale s>0, finite; alignment linear-system condition number bounded",
      "initial P honestly large on the unobservable directions (yaw, accel-bias, scale)"},
-    {{"post-alignment gravity residual", "m/s²", "the recovered R_GI actually levels gravity"},
+    {{"static gravity-leveling residual", "m/s²", "the recovered R_GI actually levels gravity (≈0)"},
      {"recovered gravity magnitude", "m/s²", "≈9.81; a wrong value flags a sign/frame bug"},
-     {"alignment condition number", "—", "scale observability; high ⇒ refuse, don't guess"},
-     {"recovered-vs-true scale error", "%", "dynamic init recovers metric scale"},
-     {"initial-P unobservable-direction σ", "deg / m", "yaw/scale variance is large, not over-tight"}},
-    {"init_gravity_residual.csv", "init_excitation_sweep.csv", "init_P_eigen.csv"},
-    "sdk/imu_init.hpp, sdk/sfm/*.hpp",
-    "scaffold"};
+     {"roll/pitch leveling error vs noise", "deg", "accel-noise sensitivity; the stationarity gate"},
+     {"dynamic scale-recovery error", "%", "metric scale from the VI alignment under excitation"},
+     {"scale-observability cliff", "% / m", "error blows up & the gate declines as excitation drops"},
+     {"initial-P seed per block", "deg / m / m/s²", "isotropic σ·I — NOT enlarged on yaw/scale/accel-bias"}},
+    {"init_static_sweep.csv", "init_excitation_sweep.csv", "init_p_sizing.csv"},
+    "sdk/imu_init.hpp, sdk/imu_preintegration.hpp",
+    "implemented"};
 
 // ── S2  IMU propagation ─────────────────────────────────────────────────────
 inline const StageInfo kS2{

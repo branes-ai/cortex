@@ -707,9 +707,19 @@ NEES vs Q-scale** (the #212 lever). Headline reading: **NEES ≈ 6 at the defaul
 is approximately consistent and the diagonal-`Q` deficit is ~7% inter-frame — the over-confidence is
 **downstream of S2**. Figures: `docs/assessments/figures/s2/`.
 
-**The other stages are scaffolds** — each prints its full contract and planned assessments and has
-an explicit fill-in point (add the computation to a `sdk/eval/*_probe.hpp` header, drive it from the
-`sN_*.cpp` like S0/S2). Revised priority for #212 now that S2 is measured-and-cleared: **S10**
+**S1 is wired** (`s1_initialization`, probe `sdk/eval/initialization_probe.hpp`, test
+`tests/sdk/initialization_probe.cpp`). It drives the real `ImuInitializer` (+ `ImuPreintegrator` for
+the dynamic keyframes) and reports: static gravity-leveling residual (machine zero) + leveling error
+vs accel noise (the stationarity gate rejects an over-noisy window); dynamic metric-scale recovery
+(<1% under excitation) and the **scale-observability cliff** — the gate *declines* once
+`resolved_motion` falls below the 0.05 m floor; and the initial covariance, which is an **isotropic
+σ·I** (σ=0.1) — *not* enlarged on the unobservable yaw/scale or the weakly-observable accel bias, a
+structural observation worth noting for the S10 calibration work. Figures: `docs/assessments/figures/s1/`.
+
+**The remaining stages (S3–S10) are scaffolds** — each prints its full contract and planned
+assessments and has an explicit fill-in point (add the computation to a `sdk/eval/*_probe.hpp`
+header, drive it from the `sN_*.cpp` like S0/S1/S2). Revised priority for #212 now that S2 is
+measured-and-cleared: **S10**
 (calibration uncertainty — now the leading candidate), **S6** (update: NIS, null-space, gating),
 **S5** (parallax gate, for the V2_03 divergence).
 
