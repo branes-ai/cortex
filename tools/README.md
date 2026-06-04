@@ -53,7 +53,7 @@ overview), `--out DIR` (artifact directory), `--no-out` (compute & print only).
 | Util | Stage | Status | Native-unit assessments |
 |---|---|---|---|
 | `s0_sensor_model` | S0 sensor & calibration models | **wired** | px (round-trip, Jacobian), px/ms (time offset), px/deg, px/mm (extrinsics), mm (IMU drift) |
-| `s1_initialization` | S1 init (static/dynamic) | scaffold | m/s² gravity residual, alignment cond#, scale %, init-P σ |
+| `s1_initialization` | S1 init (static/dynamic) | **wired** | m/s² gravity-leveling residual, deg leveling error vs noise, % scale recovery, the scale-observability cliff, isotropic init-P σ |
 | `s2_propagation` | S2 IMU propagation | **wired** | Q-structure (cortex diag vs canonical), pos-σ growth mm, GT-injection O(dt) mm, NEES vs Q-scale, R/PSD/nullspace |
 | `s3_augmentation` | S3 stochastic cloning | scaffold | clone-vs-pose marginal & cross-cov error, PSD |
 | `s4_frontend` | S4 visual frontend | scaffold | px FB residual, inlier %, grid coverage, track-length |
@@ -63,6 +63,12 @@ overview), `--out DIR` (artifact directory), `--no-out` (compute & print only).
 | `s8_zero_velocity` | S8 ZUPT | scaffold | detector ROC, static drift with/without |
 | `s9_marginalization` | S9 marginalization | scaffold | kept-marginal invariance, PSD |
 | `s10_online_calibration` | S10 online calibration | scaffold | px/ms & px/deg/mm (from S0), R-inflation equivalent, calib NEES |
+
+**S1 reading:** static init levels gravity to machine zero and the stationarity gate rejects an
+over-noisy window; dynamic init recovers the injected metric scale (<1% under excitation) and the
+scale-observability **gate declines** (rather than guessing) once `resolved_motion` drops below the
+0.05 m floor — the dynamic-init cliff. The filter's initial covariance is an **isotropic σ·I**
+(σ=0.1): *not* enlarged on the unobservable yaw/scale or the weakly-observable accel bias.
 
 **S2 reading (#212):** the probe drives the real `Propagator` and finds the diagonal `Q_d` drops
 only the canonical position-block & v–p terms (~7% position-σ inter-frame), while **propagation-only

@@ -291,4 +291,28 @@ if (gt) {
   );
 }
 
+// ── S1 figures (initialization) — rendered when the S1 artifacts are present ─
+const stat = readCsv('init_static_sweep.csv');
+if (stat) {
+  lineChart(
+    [{ name: 'leveling error (accepted)', points: stat.filter((r) => r.gate_accept === 1).map((r) => ({ x: r.accel_noise_std, y: r.rollpitch_err_deg })) }],
+    { title: 'S1  Static init: roll/pitch leveling error vs accel noise', file: 'init_static.svg',
+      xlabel: 'accel noise σ (m/s²)', ylabel: 'leveling error (deg)' },
+  );
+}
+const exc = readCsv('init_excitation_sweep.csv');
+if (exc) {
+  lineChart(
+    [{ name: 'resolved motion', points: exc.map((r) => ({ x: r.excitation_ms2, y: r.resolved_motion_m })) }],
+    { title: 'S1  Dynamic init: scale-observability cliff (gate floor = 0.05 m)', file: 'init_excitation.svg',
+      xlabel: 'acceleration excitation (m/s²)', ylabel: 'resolved metric motion (m)', hline: 0.05,
+      hlineLabel: '0.05 m gate floor — below this, scale declined' },
+  );
+  lineChart(
+    [{ name: 'scale error (accepted)', points: exc.filter((r) => r.gate_accept === 1).map((r) => ({ x: r.excitation_ms2, y: r.scale_err_pct })) }],
+    { title: 'S1  Dynamic init: metric-scale recovery error vs excitation', file: 'init_scale_error.svg',
+      xlabel: 'acceleration excitation (m/s²)', ylabel: 'scale error (%)' },
+  );
+}
+
 console.log('done.');
