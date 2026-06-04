@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.35.0](https://github.com/branes-ai/cortex/compare/v0.34.0...v0.35.0) (2026-06-04)
+
+
+### Features
+
+* **tools:** add VIO stage-probe utilities — S0 sensor-model + S2 propagation ([#283](https://github.com/branes-ai/cortex/issues/283)) ([785e875](https://github.com/branes-ai/cortex/commit/785e87575f2a34121db17ad60ce2fd5b97cd77fa))
+
 ## [0.34.0](https://github.com/branes-ai/cortex/compare/v0.33.0...v0.34.0) (2026-06-03)
 
 
