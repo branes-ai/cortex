@@ -174,7 +174,7 @@ public:
                                        static_cast<T>(config.gyro_bias_random_walk),
                                        static_cast<T>(config.accel_bias_random_walk)};
         const DVec3 gravity{{T{0}, T{0}, -static_cast<T>(config.gravity_magnitude)}};
-        prop_ = msckf::Propagator<T>(noise, gravity);
+        prop_ = msckf::Propagator<T>(noise, gravity, config.use_fej);
 
         // Wire the visual measurement noise R from config so it is tunable
         // alongside the IMU process noise (the camera update's normalized σ).
@@ -482,6 +482,7 @@ private:
     }
 
     void finish_init(double t) {
+        state_.sync_fej();  // anchor the IMU FEJ linearization at the initial estimate (#280)
         initialized_ = true;
         have_last_time_ = true;
         last_imu_time_ = t;

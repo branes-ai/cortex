@@ -36,8 +36,10 @@ public:
     using SO3 = typename State<T>::SO3;
     using Mat3 = math::lie::detail::Mat<T, 3, 3>;
 
-    explicit Propagator(const ImuNoise<T>& noise = {}, const Vec3& gravity = {{T{0}, T{0}, T{-9.81}}})
-        : noise_(noise), gravity_(gravity) {}
+    explicit Propagator(const ImuNoise<T>& noise = {},
+                        const Vec3& gravity = {{T{0}, T{0}, T{-9.81}}},
+                        bool first_estimates = true)
+        : noise_(noise), gravity_(gravity), fej_(first_estimates) {}
 
     /// Propagate one IMU sample (gyro, accel) over `dt`. Ignores
     /// non-positive dt. Generic over the covariance representation: builds
@@ -48,16 +50,21 @@ public:
     void propagate(State<T, Cov>& s, const Vec3& gyro, const Vec3& accel, T dt) {
         if (!(dt > T{0}))
             return;
-        const Vec3 w = gyro - s.bg;
-        const Vec3 a = accel - s.ba;
-        const Mat3 R = s.R.matrix();
+
+        // FEJ: the covariance transition Φ is linearized at the first-estimate
+        // (pre-update) rotation/biases, while the mean integrates at the current
+        // estimate. With FEJ off, both use the current estimate (the prior
+        // behaviour). See State::sync_fej / R_fej (#280).
+        const Vec3 w_lin = fej_ ? (gyro - s.bg_fej) : (gyro - s.bg);
+        const Vec3 a_lin = fej_ ? (accel - s.ba_fej) : (accel - s.ba);
+        const Mat3 R_lin = (fej_ ? s.R_fej : s.R).matrix();
 
         // ── Covariance: build F = I + A·dt on the 15×15 IMU block ──────
         const std::size_t d = s.dim();
         DynMat<T> F = DynMat<T>::identity(d);
-        const Mat3 negR_dt = R * (-dt);
-        const Mat3 negRahat_dt = (R * math::lie::detail::hat(a)) * (-dt);
-        const Mat3 negwhat_dt = math::lie::detail::hat(w) * (-dt);
+        const Mat3 negR_dt = R_lin * (-dt);
+        const Mat3 negRahat_dt = (R_lin * math::lie::detail::hat(a_lin)) * (-dt);
+        const Mat3 negwhat_dt = math::lie::detail::hat(w_lin) * (-dt);
         // Body-frame right-perturbation error model (R ← R·Exp(δθ)):
         //   δθ̇ = −[ω]ₓ δθ − δbg  ⇒  F[θ,θ] += −[ω]ₓ dt, F[θ,bg] = −I dt
         place3(F, State<T>::kTheta, State<T>::kTheta, negwhat_dt);
@@ -78,12 +85,21 @@ public:
         push_diag(q, 9, State<T>::kBa, noise_.accel_bias * noise_.accel_bias * dt);
         s.cov.predict(F, std::span<const NoiseTerm<T>>{q});
 
-        // ── Mean: strapdown integration ────────────────────────────────
-        const Vec3 a_world = R * a + gravity_;
+        // ── Mean: strapdown integration (always at the current estimate) ──
+        const Vec3 w = gyro - s.bg;
+        const Vec3 a = accel - s.ba;
+        const Vec3 a_world = s.R.matrix() * a + gravity_;
         s.p = s.p + s.v * dt + a_world * (T{0.5} * dt * dt);
         s.v = s.v + a_world * dt;
         s.R = s.R * SO3::exp(w * dt);
         s.timestamp += dt;
+
+        // Refresh the FEJ anchor to the just-propagated mean. ekf_update does not
+        // touch it, so it holds the pre-update prior across the next update —
+        // exactly the first-estimate linearization point Φ needs (#280).
+        s.R_fej = s.R;
+        s.bg_fej = s.bg;
+        s.ba_fej = s.ba;
     }
 
 private:
@@ -99,6 +115,7 @@ private:
 
     ImuNoise<T> noise_;
     Vec3 gravity_;
+    bool fej_ = true;  ///< linearize Φ at the first-estimate (pre-update) IMU state
 };
 
 }  // namespace branes::sdk::msckf

@@ -69,6 +69,22 @@ struct State {
     Vec3 ba{};  ///< accel bias
     double timestamp = 0.0;
 
+    // First-Estimates-Jacobian linearization point for the IMU propagation
+    // Jacobian Φ: the rotation and biases as of the last propagation's prior.
+    // `Propagator` refreshes them to the propagated mean each step but `ekf_update`
+    // never corrects them, so the one propagation step after each measurement
+    // update keeps the *pre-update* linearization — matching the frozen-clone
+    // measurement Jacobians so Φ and H share one point (#280). `sync_fej()` resets
+    // them to the current mean (called once the IMU state is initialized).
+    SO3 R_fej{};
+    Vec3 bg_fej{};
+    Vec3 ba_fej{};
+    void sync_fej() {
+        R_fej = R;
+        bg_fej = bg;
+        ba_fej = ba;
+    }
+
     std::vector<Clone> clones;
     Cov cov;  ///< joint error-state covariance (representation-policy), dim() square
 
