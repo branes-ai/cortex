@@ -102,3 +102,8 @@ add_subdirectory(cv)
 add_subdirectory(sdk)
 add_subdirectory(bench)
 add_subdirectory(daemons)
+
+# VIO stage-probe study utilities (host-only developer tools — see tools/).
+if(NOT BUILD_TARGET_KPU)
+    add_subdirectory(tools)
+endif()
