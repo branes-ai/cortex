@@ -40,6 +40,13 @@
 
 namespace branes::sdk::eval {
 
+namespace smp_detail {
+// π as a type-generic constant. (std::numbers::pi_v<T> is unusable here: this
+// layer is generic over the Universal scalar types, for which pi_v is ill-formed.)
+template <math::Scalar T>
+inline constexpr T kPi = T{3.14159265358979323846L};
+}  // namespace smp_detail
+
 // ── Shared native-unit result types ──────────────────────────────────────
 
 /// Summary of a scalar metric over a sampled domain. `unit` is carried as a
@@ -59,6 +66,8 @@ struct FieldStats {
         rms += a * a;
         ++count;
     }
+    /// Convert the running sums to mean/RMS. Call exactly once, after the last
+    /// accumulate() — it is not idempotent (a second call would re-divide).
     void finalize() {
         if (count > 0) {
             mean /= static_cast<T>(count);
@@ -125,7 +134,7 @@ template <class Cam, math::Scalar T>
             const T res = sqrt(dx * dx + dy * dy);
             using std::atan2;
             const T rxy = sqrt(bearing[0] * bearing[0] + bearing[1] * bearing[1]);
-            const T inc = atan2(rxy, bearing[2]) * (T{180} / T{3.14159265358979323846});
+            const T inc = atan2(rxy, bearing[2]) * (T{180} / smp_detail::kPi<T>);
             // The distortion inverse is only defined within the lens FOV; past
             // the incidence cap (near 90° for a fisheye) tan(θ) explodes and the
             // round-trip is meaningless. Excluded from the contract; the cap is
@@ -343,7 +352,7 @@ template <class Cam, math::Scalar T>
     using SO3 = math::lie::SO3<T>;
     using Vec3d = math::lie::detail::Vec<T, 3>;
     using std::sqrt;
-    const T deg2rad = T{3.14159265358979323846} / T{180};
+    const T deg2rad = smp_detail::kPi<T> / T{180};
 
     auto project_with = [&](const SO3& Ric, const Vec3d& pic) -> Vec2<T> {
         // Camera-frame point: p_c = R_cam_imu (p_imu_feat − p_imu_cam),
@@ -438,7 +447,7 @@ imu_static_identity(T duration_s = T{10}, T rate_hz = T{200}, T g = T{9.81}, std
         Vec3 ba_meas;      // accel bias present in the measurement but NOT estimated
         Vec3 grav_filter;  // gravity the propagator integrates with
     };
-    const T deg = T{3.14159265358979323846} / T{180};
+    const T deg = smp_detail::kPi<T> / T{180};
     const SO3 level{};
     std::vector<Setup> setups = {
         {"ideal", level, level, Vec3{}, g_world},

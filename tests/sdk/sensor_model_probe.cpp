@@ -193,7 +193,6 @@ TEST_CASE("S0 quantifies the pixel bias from extrinsic-calibration error", "[sdk
         const char* tag;
         T depth;
     };
-    bool trans_depth_monotone = true;
     T near_px_per_mm = 0, far_px_per_mm = 0;
     for (const Case cs : {Case{"near", 2.0}, Case{"far", 10.0}}) {
         const Vec3 p_feat{{p_ic[0] + 0.6, p_ic[1] + 0.3, p_ic[2] + cs.depth}};
@@ -216,7 +215,6 @@ TEST_CASE("S0 quantifies the pixel bias from extrinsic-calibration error", "[sdk
     // Translation sensitivity scales with 1/depth: a near feature is more
     // sensitive to a mm of extrinsic error than a far one.
     REQUIRE(near_px_per_mm > far_px_per_mm);
-    (void)trans_depth_monotone;
 }
 
 // ── S0.5  IMU static identity & gravity leakage (m/s², mm) ────────────────

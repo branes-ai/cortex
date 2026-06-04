@@ -73,7 +73,7 @@ struct ProbeArgs {
             a.help = true;
         else if (v == "--list")
             a.list = true;
-        else if (v == "--out" && i + 1 < argc)
+        else if (v == "--out" && i + 1 < argc && std::string_view(argv[i + 1]).substr(0, 2) != "--")
             a.out = argv[++i];
         else if (v == "--no-out")
             a.out.clear();
@@ -86,7 +86,7 @@ struct ProbeArgs {
 // ── Pretty printing ────────────────────────────────────────────────────────
 
 inline void rule(char c = '-', int n = 78) {
-    std::cout << std::string(static_cast<std::size_t>(n), c) << '\n';
+    std::cout << std::string(n < 0 ? std::size_t{0} : static_cast<std::size_t>(n), c) << '\n';
 }
 
 inline void print_contract(const StageInfo& s) {

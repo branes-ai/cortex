@@ -50,6 +50,11 @@ using SO3 = math::lie::SO3<T>;
 
 constexpr std::size_t kTheta = 0, kPos = 3, kVel = 6, kBg = 9, kBa = 12, kImu = 15;
 
+// π as a type-generic constant. (std::numbers::pi_v<T> is unusable here: this
+// layer is generic over the Universal scalar types, for which pi_v is ill-formed.)
+template <math::Scalar T>
+inline constexpr T kPi = T{3.14159265358979323846L};
+
 /// Place a 3×3 block (additively) into a DynMat at (r0,c0).
 template <math::Scalar T>
 void place3(DynMat<T>& M, std::size_t r0, std::size_t c0, const Mat3<T>& B) {
@@ -279,8 +284,8 @@ template <math::Scalar T>
             p.pos_sigma_mm_canon = block_sigma(Pcanon, kPos) * T{1000};
             p.vel_sigma_mm_s_cortex = block_sigma(Preal, kVel) * T{1000};
             p.vel_sigma_mm_s_canon = block_sigma(Pcanon, kVel) * T{1000};
-            p.att_sigma_deg_cortex = block_sigma(Preal, kTheta) * (T{180} / T{3.14159265358979323846});
-            p.att_sigma_deg_canon = block_sigma(Pcanon, kTheta) * (T{180} / T{3.14159265358979323846});
+            p.att_sigma_deg_cortex = block_sigma(Preal, kTheta) * (T{180} / kPi<T>);
+            p.att_sigma_deg_canon = block_sigma(Pcanon, kTheta) * (T{180} / kPi<T>);
             p.R_ortho_residual = sqrt(ortho);
             p.min_eig_cortex = min_eigenvalue(Preal);
             out.curve.push_back(p);
@@ -355,7 +360,7 @@ template <math::Scalar T>
     r.dt_s = dt;
     r.pos_error_mm = nrm(coarse.p - fine.p) * T{1000};
     r.vel_error_mm_s = nrm(coarse.v - fine.v) * T{1000};
-    r.att_error_deg = nrm((fine.R.inverse() * coarse.R).log()) * (T{180} / T{3.14159265358979323846});
+    r.att_error_deg = nrm((fine.R.inverse() * coarse.R).log()) * (T{180} / kPi<T>);
     return r;
 }
 
