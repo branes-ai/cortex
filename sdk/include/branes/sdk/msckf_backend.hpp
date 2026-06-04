@@ -113,6 +113,20 @@ struct InitDiagnostics {
     double dyn_tilt_vs_accel_deg = 0.0;
 };
 
+/// FEJ engagement telemetry (#280): how far each clone's mean pose drifts from
+/// its frozen first-estimate (R_fej, p_fej) over its lifetime — the magnitude the
+/// First-Estimates Jacobian actually linearizes away from. Sampled when a clone is
+/// marginalized (its full age). A tiny divergence with a large effect on
+/// consistency would point at a bug; a large divergence makes the FEJ linearization
+/// gap real.
+struct FejDivergence {
+    double rot_deg_mean = 0.0;
+    double rot_deg_max = 0.0;
+    double trans_mean = 0.0;
+    double trans_max = 0.0;
+    std::size_t samples = 0;
+};
+
 /// The MSCKF backend, generic over the covariance representation `Cov`
 /// (`FullCovariance` — Joseph-form, the default; or `SqrtCovariance` — the
 /// QR array update). The mean, IMU init, feature management, and window
@@ -188,6 +202,8 @@ public:
         tracks_.clear();
         nis_ = eval::ConsistencyAccumulator{};
         innov_ = eval::InnovationWhitenessAccumulator{};
+        fej_rot_sum_ = fej_rot_max_ = fej_trans_sum_ = fej_trans_max_ = 0.0;
+        fej_n_ = 0;
     }
 
     void process_imu(const ImuMeasurement<T>& imu) override {
@@ -321,6 +337,20 @@ public:
     /// an observability/linearization inconsistency.
     [[nodiscard]] const eval::InnovationWhitenessAccumulator& innovation_whiteness() const noexcept {
         return innov_;
+    }
+
+    /// FEJ engagement telemetry (#280): the run's clone mean-vs-first-estimate
+    /// pose divergence, averaged and peaked over marginalized clones.
+    [[nodiscard]] FejDivergence fej_divergence() const noexcept {
+        FejDivergence d;
+        d.samples = fej_n_;
+        if (fej_n_ > 0) {
+            d.rot_deg_mean = fej_rot_sum_ / static_cast<double>(fej_n_);
+            d.trans_mean = fej_trans_sum_ / static_cast<double>(fej_n_);
+        }
+        d.rot_deg_max = fej_rot_max_;
+        d.trans_max = fej_trans_max_;
+        return d;
     }
 
     /// Read-only view of the full filter state (covariance, clone window,
@@ -609,6 +639,18 @@ private:
 
     // Update with every feature observed at the oldest clone (so its
     // information is used), drop that clone, and purge its stale rows.
+    // Accumulate one clone's mean-vs-first-estimate divergence (#280).
+    void sample_fej_divergence(const typename msckf::State<T, Cov>::Clone& c) {
+        const double ang_deg = static_cast<double>(math::lie::detail::norm((c.R_fej.inverse() * c.R).log())) * 180.0 /
+                               3.14159265358979323846;
+        const double trans = static_cast<double>(math::lie::detail::norm(c.p - c.p_fej));
+        fej_rot_sum_ += ang_deg;
+        fej_trans_sum_ += trans;
+        fej_rot_max_ = std::max(fej_rot_max_, ang_deg);
+        fej_trans_max_ = std::max(fej_trans_max_, trans);
+        ++fej_n_;
+    }
+
     void marginalize_oldest() {
         if (state_.clones.empty())
             return;
@@ -625,6 +667,7 @@ private:
         for (const std::uint64_t id : touching)
             update_and_erase(id);
 
+        sample_fej_divergence(state_.clones.front());  // FEJ engagement, at full clone age (#280)
         msckf::StateHelper<T>::marginalize_clone(state_, 0);
 
         // Any surviving track that still references the dropped clone loses
@@ -643,6 +686,12 @@ private:
     msckf::CameraUpdater<T> updater_;
     eval::ConsistencyAccumulator nis_{};            // per-update NIS, accumulated over the run
     eval::InnovationWhitenessAccumulator innov_{};  // per-update innovation mean/whiteness
+    // FEJ clone divergence accumulators (#280): rotation in degrees, translation in metres.
+    double fej_rot_sum_ = 0.0;
+    double fej_rot_max_ = 0.0;
+    double fej_trans_sum_ = 0.0;
+    double fej_trans_max_ = 0.0;
+    std::size_t fej_n_ = 0;
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};

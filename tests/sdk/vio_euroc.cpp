@@ -375,6 +375,14 @@ void run_euroc_replay(
                    << (iw.biased ? " (BIASED)" : " (zero-mean)") << ", lag1_z=" << iw.lag1_z
                    << (iw.correlated ? " (CORRELATED)" : " (white)") << " — |z|>" << iw.z_crit << " flags");
     }
+    {
+        // FEJ engagement (#280): how far clones drift from their first estimate —
+        // the linearization gap FEJ corrects for. Tiny here + large effect ⇒ bug.
+        const auto fd = est.backend().fej_divergence();
+        WARN(label << ": FEJ clone divergence over " << fd.samples << " clones: rotation mean=" << fd.rot_deg_mean
+                   << " deg (max=" << fd.rot_deg_max << "), translation mean=" << fd.trans_mean
+                   << " m (max=" << fd.trans_max << ")");
+    }
     if (nees_acc.samples() > 0) {
         const auto neesr = nees_acc.report();
         WARN(label << ": NEES over " << neesr.samples << " frames: normalized=" << neesr.normalized << " (band ["
