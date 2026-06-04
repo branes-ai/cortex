@@ -105,3 +105,48 @@ TEST_CASE("EKF update reduces covariance and stays PD", "[sdk][msckf]") {
     REQUIRE(ms::is_positive_semidefinite(s.covariance()));
     REQUIRE(trace(s.covariance()) <= tr_before + 1e-9);  // an update cannot add info
 }
+
+TEST_CASE("FEJ: a clone's first-estimate pose is frozen across EKF updates", "[sdk][msckf][fej]") {
+    ms::State<T> s(0.5);
+    ms::Propagator<T> prop;
+    for (int kk = 0; kk < 40; ++kk)
+        prop.propagate(s, Vec3{{0.03, 0.01, -0.02}}, Vec3{{0.1, 0.0, 9.8}}, 0.01);
+    ms::StateHelper<T>::augment_clone(s);
+
+    // At creation the clone's FEJ anchor equals its current pose (= the IMU pose).
+    auto mat = [](const ms::State<T>::SO3& R) { return R.matrix(); };
+    const auto R_created = mat(s.clones[0].R);
+    const auto Rfej_created = mat(s.clones[0].R_fej);
+    const Vec3 p_created = s.clones[0].p;
+    const Vec3 pfej_created = s.clones[0].p_fej;
+    for (std::size_t i = 0; i < 3; ++i) {
+        REQUIRE(std::abs(pfej_created[i] - p_created[i]) < 1e-12);
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE(std::abs(Rfej_created(i, j) - R_created(i, j)) < 1e-12);
+    }
+
+    // A sizeable EKF update that touches the clone block moves R/p but must leave
+    // R_fej/p_fej untouched — the whole point of the anchor.
+    const std::size_t d = s.dim();
+    const std::size_t k = 3;
+    ms::DynMat<T> H(k, d);
+    for (std::size_t i = 0; i < k; ++i)
+        for (std::size_t j = 0; j < d; ++j)
+            H(i, j) = std::sin(0.7 * i + 0.4 * j);
+    std::vector<T> r = {0.2, -0.15, 0.1};
+    std::vector<T> Rd = {1e-3, 1e-3, 1e-3};
+    ms::StateHelper<T>::ekf_update(s, H, std::span<const T>{r}, std::span<const T>{Rd});
+
+    // The mean clone pose moved...
+    T moved = 0;
+    for (std::size_t i = 0; i < 3; ++i)
+        moved += std::abs(s.clones[0].p[i] - p_created[i]);
+    REQUIRE(moved > 1e-6);
+    // ...but the FEJ anchor did not.
+    const auto Rfej_after = mat(s.clones[0].R_fej);
+    for (std::size_t i = 0; i < 3; ++i) {
+        REQUIRE(std::abs(s.clones[0].p_fej[i] - pfej_created[i]) < 1e-12);
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE(std::abs(Rfej_after(i, j) - Rfej_created(i, j)) < 1e-12);
+    }
+}

@@ -91,6 +91,13 @@ struct CameraUpdaterOptions {
     T chi2_per_dof = T{5};
     bool enable_gating = true;
     std::size_t max_triangulation_iters = 5;  ///< Gauss-Newton refinement steps
+    /// First-Estimates Jacobians: evaluate the measurement Jacobian at each
+    /// clone's frozen creation pose (`Clone::R_fej`/`p_fej`) instead of its
+    /// current estimate, while keeping the residual at the current pose. Holds
+    /// the VIO observability subspace (global position + yaw) fixed so the EKF
+    /// stops manufacturing information in it (#280). Triangulation still uses the
+    /// current poses for the best geometry.
+    bool first_estimates_jacobians = true;
 };
 
 template <math::Scalar T>
@@ -143,17 +150,27 @@ public:
         std::vector<T> r(rows2, T{0});
 
         for (std::size_t i = 0; i < m; ++i) {
-            Jacobians J;
-            if (!project(s, obs[i], p_f, J))
+            const auto& cl = s.clones[obs[i].clone_index];
+            const auto& ex = cameras_[obs[i].camera_index];
+            Jacobians Jh;  // residual prediction h() at the CURRENT clone pose
+            if (!jacobian_at_pose(cl.R, cl.p, ex, p_f, Jh))
                 return false;  // feature behind a camera ⇒ drop the track
+            // FEJ: evaluate the Jacobian at the clone's frozen first-estimate pose
+            // (Hf and Htheta together, so the feature null-space stays
+            // self-consistent); the residual keeps the current pose. Fall back to
+            // the current pose if FEJ puts the feature behind the camera.
+            const Jacobians* Jj = &Jh;
+            Jacobians Jf;
+            if (opts_.first_estimates_jacobians && jacobian_at_pose(cl.R_fej, cl.p_fej, ex, p_f, Jf))
+                Jj = &Jf;
             const std::size_t row = 2 * i;
             const std::size_t off = s.clone_offset(obs[i].clone_index);
             for (std::size_t a = 0; a < 2; ++a) {
-                r[row + a] = obs[i].xy[a] - J.h[a];
+                r[row + a] = obs[i].xy[a] - Jh.h[a];  // residual at the current pose
                 for (std::size_t b = 0; b < 3; ++b) {
-                    Hf[(row + a) * 3 + b] = J.Hf(a, b);
-                    Hx[(row + a) * n + off + b] = J.Htheta(a, b);   // δθ block
-                    Hx[(row + a) * n + off + 3 + b] = -J.Hf(a, b);  // δp block = −Hf
+                    Hf[(row + a) * 3 + b] = Jj->Hf(a, b);
+                    Hx[(row + a) * n + off + b] = Jj->Htheta(a, b);   // δθ block
+                    Hx[(row + a) * n + off + 3 + b] = -Jj->Hf(a, b);  // δp block = −Hf
                 }
             }
         }
@@ -211,26 +228,19 @@ private:
         math::lie::detail::Mat<T, 2, 3> Htheta{};
     };
 
-    // Camera-frame point of `p_f` for observation `o`. `y` is the feature
-    // in the clone's IMU frame (needed for the orientation Jacobian).
-    template <class Cov>
-    bool to_camera(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
-        const auto& cl = s.clones[o.clone_index];
-        const auto& ex = cameras_[o.camera_index];
-        const Mat3 Rit = cl.R.inverse().matrix();
+    // Projection h(p_f) and its Jacobians (Hf w.r.t. the feature, Htheta w.r.t.
+    // the clone orientation error), linearized about an EXPLICIT clone pose
+    // (R_wi, p_wi) and camera extrinsics `ex`. FEJ passes the frozen first-
+    // estimate pose for the Jacobian; the residual is taken at the current pose.
+    bool
+    jacobian_at_pose(const SO3& R_wi, const Vec3& p_wi, const Extrinsics& ex, const Vec3& p_f, Jacobians& J) const {
+        const Mat3 Rit = R_wi.inverse().matrix();
         const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
-        y = Rit * (p_f - cl.p);          // feature in IMU frame
-        p_c = Rct * (y - ex.p_imu_cam);  // feature in camera frame
-        return p_c[2] > T{0};            // must be in front of the camera
-    }
-
-    template <class Cov>
-    bool project(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Jacobians& J) const {
-        Vec3 p_c, y;
-        if (!to_camera(s, o, p_f, p_c, y))
-            return false;
-        const T z = p_c[2];
-        const T inv = T{1} / z;
+        const Vec3 y = Rit * (p_f - p_wi);          // feature in IMU frame
+        const Vec3 p_c = Rct * (y - ex.p_imu_cam);  // feature in camera frame
+        if (!(p_c[2] > T{0}))
+            return false;  // must be in front of the camera
+        const T inv = T{1} / p_c[2];
         J.h = Vec2{{p_c[0] * inv, p_c[1] * inv}};
 
         // ∂h/∂p_c = (1/z)[[1,0,−x/z],[0,1,−y/z]].
@@ -240,16 +250,20 @@ private:
         dh(1, 1) = inv;
         dh(1, 2) = -p_c[1] * inv * inv;
 
-        const auto& cl = s.clones[o.clone_index];
-        const auto& ex = cameras_[o.camera_index];
-        const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
-        const Mat3 Rit = cl.R.inverse().matrix();
         const Mat3 M = Rct * Rit;  // ∂p_c/∂p_f
         // ∂p_c/∂δθ = R_camᵀ · [y]×  (right perturbation R ← R·Exp(δθ)).
         const Mat3 dpc_dtheta = Rct * math::lie::detail::hat(y);
         J.Hf = dh * M;
         J.Htheta = dh * dpc_dtheta;
         return true;
+    }
+
+    // Projection + Jacobians at the clone's CURRENT pose (used by triangulation
+    // and for the residual prediction).
+    template <class Cov>
+    bool project(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Jacobians& J) const {
+        const auto& cl = s.clones[o.clone_index];
+        return jacobian_at_pose(cl.R, cl.p, cameras_[o.camera_index], p_f, J);
     }
 
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton

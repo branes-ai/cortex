@@ -39,7 +39,10 @@ struct StateHelper {
             G(d + 3 + i, St::kPos + i) = T{1};  // clone δp_c = δp
         }
         s.cov.transform(G);
-        s.clones.push_back({s.R, s.p, s.timestamp});
+        // The clone's first-estimate pose (R_fej, p_fej) is its value at creation
+        // — the propagated IMU pose at this image time — and is frozen here for
+        // FEJ; ekf_update never touches it (#280).
+        s.clones.push_back({s.R, s.p, s.timestamp, s.R, s.p});
     }
 
     /// Drop clone `idx`: delete its 6 error-state rows/cols (a principal

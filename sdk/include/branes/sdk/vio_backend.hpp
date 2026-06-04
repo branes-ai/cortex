@@ -45,6 +45,9 @@ struct VioConfig {
     /// Visual measurement σ in normalized image coordinates — the MSCKF camera
     /// update's R. Default matches the updater's historical hardcoded value.
     double camera_noise_normalized = 1.0e-2;
+    /// First-Estimates Jacobians: linearize the camera update at each clone's
+    /// frozen creation pose to hold the VIO observability subspace fixed (#280).
+    bool use_fej = true;
     int num_cameras = 1;  ///< 1 = mono, 2 = stereo
     int max_clones = 11;  ///< MSCKF sliding-window length
     /// Skip the stationary-window static init and bootstrap from the dynamic

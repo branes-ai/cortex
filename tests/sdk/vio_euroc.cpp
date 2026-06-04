@@ -276,6 +276,12 @@ void run_euroc_replay(
             WARN(label << ": CORTEX_R_SCALE='" << rs << "' ignored — not a positive number");
         }
     }
+    // A/B knob (#280): CORTEX_FEJ=0 disables First-Estimates Jacobians so the
+    // observability fix can be compared head-to-head against the baseline.
+    if (const char* fe = std::getenv("CORTEX_FEJ")) {
+        cfg.use_fej = !(fe[0] == '0' && fe[1] == '\0');
+        WARN(label << ": CORTEX_FEJ=" << fe << " — first-estimates Jacobians " << (cfg.use_fej ? "ON" : "OFF"));
+    }
 
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the

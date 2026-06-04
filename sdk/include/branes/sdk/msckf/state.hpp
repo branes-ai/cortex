@@ -46,10 +46,19 @@ struct State {
     /// A cloned IMU pose (taken at an image time), kept in the window.
     /// Timestamps are wall-clock seconds — intentionally `double` (not the
     /// state scalar T), matching VioBackend / ImuMeasurement.
+    ///
+    /// `R_fej`/`p_fej` are the First-Estimates-Jacobian linearization point: the
+    /// pose at the moment this clone was created, frozen thereafter. EKF updates
+    /// correct `R`/`p` (the mean) but never the `_fej` anchors, so the camera
+    /// measurement Jacobians can be evaluated at a fixed point — preserving the
+    /// VIO observability subspace (global position + yaw) and stopping the filter
+    /// from gaining spurious information in it (#280).
     struct Clone {
         SO3 R{};
         Vec3 p{};
         double timestamp = 0.0;
+        SO3 R_fej{};
+        Vec3 p_fej{};
     };
 
     // Inertial navigation state (world frame).
