@@ -185,6 +185,37 @@ void render_scene_png(const std::string& path,
     stbi_write_png(path.c_str(), w, h, 1, img.data(), w);
 }
 
+// Emit the static scene: the 3D landmark cloud + the camera extrinsics and the
+// four image-corner rays (via the real, distortion-aware unprojection). The 3D
+// viewer renders the cloud and reconstructs the camera frustum per frame from the
+// pose. Synthetic only — EuRoC has no ground-truth landmark cloud.
+void write_scene_json(const std::string& path, const ev::SyntheticData<T>& w) {
+    std::ofstream f(path);
+    if (!f) {
+        std::cerr << "vio_pipeline: cannot write " << path << "\n";
+        return;
+    }
+    f << "{\"landmarks\":[";
+    for (std::size_t i = 0; i < w.landmarks.size(); ++i) {
+        if (i)
+            f << ',';
+        f << v3str(w.landmarks[i]);
+    }
+    const auto& q = w.R_imu_cam.quaternion();
+    f << "],\"camera\":{\"R_imu_cam\":[" << q[0] << ',' << q[1] << ',' << q[2] << ',' << q[3]
+      << "],\"p_imu_cam\":" << v3str(w.p_imu_cam) << ",\"frustum_rays\":[";
+    // Image corners TL, TR, BR, BL → unit rays in the camera frame.
+    const double W = 752, H = 480;
+    const double corners[4][2] = {{0, 0}, {W, 0}, {W, H}, {0, H}};
+    for (int i = 0; i < 4; ++i) {
+        if (i)
+            f << ',';
+        const auto r = w.camera.unproject(branes::math::cameras::Vec2<T>{corners[i][0], corners[i][1]});
+        f << '[' << r[0] << ',' << r[1] << ',' << r[2] << ']';
+    }
+    f << "]}}\n";
+}
+
 struct RunResult {
     double ate_rms_m = 0;
     double final_err_m = 0;
@@ -439,6 +470,8 @@ int main(int argc, char** argv) {
     const VioConfig cfg;
     std::cout << "synthetic world: " << world.imu.size() << " IMU, " << world.frames.size()
               << " frames, robot=" << args.robot << "\n";
+    if (!args.out.empty())
+        write_scene_json(args.out + "/scene.json", world);  // static cloud + camera, for the 3D viewer
 
     if (args.sweep) {
         auto sweep = open("noise_sweep.csv");

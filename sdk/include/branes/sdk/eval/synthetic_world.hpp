@@ -95,6 +95,7 @@ struct SyntheticData {
     math::lie::detail::Vec<T, 3> p_imu_cam{};  ///< camera origin in the IMU frame
     math::lie::detail::Vec<T, 3> gyro_bias{};
     math::lie::detail::Vec<T, 3> accel_bias{};
+    std::vector<math::lie::detail::Vec<T, 3>> landmarks;  ///< static 3D scene cloud (world frame)
 };
 
 namespace sw_detail {
@@ -175,6 +176,7 @@ template <math::Scalar T>
     std::vector<Vec3> landmarks(cfg.num_landmarks);
     for (auto& L : landmarks)
         L = Vec3{{ux(rng), uyz(rng), uyz(rng)}};
+    out.landmarks = landmarks;  ///< keep the static cloud for 3D visualization
 
     // IMU stream: gyro = ω_body + b_g, accel = Rᵀ(a_world − g) + b_a.
     const T imu_dt = T{1} / cfg.imu_rate_hz;
