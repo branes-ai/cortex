@@ -1,4 +1,6 @@
-# The VIO pipeline demo: what, why, how — and how accurate is "good enough"?
+# The VIO pipeline demo
+
+## What, why, how — and how accurate is "good enough"?
 
 A practical guide to `vio_pipeline` — the end-to-end demo that runs the whole
 Visual-Inertial Odometry pipeline as a stream, measures how well the filter
@@ -66,13 +68,18 @@ node docs-site/scripts/gen-sensor-model-figures.mjs /tmp/vio_run docs/assessment
 node docs-site/scripts/gen-overlay.mjs /tmp/vio_run        # → /tmp/vio_run/frames/*.svg
 
 # rasterize the overlay SVGs to a video (needs an SVG rasterizer + ffmpeg)
-for f in /tmp/vio_run/frames/*.svg; do cairosvg "$f" -o "${f%.svg}.png"; done   # or rsvg-convert
+for f in /tmp/vio_run/frames/*.svg; do rsvg-convert "$f" -o "${f%.svg}.png"; done   # or cairosvg
 ffmpeg -framerate 20 -i /tmp/vio_run/frames/frame_%05d.png -pix_fmt yuv420p /tmp/vio_run/scene.mp4
 ```
 
-Flags: `--source synthetic|euroc`, `--dataset <mav0>` (EuRoC), `--noise S`
-(noise multiplier, 1 = matches the filter's model), `--sweep`, `--video`,
-`--robot ground|drone|default` (motion aggressiveness).
+Flags: 
+- `--source synthetic|euroc`
+- `--dataset <mav0>` (EuRoC)
+- `--noise S`(noise multiplier, 1 = matches the filter's model)
+- `--sweep`
+- `--video`
+- `--robot ground|drone|default` (motion aggressiveness).
+
 
 ### Reading the scene-video overlay
 - **Coloured dots** — the 3-D landmarks projected into this frame, **coloured by
