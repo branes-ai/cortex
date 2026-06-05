@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.38.0](https://github.com/branes-ai/cortex/compare/v0.37.0...v0.38.0) (2026-06-05)
+
+
+### Features
+
+* 3D drone path/pose viewer (Phase 0 + Phase 1 prototype) ([#302](https://github.com/branes-ai/cortex/issues/302)) ([7e47ce3](https://github.com/branes-ai/cortex/commit/7e47ce3eeac87bd9159d39f6e2aa04de88f786c5))
+* **tools:** depth-colored scene overlay + vio_pipeline how-to guide ([#300](https://github.com/branes-ai/cortex/issues/300)) ([648ecc3](https://github.com/branes-ai/cortex/commit/648ecc3c2dc9eeb25d8df3d2fa53fc01f4d62cf0))
+
 ## [0.37.0](https://github.com/branes-ai/cortex/compare/v0.36.0...v0.37.0) (2026-06-05)
 
 
