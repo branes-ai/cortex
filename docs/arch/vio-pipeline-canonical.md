@@ -723,6 +723,21 @@ measured-and-cleared: **S10**
 (calibration uncertainty — now the leading candidate), **S6** (update: NIS, null-space, gating),
 **S5** (parallax gate, for the V2_03 divergence).
 
+### End-to-end noise→robustness demo
+
+Beside the per-stage probes, `tools/src/vio_pipeline.cpp` runs the **whole pipeline as a stream**:
+a synthetic world with exact ground truth (`sdk/eval/synthetic_world.hpp`) → an additive-noise
+injector on the camera + IMU streams → the real MSCKF backend → an estimate stream, measuring how
+well the filter rejects the noise. It writes a saveable typed stream (`run.jsonl`) plus CSVs the
+figure generator renders to: estimated-vs-GT trajectory, position error over time, **error vs
+noise level**, and **NIS vs noise level**. The measured envelope on the synthetic source: the
+filter tracks (sub-metre on gentle motion) and is over-conservative when sensors are clean
+(NIS ≪ 1), **NIS crosses 1 exactly where the injected noise matches the filter's assumed model**
+(scale = 1), becomes over-confident above it, and **loses lock past ~2–4×** — a quantified operating
+window. Building a synthetic world with exact GT also surfaced a backend behaviour worth a probe:
+features spanning the static→motion boundary triangulate degenerately (no parallax gate, the S5
+candidate), and unestimated accel bias dead-reckons into metres — both consistent with the #212 leads.
+
 ---
 
 ## Sources

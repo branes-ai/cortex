@@ -315,4 +315,71 @@ if (exc) {
   );
 }
 
+// ── Equal-aspect 2-D path plot (trajectory overlay) ────────────────────────
+function pathPlot(series, { title, file, xlabel, ylabel }) {
+  if (!series.length) return;
+  const W = 520, H = 500;
+  const pad = { l: 60, r: 130, t: 40, b: 50 };
+  const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+  const xs = series.flatMap((s) => s.points.map((p) => p.x));
+  const ys = series.flatMap((s) => s.points.map((p) => p.y));
+  let xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys);
+  // Equal aspect: expand the smaller range so a circle reads as a circle.
+  const cx = (xmin + xmax) / 2, cy = (ymin + ymax) / 2;
+  const span = Math.max(xmax - xmin, ymax - ymin, 1e-6) * 1.1;
+  xmin = cx - span / 2; xmax = cx + span / 2; ymin = cy - span / 2; ymax = cy + span / 2;
+  const sx = (x) => pad.l + ((x - xmin) / (xmax - xmin)) * plotW;
+  const sy = (y) => pad.t + (1 - (y - ymin) / (ymax - ymin)) * plotH;
+  let body = `<rect x="${pad.l}" y="${pad.t}" width="${plotW}" height="${plotH}" fill="#fafafa" stroke="#ddd"/>`;
+  const palette = ['#222', '#d1495b', '#2a6fdb'];
+  series.forEach((s, i) => {
+    const col = palette[i % palette.length];
+    const dash = s.dash ? ` stroke-dasharray="${s.dash}"` : '';
+    body += `<polyline points="${s.points.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="2"${dash}/>`;
+    body += `<circle cx="${sx(s.points[0].x)}" cy="${sy(s.points[0].y)}" r="4" fill="${col}"/>`;  // start
+    const ly = pad.t + 6 + i * 18;
+    body += line(W - pad.r + 12, ly, W - pad.r + 30, ly, { stroke: col, w: 2.5 });
+    body += txt(W - pad.r + 34, ly + 3, s.name, { size: 10, fill: '#333' });
+  });
+  body += txt(pad.l + plotW / 2, H - 12, xlabel, { anchor: 'middle' });
+  body += `<text x="18" y="${pad.t + plotH / 2}" font-size="11" fill="#333" text-anchor="middle" transform="rotate(-90 18 ${pad.t + plotH / 2})">${esc(ylabel)}</text>`;
+  writeFileSync(resolve(outDir, file), svgDoc(W, H, body, title));
+  console.log(`  wrote ${file}`);
+}
+
+// ── Pipeline noise-demo figures (vio_pipeline) ─────────────────────────────
+const traj = readCsv('trajectory.csv');
+if (traj) {
+  pathPlot(
+    [
+      { name: 'ground truth', points: traj.map((r) => ({ x: r.gt_x, y: r.gt_y })) },
+      { name: 'estimate', points: traj.map((r) => ({ x: r.est_x, y: r.est_y })), dash: '5 3' },
+    ],
+    { title: 'Pipeline  estimated vs ground-truth trajectory (top-down)', file: 'pipeline_trajectory.svg',
+      xlabel: 'world x (m)', ylabel: 'world y (m)' },
+  );
+  lineChart(
+    [{ name: 'position error', points: traj.map((r) => ({ x: r.t, y: r.pos_err })) }],
+    { title: 'Pipeline  position error vs time', file: 'pipeline_error_time.svg',
+      xlabel: 'time (s)', ylabel: 'position error (m)' },
+  );
+}
+const nsw = readCsv('noise_sweep.csv');
+if (nsw) {
+  lineChart(
+    [
+      { name: 'ATE (RMS)', points: nsw.map((r) => ({ x: r.noise_scale, y: r.ate_rms_m })) },
+      { name: 'final error', points: nsw.map((r) => ({ x: r.noise_scale, y: r.final_err_m })) },
+    ],
+    { title: 'Pipeline  robustness: trajectory error vs sensor-noise level', file: 'pipeline_noise_ate.svg',
+      xlabel: 'sensor-noise scale (1 = filter’s assumed noise)', ylabel: 'error (m)', logY: true },
+  );
+  lineChart(
+    [{ name: 'NIS (normalized)', points: nsw.map((r) => ({ x: r.noise_scale, y: r.nis_normalized })) }],
+    { title: 'Pipeline  consistency (NIS) vs sensor-noise level', file: 'pipeline_noise_nis.svg',
+      xlabel: 'sensor-noise scale', ylabel: 'NIS (1 = consistent)', hline: 1,
+      hlineLabel: 'NIS = 1 (consistent)' },
+  );
+}
+
 console.log('done.');
