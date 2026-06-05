@@ -17,7 +17,7 @@ namespace ev = branes::sdk::eval;
 using T = double;
 }  // namespace
 
-TEST_CASE("S10 calibration noise budget: ~1deg extrinsic uncertainty ≈ the empirical R×4", "[sdk][s10][calibration]") {
+TEST_CASE("S10 calibration noise budget: ~1deg extrinsic uncertainty ~ the empirical Rx4", "[sdk][s10][calibration]") {
     // 1° extrinsic, 10 mm translation, slow motion (small time-offset term).
     const auto b = ev::noise_budget<T>(/*ext_rot_deg=*/1.0,
                                        /*ext_trans_mm=*/10.0,
