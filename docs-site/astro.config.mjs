@@ -108,6 +108,7 @@ export default defineConfig({
             { label: 'The VIO Pipeline', slug: 'pipeline/overview' },
             { label: 'Reading the Metrics', slug: 'pipeline/metrics' },
             { label: 'S0 — Sensor & Calibration Models', slug: 'pipeline/stages/s0-sensor-models' },
+            { label: 'S10 — Online Calibration', slug: 'pipeline/stages/s10-online-calibration' },
             { label: '3D Path & Pose Viewer', slug: 'vio/scene3d' },
             { label: 'Engineering Status', slug: 'pipeline/engineering-status' },
           ],

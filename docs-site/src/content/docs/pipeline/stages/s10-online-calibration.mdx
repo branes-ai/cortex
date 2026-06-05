@@ -1,0 +1,112 @@
+---
+title: S10 — Online Calibration
+description: Camera–IMU extrinsics, intrinsics, and time offset as filter state — and the measured evidence that treating them as perfectly known is a leading source of the #212 over-confidence.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The camera and IMU are two rigidly-attached sensors. Fusing them requires knowing
+**exactly** how they're mounted relative to each other (the extrinsic transform
+`T_CI`), how the lens maps rays to pixels (intrinsics + distortion), and how their
+clocks line up (the time offset `t_d`). S10 is about whether the filter treats
+those numbers as *estimated state with uncertainty* — or as *perfectly known
+constants*. The cortex filter does the latter, and this page is the measured case
+that doing so is a leading contributor to the filter being over-confident.
+
+## What it does
+
+OpenVINS carries the calibration as **state**, alongside the pose and biases:
+
+- **Extrinsics** `T_CI ∈ SE(3)` — 6 parameters per camera.
+- **Intrinsics + distortion** — 8 parameters per camera (radtan).
+- **Time offset** `t_d` — 1 parameter per camera.
+
+Their Jacobians enter the measurement Jacobian `H_x` of the [MSCKF
+update](/pipeline/overview/), so the filter both *corrects* them online and, more
+importantly, **carries their uncertainty**. The principle is unconditional: even a
+filter that does **not** estimate calibration online must still account for its
+uncertainty — by inflating the measurement noise `R`, or carrying a fixed prior
+block — or it treats imperfect calibration as perfect and becomes over-confident.
+
+## Why it matters
+
+This is the crux of [#212](/pipeline/engineering-status/). The cortex MSCKF has
+**no calibration states and no calibration term in the noise budget** — the EuRoC
+`T_CI` is taken as truth. Any real mounting error then has nowhere to go: the
+filter can't estimate it away and doesn't widen its covariance for it, so the
+resulting reprojection error is **silently absorbed into the state** while the
+covariance stays tight. That is the textbook recipe for over-confidence.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | calibration as state: `T_CI` (6/cam), intrinsics+distortion (8/cam), `t_d` (1/cam) |
+| **What it does** | estimates calibration online (its Jacobians enter `H_x`); or, if fixed, accounts for its uncertainty in `R` |
+| **Post / invariants** | *if estimated:* calibration states observable only under sufficient excitation (like accel bias) · *if fixed:* the assumed-perfect calibration's true uncertainty must appear **somewhere** in the noise budget |
+| **cortex** | **none of the above** — no calibration states, no calibration noise term; `T_CI`/`t_d`/intrinsics treated as perfectly known |
+
+## Metrics
+
+The [S10 probe](/pipeline/engineering-status/) measures the hypothesis two ways —
+an analytic budget and an end-to-end sweep on the **real backend**.
+
+### 1. Analytic noise budget — what unmodeled calibration costs in pixels
+
+Given a realistic calibration uncertainty, compute the reprojection error it
+induces and the equivalent `R`-inflation. The filter assumes ~**4.6 px** of image
+noise; a single degree of extrinsic error already exceeds that:
+
+| Extrinsic σ (gentle motion) | induced reprojection | equivalent `R` inflation |
+|---|---|---|
+| 0.5° | 4.1 px | 1.8× |
+| **1.0°** | **8.1 px** | **4.1×** |
+| 2.0° | 16 px | 13.2× |
+
+![Calibration noise budget — induced pixels & R-inflation vs extrinsic error](/figures/s10/calib_budget.svg)
+
+A 1° extrinsic error (entirely realistic for a hand-measured rig) induces ~8 px —
+nearly **double** the assumed noise — for an `R`-inflation of ~**4×**. That number
+is not a coincidence: it's the same `R×4` the EuRoC troubleshooting found restores
+consistency.
+
+### 2. End-to-end R-inflation sweep — the filter's measurement-noise deficit
+
+On the synthetic world with **perfect calibration and clean sensors**, the backend
+is *already* over-confident — pose NEES ≫ dof — reproducing the EuRoC fault in
+isolation. Sweeping the measurement-noise variance `R` and watching NEES return
+toward dof = 6 confirms `R` is the lever:
+
+| `R` scale | pose NEES (target 6) |
+|---|---|
+| ×1 | **42.6** |
+| ×4 | 24.8 |
+| ×16 | 10.7 |
+| ×32 | 6.09 |
+
+![Pose NEES vs R-inflation — the sweep back to consistency](/figures/s10/calib_r_sweep.svg)
+
+The synthetic backend lands at **NEES ≈ 43 at R×1** — almost exactly the EuRoC
+MH_05 value (~43) — so this clean, ground-truthed setup is reproducing the real
+over-confidence, not a synthetic artifact.
+
+## Interactive
+
+The covariance ellipsoid in the **[3-D viewer](/vio/scene3d/)** is this stage made
+visible: on the sample run the reported position σ collapses to ~13 cm while the
+true error grows past 2 m. An ellipsoid the ground-truth marker escapes from *is*
+the missing calibration uncertainty.
+
+<Aside type="caution" title="Status">
+  **Leading contributor — measured, not the whole story.** The analytic budget and
+  the end-to-end sweep agree that calibration uncertainty cleanly accounts for the
+  **`R×4` component** of the #212 over-confidence (1° extrinsic ≈ 8 px ≈ R×4, both
+  analytically and in magnitude). But R-*only* inflation needs ~**×32** to fully
+  restore NEES — more than ×4 — because the empirical MH_05 fix paired R×4 with
+  Q×10, so `R` alone has to do both jobs. **Calibration is one contributor; the
+  rest is process noise (Q) and the S5 no-parallax-gate effect.** The principled
+  fix is to **model** the uncertainty — estimate `T_CI`/`t_d` online
+  (OpenVINS/MINS-style) or add a calibration term to `R` — not a blunt global
+  `R`-scale. Tracked, with the full decomposition, on
+  [Engineering Status](/pipeline/engineering-status/).
+</Aside>
