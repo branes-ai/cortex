@@ -11,7 +11,7 @@ pose in the world, driven by the same `run.jsonl` stream that `vio_pipeline`
 emits. Drag to orbit, scroll to zoom, and
 use the scrubber (or ▶) to step through the run.
 
-<Scene3D data="data/vio_run.jsonl" height={520} />
+<Scene3D data="data/vio_run.jsonl" scene="data/vio_scene.json" height={520} />
 
 ## What you are looking at
 
@@ -22,6 +22,11 @@ use the scrubber (or ▶) to step through the run.
 - **Yellow ellipsoid** — the filter's **position-covariance** at 3σ (≈ 97% per
   axis). This is the whole reason for the 3-D view: it makes the filter's *belief
   about its own uncertainty* visible.
+- **Grey points** — the static **landmark cloud** the camera observes (the
+  synthetic scene's true 3-D points).
+- **Cyan pyramid** — the **camera frustum** at the estimated pose, reconstructed
+  from the pose and the camera extrinsics/intrinsics. Watch it sweep across the
+  cloud — the landmarks it covers are what make the motion observable.
 
 ## Why the ellipsoid matters (the #212 story)
 
