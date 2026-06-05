@@ -1,0 +1,89 @@
+---
+title: S5 — Feature Triangulation
+description: Recovering the 3-D point a feature track corresponds to — and the measured finding that the shipped triangulator has no soft parallax gate, admitting low-parallax features at full weight.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Before a feature track can correct the filter ([S6](/pipeline/stages/s6-msckf-update/)),
+its 3-D position has to be recovered from the bearings the cameras observed. S5
+does that triangulation. The catch: depth is only well-determined when the
+observing cameras saw the point from **sufficiently different angles** — enough
+**parallax**. Triangulate a point seen from nearly the same direction and the depth
+is almost unconstrained, but the filter will use it as if it were precise. This
+page measures exactly that, and it is an **open** [#212](/pipeline/engineering-status/)
+candidate for the aggressive-motion divergence.
+
+## What it does
+
+Linear (ray-perpendicular / DLT) triangulation across the observing clones —
+solve `Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C` for the world point `p_f` — followed by a
+few Gauss-Newton reprojection refinements. OpenVINS triangulates at the *current*
+clone poses (best geometry).
+
+## Why it matters
+
+Depth uncertainty is governed by parallax. Two rays that are nearly parallel
+intersect at a shallow angle, so a tiny bearing error (a fraction of a pixel) moves
+the intersection a long way along the depth direction. A correct pipeline must
+**gate** on parallax (or the triangulation condition number): below a threshold the
+feature should be deferred or **down-weighted**, never admitted at full weight. The
+question for cortex is whether such a gate exists — and the probe answers it.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `triangulate(observations, clone_poses, T_CI) → (p_f ∈ ℝ³, status)` |
+| **Pre** | ≥ 2 observations from **distinct, sufficiently-parallax** clones; cheirality holds; pure-rotation (zero-parallax) tracks flagged, not fed in |
+| **Post / invariants** | reprojection residual below threshold · depth positive and finite · **condition number of the normal matrix bounded** — low parallax ⇒ defer/down-weight, not "use as if precise" |
+| **cortex** | `msckf/camera_updater.hpp` — linear triangulation + Gauss-Newton refine; **exposed for this probe** |
+
+## Metrics
+
+The [S5 probe](/pipeline/consistency-analysis/) drives the **shipped**
+`triangulate()` across an exact two-view parallax sweep (feature at 5 m), measuring
+the true depth uncertainty by **Monte Carlo** (the std of recovered depth under
+1 px observation noise) — not an analytic approximation.
+
+### Depth uncertainty vs parallax — and no soft gate
+
+| parallax | `triangulate()` | condition number | depth σ (1 px) | σ as % of depth |
+|---:|:---:|---:|---:|---:|
+| 0.5° | **ok** | 5.3e4 | 4581 mm | 92% |
+| 1° | **ok** | 1.3e4 | 965 mm | 19% |
+| 2° | **ok** | 3283 | 434 mm | 8.7% |
+| 5° | ok | 526 | 184 mm | 3.7% |
+| 10° | ok | 132 | 87 mm | 1.7% |
+
+![Triangulated-depth σ vs parallax](/figures/s5/triang_depth_sigma.svg)
+![Triangulation condition number vs parallax](/figures/s5/triang_condition.svg)
+
+The decisive observation: **`triangulate()` returns success at every level above the
+numerical breakdown** — including 0.5°, where the depth is uncertain to ~90% of its
+value. The only guard in the shipped code is the **hard** one: the Cholesky
+factorization fails for near-parallel rays. There is **no soft gate** on parallax or
+condition number, so a feature triangulated at 0.5–2° parallax is handed to the
+update at full weight. Clean-observation depth error is ~0 throughout (the geometry
+is correct) — the danger is entirely in the *uncertainty* the filter fails to
+account for.
+
+A reasonable soft gate (depth σ ≤ 5% of depth) would sit at ~**5°** of parallax.
+
+## Interactive
+
+Parallax is the apparent motion difference between near and far features as the
+camera moves — exactly what the depth-coloured landmark cloud in the
+[3-D viewer](/vio/scene3d/) shows: near dots sweep faster than far ones. Low
+parallax is when that sweep is small, and depth becomes unobservable.
+
+<Aside type="caution" title="Status — open candidate">
+  The shipped triangulator has **only a hard degeneracy guard** (Cholesky
+  breakdown), **no soft parallax / condition gate**. Features triangulated at low
+  parallax are admitted at full weight, injecting optimistic information — a
+  plausible contributor to the **aggressive-motion (V2_03) divergence**, where
+  erratic motion produces many marginal-parallax tracks. This is an **open** #212
+  candidate: the fix is a parallax (or condition-number / depth-σ) gate before
+  admission, or per-feature down-weighting. Full decomposition on
+  [Engineering Status](/pipeline/engineering-status/).
+</Aside>
