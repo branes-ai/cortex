@@ -52,6 +52,7 @@ namespace {
 
 namespace ev = branes::sdk::eval;
 namespace euroc = branes::sdk::euroc;
+namespace msckf = branes::sdk::msckf;
 using T = double;
 using Vec3 = branes::math::lie::detail::Vec<T, 3>;
 using branes::sdk::FrontendObservation;
@@ -119,6 +120,23 @@ std::string qstr(const branes::math::lie::SO3<T>& R) {
 std::string v3str(const Vec3& p) {
     std::ostringstream o;
     o << '[' << p[0] << ',' << p[1] << ',' << p[2] << ']';
+    return o.str();
+}
+// The 3×3 world-position covariance block (row-major, 9 numbers) lifted from the
+// dense error-state covariance at `off` (= State::kPos). Drives the 3-D pose
+// uncertainty ellipsoid; the over-confidence story (#212) is exactly this block
+// being too small while the true pose drifts outside it.
+template <class Mat>
+std::string mat3_json(const Mat& P, std::size_t off) {
+    std::ostringstream o;
+    o << '[';
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j) {
+            if (i || j)
+                o << ',';
+            o << P(off + i, off + j);
+        }
+    o << ']';
     return o.str();
 }
 std::string nums_json(const std::vector<T>& xs) {
@@ -251,7 +269,8 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
             *stream << "{\"type\":\"gt\",\"t\":" << t << ",\"q\":" << qstr(w.gt[f].R) << ",\"p\":" << v3str(gp)
                     << "}\n";
             *stream << "{\"type\":\"est\",\"t\":" << t << ",\"q\":" << qstr(est.T_world_imu.rotation())
-                    << ",\"p\":" << v3str(ep) << ",\"pos_err\":" << err << "}\n";
+                    << ",\"p\":" << v3str(ep) << ",\"pos_err\":" << err
+                    << ",\"pcov\":" << mat3_json(backend.state().covariance(), msckf::State<T>::kPos) << "}\n";
         }
         if (frames && frames->is_open()) {
             const std::string rel = "scene/frame_" + std::to_string(f) + ".png";
@@ -343,7 +362,8 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
         const double nis = safe_nis(est.backend().nis_consistency());
         if (stream && stream->is_open()) {
             const Vec3 ep = est.current_pose().translation();
-            *stream << "{\"type\":\"est\",\"t\":" << t << ",\"p\":" << v3str(ep) << "}\n";
+            *stream << "{\"type\":\"est\",\"t\":" << t << ",\"p\":" << v3str(ep)
+                    << ",\"pcov\":" << mat3_json(est.backend().state().covariance(), msckf::State<T>::kPos) << "}\n";
         }
         if (frames && frames->is_open()) {
             std::ostringstream fj;
