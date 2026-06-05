@@ -3,6 +3,9 @@ node_modules/
 dist/
 .astro/
 
+# Offline 3D-video render staging (gen-scene3d-video.mjs --keep / crashes)
+scripts/.render/
+
 # Generated Doxygen C++ API reference (built in CI / by `npm run api`)
 public/api/
 
