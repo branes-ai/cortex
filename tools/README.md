@@ -22,6 +22,9 @@ an estimate stream, measuring how well the filter cleans up the noise. The whole
 VIO premise is additive noise; this shows — and graphs — the filter rejecting it.
 
 ```bash
+# One command → scene.mp4 (+ curves): runs the experiment, overlay, and ffmpeg:
+scripts/vio_scene_video.sh --out /tmp/vio_run --robot ground --sweep
+
 # Synthetic source (exact GT — controlled noise studies):
 ./build/tools/vio_pipeline --out build/pipeline               # one run, matched noise
 ./build/tools/vio_pipeline --noise 3 --out build/pipeline     # 3× the assumed sensor noise

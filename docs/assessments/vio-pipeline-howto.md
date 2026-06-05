@@ -52,6 +52,24 @@ We want to answer three questions by **measurement**, not opinion:
 
 ## How to run it
 
+### Quickstart — one command to mp4
+
+```bash
+cmake -B build -DBUILD_TARGET_KPU=OFF && cmake --build build -j$(nproc)   # once
+scripts/vio_scene_video.sh --out /tmp/vio_run --robot ground --sweep
+# → /tmp/vio_run/scene.mp4  (the overlaid scene video)
+#   /tmp/vio_run/figures/   (the noise→robustness curves, with --sweep)
+#   /tmp/vio_run/{run.jsonl,trajectory.csv,frames.jsonl}  (the streams)
+```
+
+`scripts/vio_scene_video.sh` runs the experiment, generates the overlay frames,
+rasterizes them, and encodes the mp4 in one shot. It needs `node`, `ffmpeg`, and
+an SVG rasterizer (`librsvg2-bin`/`rsvg-convert`, or `cairosvg`, or `inkscape`).
+Options: `--source synthetic|euroc`, `--dataset <mav0>`, `--noise S`, `--robot`,
+`--fps N`, `--sweep`, `--keep`, `--build` (`--help` for all).
+
+### Step by step (what the script does)
+
 ```bash
 # build (host)
 cmake -B build -DBUILD_TARGET_KPU=OFF && cmake --build build -j$(nproc)
