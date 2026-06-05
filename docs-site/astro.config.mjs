@@ -97,6 +97,7 @@ export default defineConfig({
             { label: 'Camera Updaters', slug: 'vio/camera-updaters' },
             { label: 'MSCKF Backend', slug: 'vio/msckf-backend' },
             { label: 'VioEstimator API', slug: 'vio/vio-estimator' },
+            { label: '3D Path & Pose Viewer', slug: 'vio/scene3d' },
           ],
         },
         {

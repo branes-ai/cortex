@@ -1,0 +1,153 @@
+---
+// Scene3D.astro — embeds the Three.js VIO path/pose viewer (see scene3d.js) as a
+// vanilla Astro island. Pass `data` = path (under the site base, e.g. the public/
+// dir) to a run.jsonl produced by `vio_pipeline --out`.
+//
+//   <Scene3D data="data/vio_run.jsonl" height={520} />
+//
+// The data path is resolved against the deploy base (BASE_URL) so it works both
+// at the GitHub-Pages base (/cortex/) and in local dev (/).
+interface Props {
+  data: string;
+  height?: number;
+}
+const { data, height = 480 } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const src = `${base}/${data.replace(/^\//, '')}`;
+---
+
+<div class="scene3d" data-src={src} style={`height:${height}px`}>
+  <canvas></canvas>
+  <div class="scene3d-hud"></div>
+  <div class="scene3d-controls">
+    <button type="button" class="scene3d-play" aria-label="play / pause">▶</button>
+    <input type="range" class="scene3d-scrub" min="0" max="0" value="0" step="1" aria-label="frame" />
+    <button type="button" class="scene3d-fit" aria-label="reset view">⤢</button>
+  </div>
+  <div class="scene3d-legend">
+    <span><i style="background:#35c759"></i>ground truth</span>
+    <span><i style="background:#ff9f0a"></i>estimate</span>
+    <span><i style="background:#ffd60a"></i>3σ covariance</span>
+  </div>
+</div>
+
+<script>
+  import { createViewer, parseRunJsonl } from './scene3d.js';
+
+  for (const root of document.querySelectorAll<HTMLElement>('.scene3d')) {
+    const canvas = root.querySelector('canvas') as HTMLCanvasElement;
+    const hud = root.querySelector('.scene3d-hud') as HTMLElement;
+    const scrub = root.querySelector('.scene3d-scrub') as HTMLInputElement;
+    const playBtn = root.querySelector('.scene3d-play') as HTMLButtonElement;
+    const fitBtn = root.querySelector('.scene3d-fit') as HTMLButtonElement;
+    const src = root.dataset.src!;
+
+    fetch(src)
+      .then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${src}`);
+        return r.text();
+      })
+      .then((text) => {
+        const records = parseRunJsonl(text);
+        let playing = false;
+        // onFrame keeps the scrubber in step with the viewer's own play loop.
+        const viewer = createViewer({
+          canvas,
+          hud,
+          records,
+          options: { onFrame: (i: number) => { if (playing) scrub.value = String(i); } },
+        });
+        scrub.max = String(Math.max(0, viewer.frameCount - 1));
+
+        scrub.addEventListener('input', () => {
+          playing = false;
+          playBtn.textContent = '▶';
+          viewer.pause();
+          viewer.setFrame(Number(scrub.value));
+        });
+        playBtn.addEventListener('click', () => {
+          playing = !playing;
+          playBtn.textContent = playing ? '⏸' : '▶';
+          playing ? viewer.play() : viewer.pause();
+        });
+        fitBtn.addEventListener('click', () => viewer.fitView());
+      })
+      .catch((err) => {
+        hud.innerHTML = `<div class="warn">failed to load ${src}: ${err.message}</div>`;
+      });
+  }
+</script>
+
+<style>
+  .scene3d {
+    position: relative;
+    width: 100%;
+    border: 1px solid var(--sl-color-gray-5, #30363d);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0e1116;
+  }
+  .scene3d canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .scene3d-hud {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    font-family: var(--sl-font-mono, monospace);
+    font-size: 12px;
+    color: #e6edf3;
+    text-shadow: 0 1px 2px #000;
+    pointer-events: none;
+    line-height: 1.5;
+  }
+  .scene3d-hud .warn {
+    color: #ff6b6b;
+    font-weight: 600;
+  }
+  .scene3d-controls {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .scene3d-controls button {
+    background: rgba(0, 0, 0, 0.5);
+    color: #e6edf3;
+    border: 1px solid #30363d;
+    border-radius: 5px;
+    width: 30px;
+    height: 26px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .scene3d-scrub {
+    flex: 1;
+  }
+  .scene3d-legend {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-family: var(--sl-font-mono, monospace);
+    font-size: 11px;
+    color: #c9d1d9;
+    text-shadow: 0 1px 2px #000;
+    pointer-events: none;
+  }
+  .scene3d-legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+</style>
