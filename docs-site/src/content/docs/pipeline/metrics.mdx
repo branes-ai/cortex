@@ -1,0 +1,112 @@
+---
+title: Reading the Metrics
+description: ATE, RPE, NEES, NIS, and innovation whiteness — what the VIO pipeline's numbers mean and how to read consistency vs accuracy.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every stage page reports its health in **native units**. This page is the shared
+primer for the metrics they use, so the stage pages can stay focused. There are
+two distinct questions:
+
+1. **Is the estimate accurate?** — how close is it to truth. (ATE, RPE)
+2. **Is the estimate's claimed uncertainty honest?** — does the covariance match
+   the real error. (NEES, NIS, innovation whiteness)
+
+The second is the one most people skip, and it is the one that kills missions.
+
+## Accuracy — ATE and RPE
+
+- **ATE (Absolute Trajectory Error)** — RMS position error between the estimate
+  and ground truth after a rigid (Horn) alignment. One number for "how far off,
+  globally." Sensitive to drift accumulating over the whole run.
+- **RPE (Relative Pose Error)** — error over short fixed-length sub-trajectories.
+  Measures **drift rate** (e.g. % of distance), which for long missions matters
+  more than a single global number.
+
+Accuracy tells you nothing about whether the filter *knows* it's wrong.
+
+## Consistency — the calibration of the uncertainty
+
+A Kalman-type filter produces an estimate **and** a statement of its own
+uncertainty, the covariance `P`. When VIO says "the camera is here," it means
+"I'm 68% sure it's within this ellipsoid." A filter is **consistent** when that
+self-report matches reality: it says ±10 cm and is actually wrong by ~10 cm — not
+1 m (**over-confident**, lying that it's sure) and not 1 mm (**under-confident**,
+wasting information).
+
+<Aside type="tip" title="The weather-forecaster analogy">
+  A forecaster who says "70% chance of rain" is *well-calibrated* if, across all
+  the days they said 70%, it actually rained about 70% of the time. NEES and NIS
+  are that calibration check for an estimator — they don't ask "is the estimate
+  close?", they ask "is the estimate's *claimed uncertainty* honest?"
+</Aside>
+
+### The one idea: "how many sigmas off?"
+
+For a scalar estimate `x̂` with standard deviation `σ` and truth `x`, the error
+`e = x̂ − x` measured in units of σ is `z = e/σ`, and `z² = e²/σ²` has expected
+value **1** if the filter is honest. Average it over many estimates: ≈ 1 is
+honest, ≫ 1 means real errors exceed what σ claims (over-confident), ≪ 1 means
+under-confident.
+
+In many dimensions the state is correlated, so `1/σ²` becomes the inverse
+covariance and `e²/σ²` becomes the **squared Mahalanobis distance**:
+
+```text
+  d² = eᵀ P⁻¹ e
+```
+
+If the filter is consistent, `d² ~ χ²(n)` with `n` the dimension, and the key fact
+is `E[χ²(n)] = n`. So divide by the dimension and **a consistent filter sits at
+1.0**. Everything below is "measure `d²/n` and check it's near 1."
+
+### NEES vs NIS — same idea, two places
+
+| | NEES | NIS |
+|---|---|---|
+| error | `x̂ − x_true` (state error) | `z − ẑ` (innovation: measured − predicted) |
+| covariance | `P` (state covariance) | `S = HPHᵀ + R` (innovation covariance) |
+| dof | state dim (15 in the cortex core) | measurement dim |
+| needs truth? | **yes** → offline (EuRoC) | **no** → online, always |
+
+- **NEES** tests the *whole state's* calibration, including directions
+  measurements don't directly observe. Per-state-block NEES (slice out attitude,
+  or velocity) localizes **which** state is over/under-confident.
+- **NIS** tests the filter against its *own incoming measurements* — no ground
+  truth — so it runs live on the robot and powers the χ² outlier gate.
+
+**NIS consistent while NEES is inconsistent** is itself a clue: the measurement
+model is fine, but a hidden state (a bias, a scale, an unmodeled calibration) is
+drifting.
+
+### From one number to a verdict
+
+A single `d²` is very noisy (χ²(n) has standard deviation `√(2n)`, comparable to
+its mean). The test averages over a run: the sum of `N` samples is `χ²(D)` with
+`D = Σ dofᵢ`, which for large `D` is ≈ `Normal(D, 2D)`. The dof-normalized average
+`S/D` lands near **1.0** with a tight confidence band, turning a noisy stream into
+a verdict: **consistent**, **over-confident** (`> 1`, the dangerous one), or
+**under-confident** (`< 1`).
+
+### Innovation whiteness
+
+NIS tests the innovation's *magnitude*. **Whiteness** tests its *structure*: a
+healthy innovation sequence is zero-mean and temporally uncorrelated (white). A
+**biased mean** points at a systematic error (extrinsics, triangulation,
+time-sync); **temporal correlation** points at unmodeled dynamics or a
+linearization/observability inconsistency — failure modes a magnitude test cannot
+see.
+
+## How cortex computes them
+
+The quadratic form `eᵀ P⁻¹ e` is `normalized_squared(e, P)` in
+`eval/consistency.hpp` (a Cholesky solve, never an explicit inverse). NIS is
+accumulated on every camera update (`nis_consistency()`); innovation whiteness is
+the directional/temporal discriminator (`innovation_whiteness()`).
+
+<Aside type="caution" title="Status">
+  On EuRoC the cortex filter's NEES runs persistently **above** dof — structural
+  over-confidence. The stage-by-stage hunt for its sources, and the tracking
+  issues, are on the [Engineering Status](/pipeline/engineering-status/) page.
+</Aside>

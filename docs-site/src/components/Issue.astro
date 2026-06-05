@@ -1,0 +1,38 @@
+---
+// Issue.astro — the canonical way to reference a GitHub issue from the docs.
+//
+//   <Issue id={212} /> · <Issue id={212}>over-confidence</Issue>
+//
+// Convention (see pipeline/engineering-status): issue references are *provenance*,
+// never load-bearing for understanding. The substance lives in the page; this is a
+// styled, clearly-secondary pointer to the live engineering thread. Keep them out
+// of explanatory prose — prefer them in a "Status" aside or the status index.
+interface Props {
+  id: number;
+  repo?: string;
+}
+const { id, repo = 'branes-ai/cortex' } = Astro.props;
+const href = `https://github.com/${repo}/issues/${id}`;
+const hasLabel = Astro.slots.has('default');
+---
+<a class="issue-ref" href={href} target="_blank" rel="noopener" title={`GitHub issue #${id}`}>
+  <span class="issue-hash">#{id}</span>{hasLabel && <span class="issue-label"><slot /></span>}
+</a>
+
+<style>
+  .issue-ref {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3em;
+    text-decoration: none;
+    border-bottom: 1px dotted var(--sl-color-gray-4, #888);
+    white-space: nowrap;
+  }
+  .issue-hash {
+    font-family: var(--sl-font-mono, monospace);
+    font-size: 0.92em;
+    color: var(--sl-color-text-accent, #4ea1ff);
+  }
+  .issue-label { color: var(--sl-color-gray-2, #c9d1d9); }
+  .issue-ref:hover .issue-hash { text-decoration: underline; }
+</style>
