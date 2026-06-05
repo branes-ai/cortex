@@ -22,6 +22,19 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.37.0](https://github.com/branes-ai/cortex/compare/v0.36.0...v0.37.0) (2026-06-05)
+
+
+### Features
+
+* **tools:** add EuRoC source + scene-video metric overlay to vio_pipeline ([#292](https://github.com/branes-ai/cortex/issues/292)) ([f4b8e9e](https://github.com/branes-ai/cortex/commit/f4b8e9e95e3f9a42786e3177b76c295bf7be8061))
+* **tools:** wire S10 (calibration) stage-probe to quantify the [#212](https://github.com/branes-ai/cortex/issues/212) Rx4 ([#295](https://github.com/branes-ai/cortex/issues/295)) ([9a01499](https://github.com/branes-ai/cortex/commit/9a01499186229199eeb6ccd7a95df6ed14e1a7a1))
+
+
+### Bug Fixes
+
+* **tools:** create the --out directory so artifacts are not silently dropped ([#298](https://github.com/branes-ai/cortex/issues/298)) ([029727d](https://github.com/branes-ai/cortex/commit/029727d13b99d4a29c2695aef579378e04913144))
+
 ## [0.36.0](https://github.com/branes-ai/cortex/compare/v0.35.0...v0.36.0) (2026-06-05)
 
 
