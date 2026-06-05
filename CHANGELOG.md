@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.39.0](https://github.com/branes-ai/cortex/compare/v0.38.0...v0.39.0) (2026-06-05)
+
+
+### Features
+
+* landmark cloud + camera frustum in the 3D viewer ([#303](https://github.com/branes-ai/cortex/issues/303)) ([7f4f532](https://github.com/branes-ai/cortex/commit/7f4f5320f76ee891162d5ca0b53b0ad9835a0410))
+
 ## [0.38.0](https://github.com/branes-ai/cortex/compare/v0.37.0...v0.38.0) (2026-06-05)
 
 
