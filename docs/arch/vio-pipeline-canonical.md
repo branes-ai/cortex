@@ -640,11 +640,17 @@ marginalization-by-submatrix, FEJ storage all present and right). FEJ was implem
 by measurement. So the over-confidence is **not** in the parts that look hard in the papers. The
 ranked candidates, each a contract above with a test that decides it:
 
-1. **S10 — unmodeled calibration uncertainty (highest prior).** No extrinsic / intrinsic /
-   time-offset states or uncertainty. `R ×4` "fixing" NEES is the fingerprint of treating
-   imperfect calibration as perfect. *Decisive test:* add a fixed calibration-uncertainty term
-   (or `R` inflation derived from the S0 sensitivity sweeps) and re-measure NEES/NIS — if NEES
-   drops toward dim, this is it.
+1. **S10 — unmodeled calibration uncertainty — MEASURED, a quantified contributor.** The
+   `s10_online_calibration` probe (run 2026-06-05) confirms the analytic link: a realistic **1°
+   extrinsic uncertainty induces ~8 px of reprojection error — larger than the filter's assumed
+   ~4.6 px — for an R-inflation of ~4×, quantitatively matching the empirical `R×4`** from #212.
+   The end-to-end R-sweep reproduces the EuRoC over-confidence almost exactly (synthetic pose
+   **NEES ≈ 43 at R×1 ≈ MH_05's 43**), and R-inflation drives NEES back toward dof. Honest nuance:
+   R-*only* needs ~×33 for full consistency (the empirical fix paired `R×4` with `Q×10`), so
+   calibration cleanly accounts for the **`R×4` component** but is one contributor — the
+   over-confidence is multi-source (calibration + process noise + the S5 parallax gate). *Fix:*
+   model calibration uncertainty (estimate `T_CI`/`t_d` online, OpenVINS/MINS-style, or a
+   calibration term in `R`) rather than a blunt global `R`-scale.
 2. **S2 — diagonal `Q_d` — MEASURED and largely DE-PRIORITIZED.** The `s2_propagation` probe
    (run 2026-06-04) confirms the cortex `Q_d` is diagonal and drops the canonical position-block
    (`¼σ_a²Δt³`) and v–p cross (`½σ_a²Δt²`) terms — but quantifies the cost as **~7% position-σ
@@ -716,12 +722,20 @@ vs accel noise (the stationarity gate rejects an over-noisy window); dynamic met
 σ·I** (σ=0.1) — *not* enlarged on the unobservable yaw/scale or the weakly-observable accel bias, a
 structural observation worth noting for the S10 calibration work. Figures: `docs/assessments/figures/s1/`.
 
-**The remaining stages (S3–S10) are scaffolds** — each prints its full contract and planned
+**S10 is wired** (`s10_online_calibration`, probe `sdk/eval/calibration_probe.hpp`, test
+`tests/sdk/calibration_probe.cpp`). It measures the leading #212 candidate: (1) the analytic
+calibration noise budget — **1° extrinsic uncertainty ⇒ ~8 px induced error ⇒ R-inflation ~4×**,
+matching the empirical `R×4`; (2) an end-to-end R-sweep that reproduces the EuRoC over-confidence
+(synthetic **NEES ≈ 43 ≈ MH_05**) and shows R is the consistency lever. Honest finding: calibration
+cleanly accounts for the **`R×4` component**, but full restoration needs more (the empirical fix also
+raised `Q`), so #212 is multi-source — calibration + process noise + the S5 parallax gate. Figures:
+`docs/assessments/figures/s10/`.
+
+**The remaining stages (S3–S9) are scaffolds** — each prints its full contract and planned
 assessments and has an explicit fill-in point (add the computation to a `sdk/eval/*_probe.hpp`
-header, drive it from the `sN_*.cpp` like S0/S1/S2). Revised priority for #212 now that S2 is
-measured-and-cleared: **S10**
-(calibration uncertainty — now the leading candidate), **S6** (update: NIS, null-space, gating),
-**S5** (parallax gate, for the V2_03 divergence).
+header, drive it from the `sN_*.cpp` like S0/S1/S2/S10). Wired: **S0, S1, S2, S10**. Next for #212:
+**S6** (update: NIS, null-space, χ² gating) and **S5** (parallax gate, for the V2_03 divergence) —
+the remaining over-confidence sources beyond the calibration `R×4` that S10 quantified.
 
 ### End-to-end noise→robustness demo
 

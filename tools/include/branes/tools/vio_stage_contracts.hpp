@@ -217,13 +217,16 @@ inline const StageInfo kS10{
      "if fixed: the assumed-perfect calibration's true uncertainty must appear in the noise budget"},
     {"estimated calibration states converge & stay consistent under excitation",
      "CANDIDATE (#212): unmodeled calibration uncertainty ⇒ structural over-confidence"},
-    {{"time-offset sensitivity (from S0)", "px/ms", "the σ the filter omits by fixing t_d"},
-     {"extrinsic sensitivity (from S0)", "px/deg, px/mm", "the σ the filter omits by fixing T_CI"},
-     {"R-inflation equivalent of calib σ", "×", "does adding calib uncertainty match the empirical R×4?"},
-     {"calibration-state NEES (if estimated)", "—", "online calibration is itself consistent"}},
-    {"calib_sensitivity.csv", "calib_r_equivalent.csv"},
-    "(no calibration states in cortex — the S10 gap)",
-    "scaffold"};
+    {{"calibration noise budget → R-inflation",
+      "px, ×",
+      "1° extrinsic uncertainty ⇒ ~R×4, matching the empirical #212 fix"},
+     {"induced reprojection vs assumed pixel σ", "px", "calib error (~8px @1°) exceeds the filter's assumed ~4.6px"},
+     {"pose NEES with perfect calibration", "—", "backend over-confident (NEES~43 ≈ EuRoC MH_05) even with exact T_CI"},
+     {"R-scale that restores NEES≈dof", "×", "the empirical measurement-noise deficit; R is the lever"},
+     {"calibration-state NEES (if estimated online)", "—", "the principled fix — OpenVINS/MINS-style online calib"}},
+    {"calib_budget.csv", "calib_r_sweep.csv"},
+    "(no calibration states / no calib term in R in cortex — the S10 gap)",
+    "implemented"};
 
 /// The whole pipeline, in dataflow order — for `--list`.
 [[nodiscard]] inline std::vector<StageInfo> pipeline() {
