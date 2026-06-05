@@ -382,4 +382,25 @@ if (nsw) {
   );
 }
 
+// ── S10 figures (calibration) — rendered when the S10 artifacts are present ──
+const cb = readCsv('calib_budget.csv');
+if (cb) {
+  const motions = [...new Set(cb.map((r) => r.motion))];
+  lineChart(
+    motions.map((m) => ({ name: m, points: cb.filter((r) => r.motion === m).map((r) => ({ x: r.ext_rot_deg, y: r.r_inflation })) })),
+    { title: 'S10  calibration noise budget: R-inflation vs extrinsic uncertainty', file: 'calib_budget.svg',
+      xlabel: 'extrinsic rotation uncertainty (deg)', ylabel: 'R-inflation factor (×)', logY: true,
+      hline: 4, hlineLabel: 'empirical R×4 (#212) ≈ 1° extrinsic' },
+  );
+}
+const crs = readCsv('calib_r_sweep.csv');
+if (crs) {
+  lineChart(
+    [{ name: '6-DoF pose NEES', points: crs.map((r) => ({ x: r.r_scale, y: r.nees })) }],
+    { title: 'S10  pose NEES vs measurement-noise inflation (perfect calibration)', file: 'calib_r_sweep.svg',
+      xlabel: 'R variance multiplier (×)', ylabel: 'pose NEES (target = dof = 6)', logY: true,
+      hline: 6, hlineLabel: 'dof = 6 (consistent)' },
+  );
+}
+
 console.log('done.');
