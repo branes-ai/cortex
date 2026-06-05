@@ -27,6 +27,19 @@ const W = 752, H = 480; // EuRoC cam0 / synthetic scene size
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const num = (v, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '—');
 
+// Perceptual-ish blue→green→yellow→red ramp, t∈[0,1] (matches the figure generator).
+function ramp(t) {
+  t = Math.max(0, Math.min(1, t));
+  const stops = [[0, [13, 8, 135]], [0.35, [42, 130, 180]], [0.6, [60, 170, 100]], [0.8, [240, 200, 60]], [1, [200, 30, 30]]];
+  for (let i = 1; i < stops.length; i++)
+    if (t <= stops[i][0]) {
+      const [a0, c0] = stops[i - 1], [a1, c1] = stops[i], f = (t - a0) / (a1 - a0 || 1);
+      const c = c0.map((v, k) => Math.round(v + f * (c1[k] - v)));
+      return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+  return 'rgb(200,30,30)';
+}
+
 // Embed one frame's image as a data URI. Not cached: every frame is a distinct
 // image (a per-frame synthetic scene, or a unique EuRoC frame), so a cache would
 // only accumulate — on a long EuRoC run that is thousands of base64 PNGs in memory.
@@ -39,23 +52,48 @@ function dataUri(imgRef) {
   }
 }
 
-const lines = readFileSync(framesPath, 'utf8').trim().split('\n').filter(Boolean);
+const records = readFileSync(framesPath, 'utf8').trim().split('\n').filter(Boolean)
+  .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+// Global depth range (synthetic only) so the depth colour-map is consistent
+// across the whole video — near features pop warm, far ones go cool.
+let dmin = Infinity, dmax = -Infinity;
+for (const r of records) for (const d of r.depth ?? []) { if (d < dmin) dmin = d; if (d > dmax) dmax = d; }
+const haveDepth = Number.isFinite(dmin) && dmax > dmin;
+// near (close, large parallax) → red; far → blue.
+const depthColor = (d) => ramp(1 - (d - dmin) / (dmax - dmin));
+
 let count = 0;
-for (const line of lines) {
-  let r;
-  try { r = JSON.parse(line); } catch { continue; }
+for (const r of records) {
   const uri = dataUri(r.image);
 
   let body = '';
   body += `<rect width="${W}" height="${H}" fill="#000"/>`;
   if (uri) body += `<image href="${uri}" x="0" y="0" width="${W}" height="${H}"/>`;
 
-  // True projections (synthetic only) — faint gray; the noise is the offset to red.
-  for (const p of r.true ?? [])
-    body += `<circle cx="${p[0]}" cy="${p[1]}" r="2.5" fill="none" stroke="#9aa" stroke-width="0.8" opacity="0.7"/>`;
-  // Live feature tracks the filter consumes — red.
+  // True projections, colour-coded by depth (near = warm, far = cool) so the
+  // parallax — near dots sweep faster than far ones — reads at a glance.
+  const tru = r.true ?? [];
+  const dep = r.depth ?? [];
+  for (let i = 0; i < tru.length; i++) {
+    const c = haveDepth && dep[i] != null ? depthColor(dep[i]) : '#9aa';
+    body += `<circle cx="${tru[i][0]}" cy="${tru[i][1]}" r="3" fill="${c}" opacity="0.95"/>`;
+  }
+  // Live (noisy) feature tracks the filter consumes — thin white ring; the
+  // offset from its coloured dot is the additive camera noise.
   for (const p of r.obs ?? [])
-    body += `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="none" stroke="#ff3b30" stroke-width="1.3"/>`;
+    body += `<circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="none" stroke="#fff" stroke-width="1" opacity="0.85"/>`;
+
+  // Depth colour-bar legend (synthetic).
+  if (haveDepth) {
+    const lx = W - 130, ly = H - 70, lw = 110, lh = 12;
+    for (let k = 0; k < 22; k++)
+      body += `<rect x="${lx + (k / 22) * lw}" y="${ly}" width="${lw / 22 + 1}" height="${lh}" fill="${ramp(1 - k / 21)}"/>`;
+    body += `<rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="none" stroke="#888"/>`;
+    body += `<text x="${lx}" y="${ly - 4}" font-family="monospace" font-size="10" fill="#ddd">depth (m)</text>`;
+    body += `<text x="${lx}" y="${ly + lh + 12}" font-family="monospace" font-size="9" fill="#ddd">near ${dmin.toFixed(1)}</text>`;
+    body += `<text x="${lx + lw}" y="${ly + lh + 12}" text-anchor="end" font-family="monospace" font-size="9" fill="#ddd">far ${dmax.toFixed(1)}</text>`;
+  }
 
   // Metrics HUD (top-left).
   const hud = [
@@ -71,7 +109,10 @@ for (const line of lines) {
     body += `<text x="18" y="${30 + i * 18}" font-family="monospace" font-size="14" fill="#eee">${esc(h)}</text>`;
   });
   // Legend.
-  body += `<text x="${W - 8}" y="${H - 12}" text-anchor="end" font-family="monospace" font-size="11" fill="#ddd">red = tracked feature${(r.true ?? []).length ? '   gray = true (noise = offset)' : ''}</text>`;
+  const legend = haveDepth
+    ? 'dots = landmarks (colour = depth)   white ring = noisy track'
+    : 'white ring = tracked feature';
+  body += `<text x="8" y="${H - 12}" font-family="monospace" font-size="11" fill="#ddd">${legend}</text>`;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg>`;
   const name = `frame_${String(r.frame).padStart(5, '0')}.svg`;
