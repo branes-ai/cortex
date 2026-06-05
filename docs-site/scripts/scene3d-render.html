@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  scene3d-render.html — the offline-capture harness for the 3D path/pose viewer.
+  A headless browser (gen-scene3d-video.mjs) loads this, then steps frames via
+  window.__viewer.setFrame(i) and screenshots the canvas. It reuses the exact same
+  viewer module as the interactive docs island (src/components/scene3d.js), so the
+  rendered video matches the web view. three is resolved from node_modules through
+  the import map; everything is served from the docs-site root by the renderer.
+
+    ?data=<url to run.jsonl>&w=<px>&h=<px>
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html, body { margin: 0; background: #0e1116; overflow: hidden; }
+      #c { display: block; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script type="module">
+      import { createViewer, parseRunJsonl } from '/src/components/scene3d.js';
+
+      const p = new URLSearchParams(location.search);
+      const w = Number(p.get('w') || 960);
+      const h = Number(p.get('h') || 600);
+      const canvas = document.getElementById('c');
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+
+      window.__error = null;
+      try {
+        const res = await fetch(p.get('data'));
+        if (!res.ok) throw new Error(`${res.status} ${p.get('data')}`);
+        const records = parseRunJsonl(await res.text());
+        // Fixed viewpoint for a stable video (the viewer auto-fits to the path).
+        window.__viewer = createViewer({ canvas, records });
+        window.__ready = true;
+      } catch (e) {
+        window.__error = String(e && e.message ? e.message : e);
+        window.__ready = true;
+      }
+    </script>
+  </body>
+</html>

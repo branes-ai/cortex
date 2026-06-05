@@ -109,10 +109,15 @@ reported position σ collapses to ~13 cm while the true error grows past 2 m.)
   when the true pose escapes it.
 - Docs page `vio/scene3d.mdx` embeds it against a shipped sample
   `public/data/vio_run.jsonl`; deploys with the docs-site to GitHub Pages.
-- **Next increments:** (a) offline mp4 — Playwright drives the page frame-by-frame
-  → PNG → existing ffmpeg step in `scripts/vio_scene_video.sh` (`--3d` mode);
-  (b) landmark cloud + camera frustum (emit the synthetic world's 3-D landmarks);
-  (c) growing-trail / playback polish.
+- **Offline mp4 [DONE].** `docs-site/scripts/gen-scene3d-video.mjs` serves the
+  docs-site, drives the same viewer module in headless chromium (swiftshader
+  WebGL) via `scene3d-render.html`, screenshots each frame, and pipes the PNG
+  sequence through ffmpeg. Wired into `scripts/vio_scene_video.sh --3d`. The video
+  is the same viewer the web page uses, so they match. Verified: 250-frame
+  960×600 12.5 s mp4 with real rendered content.
+- **Next increments:** (a) landmark cloud + camera frustum (emit the synthetic
+  world's 3-D landmarks); (b) growing-trail / playback polish; (c) a fixed-orbit
+  camera option for the video.
 
 **Phase 2 — Rerun instrumentation (Tier 2).**
 - Add the Rerun C++ SDK (FetchContent) behind a build flag; log poses, landmark
