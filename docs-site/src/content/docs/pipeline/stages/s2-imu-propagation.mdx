@@ -1,0 +1,106 @@
+---
+title: S2 — IMU Propagation
+description: Predicting the mean and covariance forward between images — the Φ/Q_d covariance propagation, and the measured verdict that its diagonal-Q simplification is a minor, cleared #212 candidate.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Between camera frames the IMU runs at 200 Hz–1 kHz, and S2 integrates it: it
+strapdown-integrates the **mean** (attitude, velocity, position) and propagates the
+**covariance** `P` forward, so the filter arrives at the next image with both a
+predicted pose and an honest uncertainty about it. This stage was a prime suspect
+for the [#212 over-confidence](/pipeline/engineering-status/) — and the probe
+**cleared it**. This page is what a measured *negative* result looks like.
+
+## What it does
+
+- **Mean** — debias the IMU sample, then strapdown-integrate `R, v, p` (zeroth-order
+  hold or RK4).
+- **Covariance** — `P⁻_{k+1} = Φ P⁺_k Φᵀ + Q_d`. The transition matrix `Φ` carries
+  the **off-diagonal skew blocks** coupling orientation error into velocity and
+  position error — gravity leakage living inside the covariance. The discrete noise
+  `Q_d` should map measurement-space noise through the noise Jacobian `G`, producing
+  `θ–v–p` cross-correlations and the higher-order `Δt²/Δt³` scalings — **not** a
+  plain diagonal.
+
+## Why it was a suspect
+
+The cortex `Q_d` is assembled **diagonally** — it drops the canonical position-noise
+block and the velocity–position cross term. A diagonal `Q_d` understates
+position/velocity process noise and omits correlations the update relies on, which
+is a textbook over-confidence mechanism. The question is not "is it diagonal" (it
+is) but **how much does that actually cost** — and the only honest way to answer is
+to measure it against a canonical reference.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `propagate(x⁻, P⁻, imu[t_k, t_{k+1}]) → (x⁻_{k+1}, P⁻_{k+1})` |
+| **Pre** | `Δt > 0`, monotonic timestamps; measurements debiased; `P⁺_k` symmetric PSD |
+| **Post / invariants** | `R ∈ SO(3)` (orthonormal, det 1) · `P⁻` symmetric PSD · `Q_d` PSD with `θ–v–p` cross-correlations · the 4-D unobservable subspace (global position + yaw) stays in the propagation null space · GT-injection: zero-noise propagation reproduces the GT trajectory within integration tolerance |
+| **cortex** | `msckf/propagator.hpp` (Φ assembly, Q, FEJ) |
+
+## Metrics
+
+The [S2 probe](/pipeline/consistency-analysis/) reconstructs the canonical `Φ`/`Q_d`
+and compares them to the shipped `Propagator`, then drives the **real** propagator
+on the synthetic world.
+
+### Φ reconstruction & the structural invariants — all pass
+
+| check | result |
+|---|---|
+| Φ reconstruction (real == reference) | 1.5e-16 — **pass** |
+| `R` orthonormality `‖RᵀR − I‖` @0.5 s | 2.2e-16 — **pass** |
+| `P` min-eigenvalue @0.5 s | > 0 — **PSD** |
+| global-position nullspace leak | 0 — **preserved** |
+| GT-injection integrator order | O(Δt) (error halves with Δt: 59→30→15→7 mm @ 50→800 Hz) |
+
+### The diagonal-Q deficit — real, but small
+
+The cortex `Q_d` does drop terms — but measured against the canonical `G Q_meas Gᵀ`,
+the cost is minor:
+
+| quantity | cortex vs canonical |
+|---|---|
+| Q θ-σ, Q v-σ | **match** |
+| Q position term | 0 vs 3.06e-6 m — **dropped** |
+| Q v–p cross term | 0 vs 1.25e-9 — **dropped** |
+| Q relative-Frobenius gap | **0.35%** of Q dropped |
+| position-σ under-report @0.05 s (inter-frame) | **7.4%** |
+| position-σ under-report @0.5 s | **0.7%** |
+
+![Diagonal-Q position-σ deficit vs canonical](/figures/s2/prop_growth_pos.svg)
+![Per-step propagation error vs ground truth](/figures/s2/prop_gt_error.svg)
+
+### Propagation-only NEES — consistent at the default Q
+
+Driving the real propagator and scaling `Q`, the propagation-only 6-DoF pose NEES
+sits **right at its target** with the shipped noise:
+
+| Q scale | pose NEES (target 6) |
+|---|---|
+| 0.25 | 23.5 |
+| 0.5 | 12.2 |
+| **1 (shipped)** | **6.4** |
+| 2 | 2.97 |
+| 4 | 1.52 |
+
+![Propagation-only NEES vs Q-scale](/figures/s2/prop_nees.svg)
+
+At the default `Q`, NEES ≈ 6.4 ≈ the 6-DoF target — **the propagated covariance is
+essentially honest on its own.**
+
+<Aside type="tip" title="Status — cleared (with a small fix outstanding)">
+  S2 is **not** a primary source of the #212 over-confidence. The diagonal-`Q`
+  simplification is real but costs &lt;1% of position-σ over a frame, every
+  structural invariant passes, and propagation-only NEES is consistent at the
+  shipped noise. This also **sharpens** the
+  [Consistency Analysis](/pipeline/consistency-analysis/) finding that "Q×10 helps
+  on EuRoC": that is *compensating inflation* widening `P` to mask the structural
+  error elsewhere — not evidence that propagation is genuinely under-noised.
+  Outstanding (correctness, not consistency): add the dropped `Q_d` position and
+  v–p cross terms. Full decomposition on
+  [Engineering Status](/pipeline/engineering-status/).
+</Aside>

@@ -132,7 +132,11 @@ The current reading is therefore **multi-source**, not a single bug:
 - **Unmodeled calibration** ([S0](/pipeline/stages/s0-sensor-models/) /
   [S10](/pipeline/stages/s10-online-calibration/)) — a variance deficit with no
   mean bias, accounting for the `R×4` component. **Leading.**
-- **Undersized process noise** `Q` ([S2](/pipeline/overview/)) — the `Q×10` half.
+- **Process noise** `Q` ([S2](/pipeline/stages/s2-imu-propagation/)) — the `Q×10`
+  that helps on EuRoC. But the S2 probe shows propagation-only NEES is *consistent*
+  at the shipped `Q`, so this is **compensating inflation** masking the structural
+  error, not a genuine propagation defect. (Its diagonal-`Q` simplification is real
+  but costs &lt;1% per frame.)
 - **Missing parallax gate** (S5) — implicated in the V2_03 divergence.
 
 The full, current decomposition and the tracking issues live on
