@@ -27,19 +27,16 @@ const W = 752, H = 480; // EuRoC cam0 / synthetic scene size
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const num = (v, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '—');
 
-// Cache embedded images (the synthetic scene reuses few; EuRoC frames are unique).
-const imgCache = new Map();
+// Embed one frame's image as a data URI. Not cached: every frame is a distinct
+// image (a per-frame synthetic scene, or a unique EuRoC frame), so a cache would
+// only accumulate — on a long EuRoC run that is thousands of base64 PNGs in memory.
 function dataUri(imgRef) {
-  if (imgCache.has(imgRef)) return imgCache.get(imgRef);
   const p = isAbsolute(imgRef) ? imgRef : resolve(dir, imgRef);
-  let uri = '';
   try {
-    uri = `data:image/png;base64,${readFileSync(p).toString('base64')}`;
+    return `data:image/png;base64,${readFileSync(p).toString('base64')}`;
   } catch {
-    uri = ''; // missing image → just draw the overlay on black
+    return ''; // missing image → just draw the overlay on black
   }
-  imgCache.set(imgRef, uri);
-  return uri;
 }
 
 const lines = readFileSync(framesPath, 'utf8').trim().split('\n').filter(Boolean);

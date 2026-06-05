@@ -19,7 +19,13 @@
 //   ./vio_pipeline --video --out DIR               # + per-frame scene + overlay data
 //   ./vio_pipeline --source euroc --dataset ROOT --video --out DIR
 
+// stb_image_write generates its implementation in this TU; the define must
+// immediately precede the include (guard it so include-sorting can't split them).
+// clang-format off
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+// clang-format on
+
 #include <branes/cv/image_io.hpp>
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/synthetic_world.hpp>
@@ -41,8 +47,6 @@
 #include <string_view>
 #include <system_error>
 #include <vector>
-
-#include <stb_image_write.h>
 
 namespace {
 
@@ -83,9 +87,13 @@ Args parse(int argc, char** argv) {
             a.source = argv[++i];
         else if (v == "--dataset" && next_is_value())
             a.dataset = argv[++i];
-        else if (v == "--noise" && i + 1 < argc)
-            a.noise = std::stod(argv[++i]);
-        else if (v == "--robot" && next_is_value())
+        else if (v == "--noise" && i + 1 < argc) {
+            try {
+                a.noise = std::stod(argv[++i]);
+            } catch (const std::exception&) {
+                std::cerr << "vio_pipeline: ignoring malformed --noise value, using " << a.noise << "\n";
+            }
+        } else if (v == "--robot" && next_is_value())
             a.robot = argv[++i];
     }
     return a;
@@ -267,8 +275,11 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
                   << "\n  Set --dataset to a mav0 root (e.g. .../V1_01_easy/mav0). Skipping.\n";
         return false;
     }
-    if (images.empty() || imu.empty())
+    if (images.empty() || imu.empty()) {
+        std::cout << "  EuRoC streams empty at '" << args.dataset << "' (" << images.size() << " images, " << imu.size()
+                  << " IMU). Skipping.\n";
         return false;
+    }
 
     typename Backend::CameraCalibration cal;
     cal.intrinsics = typename Backend::Camera(
@@ -308,12 +319,12 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
             continue;
         }
         est.feed_image(t, std::as_const(img).view());
+        if (!est.backend().initialized())
+            continue;  // skip pre-init frames so they don't pollute the ATE
         ev::StampedPose<T> sp;
         sp.t_s = t;
         sp.pose = est.current_pose();
         traj.push_back(sp);
-        if (!est.backend().initialized())
-            continue;
         ++n;
         const auto tf = est.tracked_features();
         feat_total += tf.size();
