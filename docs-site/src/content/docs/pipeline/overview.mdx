@@ -62,13 +62,13 @@ whole window. Old clones are **marginalized** out.
 | **S3** | State augmentation / cloning | add the new image's pose to the sliding window |
 | **S4** | Visual frontend | KLT tracking + RANSAC → feature tracks |
 | **S5** | Feature triangulation | recover the 3-D point a track corresponds to |
-| **S6** | MSCKF update | null-space → QR compress → χ² gate → EKF correction |
+| **S6** | [MSCKF update](/pipeline/stages/s6-msckf-update/) | null-space → QR compress → χ² gate → EKF correction |
 | **S7** | SLAM-feature update | optional persistent landmarks |
 | **S8** | Zero-velocity update | optional stationarity robustness |
 | **S9** | Marginalization | drop the oldest clone, keep the window bounded |
 | **S10** | [Online calibration](/pipeline/stages/s10-online-calibration/) | extrinsics, intrinsics, time offset |
 
-*(S0 and S10 are fully written; the rest follow the same template as their
+*(S0, S6, and S10 are fully written; the rest follow the same template as their
 [stage-probe utilities](/pipeline/engineering-status/) land.)*
 
 ## What "good" looks like

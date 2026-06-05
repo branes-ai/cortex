@@ -1,0 +1,153 @@
+---
+title: Consistency Analysis
+description: The diagnostic chain that localized the #212 over-confidence — driving the Q and R noise knobs and reading NEES/NIS instead of ATE — and what the FEJ experiment then revealed.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This is the deep-dive behind the [MSCKF update](/pipeline/stages/s6-msckf-update/):
+how the filter's over-confidence was localized by **measurement** rather than
+guesswork. It is the worked example of the method — drive a well-defined knob, read
+the [consistency instrument](/pipeline/metrics/), not end-to-end ATE.
+
+<Aside type="tip" title="Bottom line up front">
+  The over-confidence is **not** a mistuned noise dial. The true measurement noise
+  *is* ~4× larger and the process noise ~10× larger than configured — but setting
+  them honestly makes the trajectory *worse*, not better. Accuracy currently
+  *requires* a dishonest covariance, which means the over-confidence is
+  **compensating for a structural error**, not a config mistake.
+</Aside>
+
+## The symptom the instrument exposed
+
+The MSCKF is systemically over-confident on every sequence — **invisible to ATE**,
+which looked fine (sub-metre on the well-tracked runs):
+
+| sequence (static init) | ATE | NIS (target 1) | NEES (target 1) |
+|---|---|---|---|
+| MH_05_difficult | 0.79 m | 2.2 | 10 |
+| V2_03_difficult | 0.29 m | **14.8** | **115** |
+
+Per-block NEES localized it to **attitude**, worst under fast rotation (V2_03
+attitude NEES 169 vs position 3.5). Crucially, the over-confidence **scales with
+motion aggressiveness** — the first hint of a linearization/observability cause
+rather than a constant mistune.
+
+## The three sweeps
+
+Two runtime knobs (no rebuild) drove the diagnosis: `CORTEX_Q_SCALE` multiplies the
+IMU process-noise densities, `CORTEX_R_SCALE` the visual measurement noise.
+
+### Q — process noise is ~10× too small
+
+| Q scale | V2_03 NEES | V2_03 NIS | MH_05 NEES |
+|---|---|---|---|
+| 1 | 115 | 14.8 | 10.1 |
+| 10 | **7.95** | 12.9 | **4.86** |
+| 30 | 17.7 | 11.3 | 7.17 |
+
+NEES has a clear minimum at Q≈10 — the IMU densities are an order of magnitude
+under-sized. **But NIS barely moves** (14.8 → 11.3 across 30×): inflating `P` via
+`Q` does not fix the innovation over-confidence. Two independent faults.
+
+### R — measurement noise is ~4× too small, and it is holding the filter up
+
+| R scale | V2_03 ATE | V2_03 NIS | MH_05 NIS |
+|---|---|---|---|
+| 1 | 0.29 m | 14.8 | 2.18 |
+| 4 | 2.07 m | **1.08** | 0.15 |
+| 10 | **278 m** | 0.36 | 0.04 |
+
+NIS scales as a near-perfect **1/R²** (14.8 → 3.9 → 1.08) — the signature of an
+under-tuned *measurement noise*, not an observability wall (which wouldn't scale
+away). **But making `R` honest diverges the filter**: ATE goes 0.29 m → 2 m → 278 m.
+The over-tight `R` is supplying the correction authority that keeps the trajectory
+bounded. The default config has *good ATE and a lying covariance* because two errors
+(tight `Q`, tight `R`) are **mutually compensating**.
+
+### Joint — no setting is both consistent and accurate
+
+| Q | R | seq | ATE | NIS | NEES |
+|---|---|---|---|---|---|
+| 1 | 1 | V2_03 | **0.29** | 14.8 | 115 |
+| 10 | 2 | V2_03 | 0.83 | 3.6 | **10.1** |
+| 10 | 4 | V2_03 | 6.22 | **1.06** | 42 |
+| 1 | 1 | MH_05 | **0.79** | 2.2 | 10 |
+| 10 | 4 | MH_05 | 3.04 | 0.15 | **3.6** |
+
+Read down the ATE column: **every step toward an honest covariance costs accuracy.**
+The most accurate config is the most over-confident; the most consistent configs
+carry 3–6 m ATE.
+
+The same relationship is visible cleanly on the synthetic world, where ground truth
+is exact — NIS crosses 1 right where the injected noise matches the model, and ATE
+holds until the filter loses lock:
+
+![Synthetic NIS vs injected noise](/figures/pipeline/pipeline_noise_nis.svg)
+![Synthetic ATE vs injected noise](/figures/pipeline/pipeline_noise_ate.svg)
+
+## Why this is structural, not a re-tune
+
+In a correctly-modelled filter the *true* noise values give consistency **and**
+optimal accuracy simultaneously — that is the definition of optimality. Here,
+accuracy *requires* over-confident noise, so a structural error is being masked by
+the over-confidence; relax the noise and the underlying error surfaces as drift.
+
+The fault is **motion-dependent** — attitude NEES, NIS, and the residual
+inconsistency at honest noise all scale with aggressiveness. That fingerprints an
+**EKF observability / linearization inconsistency** (the classic MSCKF
+spurious-information-gain in the unobservable yaw + position directions).
+
+## The discriminator — innovation whiteness
+
+One clean test separates "observability inconsistency" from "a systematic bias
+(calibration / triangulation / time-sync)": the **mean and whiteness** of the
+normalized innovations.
+
+| sequence | mean z | bias magnitude | lag-1 z | verdict |
+|---|---|---|---|---|
+| V2_03 (aggressive) | −4.64 | ≈ −0.013σ (~0.1 px) | +14.2 | non-white; bias negligible |
+| MH_05 (mild) | +2.19 | — | −10.3 | non-white; zero-mean |
+
+The innovations are **strongly non-white** on both sequences (|lag-1 z| ≫ 2.58) —
+the filter leaves temporal structure in the residuals, the signature of an
+observability/linearization inconsistency. The mean is **effectively zero** (no
+gross calibration error). At the time, this pointed squarely at **First-Estimates
+Jacobians (FEJ) / OC-EKF** as the fix.
+
+## What the FEJ experiment then revealed
+
+<Aside type="caution" title="The plot twist — and why measurement beats reasoning">
+  FEJ was the textbook fix the whiteness test implied, so it was implemented
+  (propagation- and update-side) with telemetry confirming it engaged. **NEES did
+  not improve — FEJ is refuted as the primary cause.** That negative result is the
+  most important finding here: the observability story was necessary but not
+  sufficient. It re-opened the candidate list and re-weighted it toward the *other*
+  source of a too-small covariance that is **zero-mean** (consistent with the
+  near-zero innovation bias): **unmodeled calibration uncertainty**.
+</Aside>
+
+The current reading is therefore **multi-source**, not a single bug:
+
+- **Unmodeled calibration** ([S0](/pipeline/stages/s0-sensor-models/) /
+  [S10](/pipeline/stages/s10-online-calibration/)) — a variance deficit with no
+  mean bias, accounting for the `R×4` component. **Leading.**
+- **Undersized process noise** `Q` ([S2](/pipeline/overview/)) — the `Q×10` half.
+- **Missing parallax gate** (S5) — implicated in the V2_03 divergence.
+
+The full, current decomposition and the tracking issues live on
+[Engineering Status](/pipeline/engineering-status/).
+
+## Reproduce it
+
+```bash
+cmake --preset sitl-release && cmake --build --preset sitl-release --target vio_euroc -j4
+export CORTEX_EUROC_MH05=/path/to/MH_05_difficult/mav0
+export CORTEX_EUROC_V203=/path/to/V2_03_difficult/mav0
+CORTEX_Q_SCALE=10 CORTEX_R_SCALE=2 \
+  ./build/sitl-release/tests/vio_euroc "V2_03_difficult replay (moving start) converges"
+```
+
+The benchmark WARNs the aggregate NEES/NIS, the per-block NEES, and the active
+scale factors. Use the Release binary — it replays a sequence in ~85 s vs ~25×
+slower unoptimized.
