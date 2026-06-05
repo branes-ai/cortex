@@ -63,6 +63,14 @@ is `E[χ²(n)] = n`. So divide by the dimension and **a consistent filter sits a
 
 ### NEES vs NIS — same idea, two places
 
+Both are the dof-normalized Mahalanobis distance above; they differ only in *what
+error* and *what covariance* you plug in:
+
+- **NEES** — **N**ormalized **E**stimation **E**rror **S**quared: `eᵀ P⁻¹ e` on
+  the **state estimate's** error vs the **state** covariance `P`.
+- **NIS** — **N**ormalized **I**nnovation **S**quared: the same form on the
+  **innovation** (measurement − prediction) vs the **innovation** covariance `S`.
+
 | | NEES | NIS |
 |---|---|---|
 | error | `x̂ − x_true` (state error) | `z − ẑ` (innovation: measured − predicted) |
