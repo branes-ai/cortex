@@ -22,6 +22,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.39.3](https://github.com/branes-ai/cortex/compare/v0.39.2...v0.39.3) (2026-06-05)
+
+
+### Documentation
+
+* S6 MSCKF-update stage + consistency-analysis page ([#309](https://github.com/branes-ai/cortex/issues/309)) ([08a9864](https://github.com/branes-ai/cortex/commit/08a986465460b76670256075ef816a6ebfbc6478))
+
 ## [0.39.2](https://github.com/branes-ai/cortex/compare/v0.39.1...v0.39.2) (2026-06-05)
 
 
