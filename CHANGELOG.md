@@ -22,6 +22,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.39.2](https://github.com/branes-ai/cortex/compare/v0.39.1...v0.39.2) (2026-06-05)
+
+
+### Documentation
+
+* S10 online-calibration stage page (the [#212](https://github.com/branes-ai/cortex/issues/212) centerpiece) ([#307](https://github.com/branes-ai/cortex/issues/307)) ([91ead13](https://github.com/branes-ai/cortex/commit/91ead132c3a0e76770ab26d991bb45a3fbe45784))
+* **site:** add the S10 online-calibration stage page ([#212](https://github.com/branes-ai/cortex/issues/212) centerpiece) ([91ead13](https://github.com/branes-ai/cortex/commit/91ead132c3a0e76770ab26d991bb45a3fbe45784))
+
 ## [0.39.1](https://github.com/branes-ai/cortex/compare/v0.39.0...v0.39.1) (2026-06-05)
 
 
