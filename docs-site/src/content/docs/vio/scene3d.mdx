@@ -1,0 +1,73 @@
+---
+title: 3D Path & Pose Viewer
+description: An interactive Three.js view of the VIO drone trajectory, pose, and covariance ellipsoid — and what it shows about filter over-confidence (#212).
+---
+
+import Scene3D from '../../../components/Scene3D.astro';
+
+The 2-D [scene-video overlay](https://github.com/branes-ai/cortex/blob/main/docs/assessments/vio-pipeline-howto.md)
+shows what the camera sees. This is the **3-D** companion: the drone's path and
+pose in the world, driven by the same `run.jsonl` stream that `vio_pipeline`
+emits. Drag to orbit, scroll to zoom, and
+use the scrubber (or ▶) to step through the run.
+
+<Scene3D data="data/vio_run.jsonl" height={520} />
+
+## What you are looking at
+
+- **Green line / triad** — the **ground-truth** trajectory and the true pose at the
+  current frame.
+- **Orange line / triad** — the **estimated** trajectory and the filter's current
+  pose estimate.
+- **Yellow ellipsoid** — the filter's **position-covariance** at 3σ (≈ 97% per
+  axis). This is the whole reason for the 3-D view: it makes the filter's *belief
+  about its own uncertainty* visible.
+
+## Why the ellipsoid matters (the #212 story)
+
+A trustworthy filter keeps the green ground-truth marker **inside** its covariance
+ellipsoid — the true pose lies within the uncertainty it reports. When the
+ellipsoid is **too small and the green marker drifts outside it**, the filter is
+**over-confident**: certain about a wrong position. The HUD flags this the moment
+the true error exceeds the 3σ ellipsoid.
+
+This is exactly the over-confidence tracked in
+[issue #212](https://github.com/branes-ai/cortex/issues/212): on this sample run
+the reported position σ shrinks to ~13 cm while the true error grows past 2 m —
+the ellipsoid collapses to a fraction of the actual error. A controller trusting
+that covariance would act decisively on a wrong position. See the
+[pipeline how-to](https://github.com/branes-ai/cortex/blob/main/docs/assessments/vio-pipeline-howto.md)
+and the [canonical contract doc](https://github.com/branes-ai/cortex/blob/main/docs/arch/vio-pipeline-canonical.md)
+for the stage-by-stage decomposition.
+
+## Generate your own
+
+```bash
+cmake -B build -DBUILD_TARGET_KPU=OFF && cmake --build build -j$(nproc)
+./build/tools/vio_pipeline --robot drone --out /tmp/run
+# → /tmp/run/run.jsonl  (drop it in docs-site/public/data/ to view here)
+```
+
+### Render it to an mp4 (offline)
+
+The same viewer renders headlessly to a video — useful for talks and slides:
+
+```bash
+# one-shot: experiment → 3D video
+scripts/vio_scene_video.sh --3d --robot drone -o /tmp/run    # → /tmp/run/scene3d.mp4
+
+# or straight from an existing run.jsonl
+node docs-site/scripts/gen-scene3d-video.mjs --data /tmp/run/run.jsonl --out /tmp/run/scene3d.mp4
+```
+
+Needs `playwright` (`cd docs-site && npm i -D playwright && npx playwright install
+chromium`) and `ffmpeg`. It drives this exact viewer frame-by-frame in a headless
+browser, so the video matches what you see above.
+
+Each estimate record now carries the 3×3 position covariance block (`pcov`) that
+drives the ellipsoid:
+
+```json
+{"type":"est","t":13.95,"q":[...],"p":[1.23,3.36,0.38],"pos_err":2.59,
+ "pcov":[0.0165,-0.0016,0.00016, -0.0016,0.0206,0.0001, 0.00016,0.0001,0.0108]}
+```

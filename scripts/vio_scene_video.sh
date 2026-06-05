@@ -12,13 +12,16 @@
 #       --source S       synthetic | euroc            (default: synthetic)
 #       --dataset PATH   EuRoC mav0 root (for --source euroc)
 #       --fps N          output video frame rate      (default: 20)
+#       --3d             render the 3D path/pose video (scene3d.mp4) instead of
+#                        the 2D overlay — needs playwright (see below)
 #       --sweep          also emit the noise→robustness curves (SVG)
 #       --keep           keep intermediate frame SVG/PNG files
 #       --build          (re)build vio_pipeline first
 #   -h, --help           this help
 #
-# Needs: a built vio_pipeline, node, ffmpeg, and an SVG rasterizer
-# (rsvg-convert | cairosvg | inkscape).
+# Needs: a built vio_pipeline, node, ffmpeg. The 2D overlay also needs an SVG
+# rasterizer (rsvg-convert | cairosvg | inkscape); the 3D mode (--3d) needs
+# playwright (cd docs-site && npm i -D playwright && npx playwright install chromium).
 
 set -euo pipefail
 
@@ -36,8 +39,9 @@ FPS="20"
 SWEEP=0
 KEEP=0
 BUILD=0
+THREED=0
 
-usage() { sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --source)     SOURCE="$2"; shift 2;;
     --dataset)    DATASET="$2"; shift 2;;
     --fps)        FPS="$2"; shift 2;;
+    --3d)         THREED=1; shift;;
     --sweep)      SWEEP=1; shift;;
     --keep)       KEEP=1; shift;;
     --build)      BUILD=1; shift;;
@@ -67,10 +72,12 @@ command -v node   >/dev/null || die "node not found (needed for the overlay gene
 command -v ffmpeg >/dev/null || die "ffmpeg not found (apt-get install ffmpeg)"
 
 RASTER=""
-if   command -v rsvg-convert >/dev/null; then RASTER="rsvg-convert"
-elif command -v cairosvg     >/dev/null; then RASTER="cairosvg"
-elif command -v inkscape     >/dev/null; then RASTER="inkscape"
-else die "no SVG rasterizer found — install one of: librsvg2-bin (rsvg-convert), cairosvg, inkscape"
+if [[ $THREED -eq 0 ]]; then
+  if   command -v rsvg-convert >/dev/null; then RASTER="rsvg-convert"
+  elif command -v cairosvg     >/dev/null; then RASTER="cairosvg"
+  elif command -v inkscape     >/dev/null; then RASTER="inkscape"
+  else die "no SVG rasterizer found — install one of: librsvg2-bin (rsvg-convert), cairosvg, inkscape"
+  fi
 fi
 
 if [[ $BUILD -eq 1 || ! -x "$BIN" ]]; then
@@ -82,12 +89,28 @@ fi
 
 mkdir -p "$OUT"
 
-# ── 1) run the experiment with --video (emits scene/ + frames.jsonl) ────────
+# ── 1) run the experiment (emits run.jsonl always; scene/ + frames.jsonl with --video) ──
 say "running vio_pipeline (source=$SOURCE robot=$ROBOT noise=$NOISE)"
-RUN_ARGS=(--source "$SOURCE" --video --out "$OUT")
+RUN_ARGS=(--source "$SOURCE" --out "$OUT")
+[[ $THREED -eq 0 ]] && RUN_ARGS+=(--video)  # 3D only needs run.jsonl
 [[ "$SOURCE" == "synthetic" ]] && RUN_ARGS+=(--robot "$ROBOT" --noise "$NOISE")
 [[ -n "$DATASET" ]] && RUN_ARGS+=(--dataset "$DATASET")
 "$BIN" "${RUN_ARGS[@]}"
+
+# ── 3D mode: render the path/pose video from run.jsonl and stop ─────────────
+if [[ $THREED -eq 1 ]]; then
+  [[ -s "$OUT/run.jsonl" ]] || die "no run.jsonl produced — for --source euroc, pass a valid --dataset"
+  MP4="$OUT/scene3d.mp4"
+  say "rendering 3D path/pose video (headless three.js)"
+  KEEP_ARG=(); [[ $KEEP -eq 1 ]] && KEEP_ARG=(--keep)
+  node "$ROOT/docs-site/scripts/gen-scene3d-video.mjs" \
+    --data "$OUT/run.jsonl" --out "$MP4" --fps "$FPS" "${KEEP_ARG[@]}"
+  say "done"
+  echo "  video : $MP4"
+  echo "  data  : $OUT/{run.jsonl,trajectory.csv}"
+  exit 0
+fi
+
 [[ -s "$OUT/frames.jsonl" ]] || die "no frames.jsonl produced — for --source euroc, pass a valid --dataset"
 
 # ── 2) the noise→robustness curves (optional) ───────────────────────────────

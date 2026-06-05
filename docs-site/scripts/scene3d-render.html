@@ -1,0 +1,79 @@
+<!doctype html>
+<!--
+  scene3d-render.html — the offline-capture harness for the 3D path/pose viewer.
+  A headless browser (gen-scene3d-video.mjs) loads this, then steps frames via
+  window.__viewer.setFrame(i) and screenshots the canvas. It reuses the exact same
+  viewer module as the interactive docs island (src/components/scene3d.js), so the
+  rendered video matches the web view. three is resolved from node_modules through
+  the import map; everything is served from the docs-site root by the renderer.
+
+    ?data=<url to run.jsonl>&w=<px>&h=<px>
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>3D VIO path/pose render harness</title>
+    <style>
+      html, body { margin: 0; background: #0e1116; overflow: hidden; }
+      #stage { position: relative; background: #0e1116; }
+      #c { display: block; }
+      .hud {
+        position: absolute; top: 10px; left: 12px;
+        font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+        color: #e6edf3; text-shadow: 0 1px 2px #000; line-height: 1.5; pointer-events: none;
+      }
+      .hud .warn { color: #ff6b6b; font-weight: 600; }
+      .legend {
+        position: absolute; top: 10px; right: 12px; display: flex; flex-direction: column; gap: 3px;
+        font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+        color: #c9d1d9; text-shadow: 0 1px 2px #000; pointer-events: none;
+      }
+      .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="c"></canvas>
+      <div class="hud"></div>
+      <div class="legend">
+        <span><i style="background:#35c759"></i>ground truth</span>
+        <span><i style="background:#ff9f0a"></i>estimate</span>
+        <span><i style="background:#ffd60a"></i>3σ covariance</span>
+      </div>
+    </div>
+    <script type="module">
+      import { createViewer, parseRunJsonl } from '/src/components/scene3d.js';
+
+      const p = new URLSearchParams(location.search);
+      const w = Number(p.get('w') || 960);
+      const h = Number(p.get('h') || 600);
+      const stage = document.getElementById('stage');
+      const canvas = document.getElementById('c');
+      const hud = document.querySelector('.hud');
+      stage.style.width = canvas.style.width = w + 'px';
+      stage.style.height = canvas.style.height = h + 'px';
+
+      window.__error = null;
+      try {
+        const res = await fetch(p.get('data'));
+        if (!res.ok) throw new Error(`${res.status} ${p.get('data')}`);
+        const records = parseRunJsonl(await res.text());
+        // Fixed viewpoint for a stable video (the viewer auto-fits to the path).
+        // Pass the HUD so the metrics overlay is captured in the screenshot too.
+        window.__viewer = createViewer({ canvas, hud, records });
+        window.__ready = true;
+      } catch (e) {
+        window.__error = String(e && e.message ? e.message : e);
+        window.__ready = true;
+      }
+    </script>
+  </body>
+</html>
