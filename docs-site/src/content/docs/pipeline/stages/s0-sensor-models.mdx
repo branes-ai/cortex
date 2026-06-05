@@ -1,0 +1,94 @@
+---
+title: S0 — Sensor & Calibration Models
+description: The measurement functions every VIO residual is built from — camera projection, IMU model, extrinsics, time offset — and the sensitivity sweeps that quantify the cost of treating calibration as perfectly known.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**The substrate every other stage trusts.** S0 isn't an algorithm step — it's the
+set of measurement *functions* that turn 3-D geometry into the pixels and inertial
+samples the filter consumes. Every residual, and every Jacobian in the system, is
+built on top of S0. A bug here doesn't fail loudly; it quietly poisons every stage
+downstream.
+
+## What it does
+
+S0 defines three models:
+
+- **Camera** — `project(p_c ∈ ℝ³) → (u,v)` and its inverse. OpenVINS composes the
+  camera measurement as four stacked maps: feature representation → world-to-camera
+  transform (uses the extrinsics + a clone pose) → perspective projection →
+  distortion (radial-tangential 8-param, or fisheye/Kannala-Brandt 4-param).
+- **IMU** — `ω̃ = ω + b_g + n_g`, `ã = Rᵀ(a − g) + b_a + n_a`. A stationary IMU
+  reads `+‖g‖` along its up axis (it senses the *reaction* to gravity), not zero.
+- **Extrinsics & time offset** — the rigid transform `T_CI ∈ SE(3)` between camera
+  and IMU, and the inter-sensor time offset `t_d`.
+
+## Why it matters
+
+Two reasons S0 is where structural problems are born:
+
+1. **Round-trip and Jacobian correctness.** If `project`/`unproject` don't invert,
+   or the analytic Jacobian disagrees with finite differences, the frontend tracks
+   the wrong geometry and every update is biased — invisibly.
+2. **Unmodeled calibration uncertainty.** If `T_CI` and `t_d` are treated as
+   *perfectly known* rather than known-with-uncertainty, that real uncertainty is
+   removed from the filter. Structurally, that is **indistinguishable from
+   over-confidence** — and it is exactly the mechanism behind the EuRoC NEES being
+   too high. The two sensitivity sweeps below quantify the deficit.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `project(p_c, ζ) → (u,v)` + inverse; `(ω̃, ã) = imu_model(ω, a, R, g, b, n)`; `T_CI ∈ SE(3)`; `t_d ∈ ℝ` |
+| **Pre** | `ζ` valid (`f_x, f_y > 0`, distortion in its convergence basin); gravity sign & magnitude pinned and frame-consistent; `T_CI`, `t_d` known **with a stated uncertainty** |
+| **Post / invariants** | **Round-trip:** `unproject(project(p_c)) ≈ p_c/‖p_c‖` within ε for all `z > 0` · **Jacobian:** `∂h/∂p_c` finite, rank-2, matches finite-diff · **Cheirality:** `z ≤ 0` features rejected, never projected · **IMU static identity:** a stationary IMU integrates to zero world-frame acceleration |
+| **cortex** | camera model + `jacobian_at_pose` in `msckf/camera_updater.hpp`; IMU model in `msckf/propagator.hpp` |
+
+## Metrics
+
+### Projection round-trip & Jacobian (the contract holds)
+
+The workhorse check, run for both distortion models: unproject∘project residual,
+and analytic-vs-numeric Jacobian max-abs error, across the image. Both sit at
+machine-epsilon — **the camera contract holds** (verified by the S0 probe).
+
+![Projection round-trip residual (radtan)](/figures/s0/roundtrip_radtan.svg)
+![Analytic vs numeric Jacobian error (radtan)](/figures/s0/jacobian_radtan.svg)
+
+### Sensitivity: the cost of unmodeled calibration
+
+These two sweeps are the load-bearing ones for consistency. They inject a known
+calibration error and measure the **reprojection bias the filter silently absorbs
+into the state as if it were zero-mean noise**.
+
+- **Time offset** — sweep `t_d ∈ {−10 … +10} ms` and measure induced pose error:
+  how many mm/° of error per ms of unmodeled offset.
+- **Extrinsic perturbation** — perturb `T_CI` by `{0.5°, 1°, 2°}` and `{1, 5} mm`
+  and measure the induced reprojection bias.
+
+![Time-offset sensitivity](/figures/s0/timeoffset.svg)
+![Extrinsic rotation sensitivity](/figures/s0/extrinsic_rotation.svg)
+
+A 1° extrinsic error induces ≈ `focal·π/180 ≈ 8 px` of reprojection bias — already
+larger than the ~4.6 px the filter assumes as measurement noise. The filter has no
+state to absorb it, so it shows up as a covariance that is too small: structural
+over-confidence injected at the substrate.
+
+## Interactive
+
+S0 is a *2-D* contract (geometry → pixels), so its natural visualization is the
+**[scene-video overlay](/vio/scene3d/)**: the true projections vs the noisy
+observations the filter receives, with the camera frustum that S0's extrinsics
+define shown in the 3-D viewer.
+
+<Aside type="caution" title="Status">
+  The camera projection/Jacobian contract **holds**. The open item is the
+  **unmodeled `T_CI` / `t_d` / intrinsics uncertainty** — there are no calibration
+  states in the cortex filter, so their uncertainty never reaches the covariance.
+  This is a leading candidate for the EuRoC over-confidence (the `R×4` inflation
+  that restores NEES is a crude proxy for exactly this). See
+  [Engineering Status](/pipeline/engineering-status/) for the tracked,
+  stage-by-stage decomposition and the issue index.
+</Aside>

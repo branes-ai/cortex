@@ -28,13 +28,16 @@ const rehypeBaseLinks = isGitHubPages ? [
     rehypeRewrite,
     {
       rewrite: (node) => {
-        if (node.type === 'element' && node.tagName === 'a' && typeof node.properties?.href === 'string') {
-          const href = node.properties.href;
-          const isRootRelative = href.startsWith('/') && !href.startsWith('//');
-          const alreadyPrefixed = href === basePrefix || href.startsWith(basePrefix + '/');
-          if (isRootRelative && !alreadyPrefixed) {
-            node.properties.href = basePrefix + href;
-          }
+        if (node.type !== 'element') return;
+        // Base-prefix both internal links (<a href>) and embedded assets
+        // (<img src>, e.g. the generated figures under public/figures/).
+        const attr = node.tagName === 'a' ? 'href' : node.tagName === 'img' ? 'src' : null;
+        if (!attr || typeof node.properties?.[attr] !== 'string') return;
+        const val = node.properties[attr];
+        const isRootRelative = val.startsWith('/') && !val.startsWith('//');
+        const alreadyPrefixed = val === basePrefix || val.startsWith(basePrefix + '/');
+        if (isRootRelative && !alreadyPrefixed) {
+          node.properties[attr] = basePrefix + val;
         }
       },
     },
@@ -97,7 +100,16 @@ export default defineConfig({
             { label: 'Camera Updaters', slug: 'vio/camera-updaters' },
             { label: 'MSCKF Backend', slug: 'vio/msckf-backend' },
             { label: 'VioEstimator API', slug: 'vio/vio-estimator' },
+          ],
+        },
+        {
+          label: 'VIO Pipeline',
+          items: [
+            { label: 'The VIO Pipeline', slug: 'pipeline/overview' },
+            { label: 'Reading the Metrics', slug: 'pipeline/metrics' },
+            { label: 'S0 — Sensor & Calibration Models', slug: 'pipeline/stages/s0-sensor-models' },
             { label: '3D Path & Pose Viewer', slug: 'vio/scene3d' },
+            { label: 'Engineering Status', slug: 'pipeline/engineering-status' },
           ],
         },
         {
