@@ -107,12 +107,14 @@ try {
   if (!n || n < 1) die('viewer reports 0 frames — is run.jsonl empty / lacking est records?');
   log(`rendering ${n} frames at ${W}x${H}`);
 
-  const canvas = page.locator('#c');
+  // Screenshot the stage (canvas + HUD + legend overlays), not the bare canvas,
+  // so the metrics and over-confidence flag are captured in the video.
+  const stage = page.locator('#stage');
   for (let i = 0; i < n; i++) {
     await page.evaluate((k) => window.__viewer.setFrame(k), i);
     // let the render loop paint the new frame (two rAFs = settled)
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    await canvas.screenshot({ path: join(framesDir, `frame_${String(i).padStart(5, '0')}.png`) });
+    await stage.screenshot({ path: join(framesDir, `frame_${String(i).padStart(5, '0')}.png`) });
     if ((i + 1) % 25 === 0 || i + 1 === n) process.stdout.write(`\r    ${i + 1}/${n}`);
   }
   process.stdout.write('\n');
