@@ -1,0 +1,100 @@
+---
+title: S6 — MSCKF Update
+description: The consistency-critical stage — one update built from five sub-contracts (Jacobians, null-space projection, QR compression, χ² gating, Joseph EKF), and where NEES/NIS consistency is won or lost.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This is the stage that turns feature reprojection residuals into a state
+correction — and it is **the consistency-critical stage**. The three global health
+properties of the whole filter (NEES ≈ state dimension, NIS ≈ measurement dof,
+white innovations — see [Reading the Metrics](/pipeline/metrics/)) are won or lost
+here. It is one stage, but **five sub-contracts**, and the order matters.
+
+## What it does
+
+For each feature track that is being marginalized (lost, or sliding out of the
+window), S6 builds the reprojection residual, algebraically removes the unknown 3-D
+feature, gates the result, and applies an EKF correction to the whole sliding
+window:
+
+```
+build (H_x, H_f, r)  →  null-space project out the feature  →  QR-compress
+                     →  χ²-gate  →  EKF update (Joseph)
+```
+
+## The five sub-contracts
+
+### S6a — Jacobians & residual
+`r = z − ẑ`, linearized as `r ≈ H_x δx + H_f δf + n`. `H_x` is nonzero only on the
+columns of the **observing clone(s)**. **First-Estimates Jacobians (FEJ):** `H_x`,
+`H_f` are evaluated at the clones' *first-estimate* poses while the residual uses
+the *current* poses — the standard fix for the MSCKF's observability inconsistency.
+*Invariants:* `rank(H_f) = 3`; analytic Jacobians match finite-difference; `H_x`
+sparsity correct.
+
+### S6b — Left null-space projection
+Pick `N` spanning the left null space of `H_f` (`Nᵀ H_f = 0`) and left-multiply:
+the feature is eliminated algebraically, leaving `Nᵀ r = Nᵀ H_x δx + Nᵀ n`.
+*Invariant:* `N` is **orthonormal** (`NᵀN = I`) so the projected noise stays
+`σ² I` — break orthonormality and the noise model is silently wrong. Output
+dimension is `2m − 3` for `m` observations.
+
+### S6c — QR compression
+Thin-QR the tall `H_x` and keep the state-sized factor. **Purely for speed**, and
+**exact** (the orthogonal `Q₁ᵀ` keeps the noise isotropic and the information
+identical). Its absence is an efficiency matter, never a correctness one — not a
+#212 suspect.
+
+### S6d — χ² (Mahalanobis) gating
+`γ = rᵀ S⁻¹ r` with `S = H P⁻ Hᵀ + R`; accept if `γ < χ²_thresh(dof)`. *Invariant:*
+accepted innovations satisfy `γ ~ χ²(dof)` — i.e. **NIS is χ²-distributed with the
+right dof**. NIS systematically ≫ dof ⇒ `S` too small ⇒ `R` and/or `P` understated:
+the over-confidence signature (measured: NIS ∝ 1/R²). A *too-tight* gate that
+rejects good aggressive-motion measurements is a divergence suspect — the filter
+stops correcting exactly when motion is hardest.
+
+### S6e — EKF update (Joseph form)
+`K = P⁻ Hᵀ S⁻¹`, `δx = K r`, `x⁺ = x⁻ ⊞ δx`, and the **Joseph-form** covariance
+update `P⁺ = (I−KH) P⁻ (I−KH)ᵀ + K R Kᵀ`. *Invariants:* `P⁺` symmetric PSD (Joseph
+guarantees it under numeric error); `x⁺` retracted **on-manifold** (`R ⊞ δθ` via
+`Exp`, never additive on rotation); FEJ linearization points untouched by the update.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `update(x⁻, P⁻, {feature tracks}) → (x⁺, P⁺)` |
+| **Pre** | triangulated `p_f` valid (S5), ≥ 2 observations per track; `S` well-conditioned (Cholesky succeeds) |
+| **Master post-conditions** | **NEES ≈ dim(state)** · **NIS ≈ dof** · **innovations white** — the three globals; S6 is where they are won or lost |
+| **cortex** | `msckf/camera_updater.hpp` (update), `features/msckf_nullspace.hpp` (null-space), `msckf/covariance.hpp` (Joseph + gating), per-track FEJ toggle |
+
+## Metrics
+
+- **NIS** (always-on, no ground truth) — the χ² consistency of each accepted
+  update; the live over-confidence signal.
+- **Gate rejection rate** and `cond(S)` — too-tight gating vs ill-conditioning.
+- **Joseph PSD** — `P⁺` min-eigenvalue ≥ 0 under a stress sequence; `‖RᵀR − I‖`
+  after the on-manifold retraction.
+- **FEJ divergence** — `‖R_fej − R‖`, `‖p_fej − p‖` per clone, to confirm FEJ is
+  actually engaging.
+
+## Interactive
+
+The **NIS** readout in the [3-D viewer](/vio/scene3d/) is this stage's health,
+live: it is the per-update χ² of S6d. When it climbs past 1 while the covariance
+ellipsoid stays small, S6's post-conditions are being violated.
+
+<Aside type="caution" title="Status">
+  The S6 **algebra is textbook-correct** — null-space orthonormality, QR exactness,
+  and the Joseph update check out; this stage is faithful to OpenVINS. The defect
+  behind the #212 over-confidence is therefore **not** the S6 algebra but **what
+  `R` and `P⁻` contain entering `S`** — which points back to
+  [S2 process noise](/pipeline/overview/) and
+  [S0](/pipeline/stages/s0-sensor-models/) /
+  [S10](/pipeline/stages/s10-online-calibration/) unmodeled calibration. Notably,
+  the S6a **FEJ** fix — the prime textbook suspect — was implemented and **refuted
+  by measurement**. The full diagnostic chain is on
+  [Consistency Analysis](/pipeline/consistency-analysis/); the live decomposition
+  on [Engineering Status](/pipeline/engineering-status/).
+</Aside>

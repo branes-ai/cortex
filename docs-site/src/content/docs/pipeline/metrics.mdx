@@ -63,6 +63,14 @@ is `E[χ²(n)] = n`. So divide by the dimension and **a consistent filter sits a
 
 ### NEES vs NIS — same idea, two places
 
+Both are the dof-normalized Mahalanobis distance above; they differ only in *what
+error* and *what covariance* you plug in:
+
+- **NEES** — **N**ormalized **E**stimation **E**rror **S**quared: `eᵀ P⁻¹ e` on
+  the **state estimate's** error vs the **state** covariance `P`.
+- **NIS** — **N**ormalized **I**nnovation **S**quared: the same form on the
+  **innovation** (measurement − prediction) vs the **innovation** covariance `S`.
+
 | | NEES | NIS |
 |---|---|---|
 | error | `x̂ − x_true` (state error) | `z − ẑ` (innovation: measured − predicted) |
@@ -107,6 +115,8 @@ the directional/temporal discriminator (`innovation_whiteness()`).
 
 <Aside type="caution" title="Status">
   On EuRoC the cortex filter's NEES runs persistently **above** dof — structural
-  over-confidence. The stage-by-stage hunt for its sources, and the tracking
-  issues, are on the [Engineering Status](/pipeline/engineering-status/) page.
+  over-confidence. The worked diagnostic chain is on
+  [Consistency Analysis](/pipeline/consistency-analysis/); the stage-by-stage
+  decomposition and tracking issues are on
+  [Engineering Status](/pipeline/engineering-status/).
 </Aside>
