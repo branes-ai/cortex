@@ -134,8 +134,12 @@ await new Promise((res, rej) => {
     '-i', join(framesDir, 'frame_%05d.png'),
     '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-pix_fmt', 'yuv420p', resolve(outPath),
   ], { stdio: 'inherit' });
-  ff.on('error', (e) => rej(new Error(`ffmpeg failed to start (${e.message}) — is it installed?`)));
-  ff.on('close', (c) => (c === 0 ? res() : rej(new Error(`ffmpeg exited ${c}`))));
+  // Don't block forever if ffmpeg stalls (corrupt frame / disk full): budget the
+  // run time from the frame count plus a fixed buffer, then SIGKILL.
+  const ms = (frames.length / FPS + 60) * 1000;
+  const timer = setTimeout(() => { ff.kill('SIGKILL'); rej(new Error(`ffmpeg timed out after ${Math.ceil(ms / 1000)}s`)); }, ms);
+  ff.on('error', (e) => { clearTimeout(timer); rej(new Error(`ffmpeg failed to start (${e.message}) — is it installed?`)); });
+  ff.on('close', (c) => { clearTimeout(timer); c === 0 ? res() : rej(new Error(`ffmpeg exited ${c}`)); });
 });
 
 if (!KEEP) await rm(stageDir, { recursive: true, force: true });

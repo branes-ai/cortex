@@ -73,7 +73,8 @@ const src = `${base}/${data.replace(/^\//, '')}`;
         fitBtn.addEventListener('click', () => viewer.fitView());
       })
       .catch((err) => {
-        hud.innerHTML = `<div class="warn">failed to load ${src}: ${err.message}</div>`;
+        hud.textContent = `failed to load ${src}: ${err.message}`;
+        hud.classList.add('warn');
       });
   }
 </script>
@@ -103,7 +104,8 @@ const src = `${base}/${data.replace(/^\//, '')}`;
     pointer-events: none;
     line-height: 1.5;
   }
-  .scene3d-hud .warn {
+  .scene3d-hud .warn,
+  .scene3d-hud.warn {
     color: #ff6b6b;
     font-weight: 600;
   }
