@@ -1,0 +1,70 @@
+---
+title: Engineering Status
+description: Where the cortex VIO filter stands against the canonical contract — the #212 over-confidence decomposition and the tracking-issue index.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Issue from '../../../components/Issue.astro';
+
+This page is the single place where the documentation connects to the live
+engineering threads. Everything you need to *understand* the pipeline lives in the
+stage pages; the GitHub issues here are **provenance and status**, not required
+reading.
+
+<Aside type="note" title="Why issues live here, not in the prose">
+  Issue references are deliberately **single-sourced to this page**. The stage and
+  concept pages explain everything self-contained and, where relevant, *link here*
+  rather than embedding issue numbers; the actual pointers (rendered like
+  <Issue id={212} />) live only in this index. Issues get closed, edited, and
+  renumbered — so the *understanding* never depends on them, and there's exactly
+  one place to keep the links current.
+</Aside>
+
+## The headline: structural over-confidence
+
+On EuRoC the filter is **accurate enough but over-confident** — its NEES runs
+persistently above the state dimension (≈ 43 vs an expected ~15 on MH_05). The
+covariance is too small for the true error. Per [Reading the
+metrics](/pipeline/metrics/), that is the dangerous failure mode: a controller
+trusting the covariance acts decisively on a wrong position.
+
+This is being localized **by measurement**, stage by stage — not by guessing. The
+method: for each stage, a probe (native-unit health), a test (does the invariant
+hold), and a sensitivity sweep (how much does violating the pre-condition cost).
+
+### Candidate decomposition
+
+| Candidate | Stage | Status |
+|---|---|---|
+| First-Estimates Jacobians (FEJ) missing | S2/S6 | **Refuted** — implemented and measured; not the cause |
+| Diagonal-only process noise `Q_d` | [S2](/pipeline/overview/) | **Cleared** — propagation cross-terms checked |
+| **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), S10 | **Leading** — explains the `R×4` component (1° extrinsic ≈ 8 px > 4.6 px assumed) |
+| No parallax gate on triangulation | S5 | **Open** — suspected in the V2_03 divergence |
+| χ² gate threshold / measurement noise `R` | S6 | **Open** |
+
+<Aside type="tip" title="What 'refuted' means here">
+  A candidate is only crossed off when a *measurement* rules it out. FEJ was a
+  plausible textbook fix; it was implemented, the clone-divergence telemetry
+  confirmed it engaged, and NEES did not improve — so it is refuted, not deferred.
+  This is the bar for every row above.
+</Aside>
+
+## The diagnostic program
+
+The stage contracts and probes are the instrument. The canonical pipeline is
+distilled into the eleven staged contracts (S0–S10) of this section, each with a probe utility under
+`tools/` and a probe header under `sdk/eval/`. The consistency instrument itself
+(NEES/NIS/whiteness) is the always-on half.
+
+## Tracking index
+
+| Area | Issue |
+|---|---|
+| Over-confidence (the umbrella) | <Issue id={212} /> |
+| Consistency instrument (NEES/NIS) | <Issue id={264} /> |
+| Diagnostic-instrumentation epic | <Issue id={261} /> |
+| Stream characterization (Allan → Q) | <Issue id={268} /> |
+| Dynamic init on real EuRoC | <Issue id={211} />, <Issue id={247} /> |
+
+*This index is the maintained list — when an issue closes, it changes here, and the
+stage pages stay correct regardless.*
