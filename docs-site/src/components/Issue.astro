@@ -15,7 +15,7 @@ const { id, repo = 'branes-ai/cortex' } = Astro.props;
 const href = `https://github.com/${repo}/issues/${id}`;
 const hasLabel = Astro.slots.has('default');
 ---
-<a class="issue-ref" href={href} target="_blank" rel="noopener" title={`GitHub issue #${id}`}>
+<a class="issue-ref" href={href} target="_blank" rel="noopener noreferrer" title={`GitHub issue #${id}`}>
   <span class="issue-hash">#{id}</span>{hasLabel && <span class="issue-label"><slot /></span>}
 </a>
 
