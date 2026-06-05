@@ -52,6 +52,9 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
+# Experiment data directories
+experiments/
+
 # Temporary files
 *.tmp
 *.log
@@ -73,3 +76,4 @@ Testing/
 
 # Cargo build output (alongside any Cargo.toml in the tree)
 **/target/
+

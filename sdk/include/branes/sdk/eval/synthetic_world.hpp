@@ -73,11 +73,14 @@ struct GtSample {
     math::lie::detail::Vec<T, 3> v{};  ///< world velocity
 };
 
-/// One camera frame: timestamp + the pixel observations of the visible landmarks.
+/// One camera frame: timestamp + the pixel observations of the visible
+/// landmarks, plus each observation's camera-frame depth (z, metres) in the same
+/// order — used to colour-code features by depth so parallax reads at a glance.
 template <math::Scalar T>
 struct SyntheticFrame {
     double t = 0;
     std::vector<FrontendObservation<T>> obs;
+    std::vector<T> depth;  ///< camera-frame z (m) per obs, same order
 };
 
 /// The generated world: the two clean sensor streams, the per-frame ground truth,
@@ -227,6 +230,7 @@ template <math::Scalar T>
             o.u = px[0];
             o.v = px[1];
             frame.obs.push_back(o);
+            frame.depth.push_back(in_cam[2]);  // camera-frame depth, for colour-coding
         }
         out.frames.push_back(std::move(frame));
     }
