@@ -109,7 +109,7 @@ overview), `--out DIR` (artifact directory), `--no-out` (compute & print only).
 | `s7_slam_features` | S7 in-state landmarks | scaffold | feature-init cross-cov, landmark NEES |
 | `s8_zero_velocity` | S8 ZUPT | scaffold | detector ROC, static drift with/without |
 | `s9_marginalization` | S9 marginalization | scaffold | kept-marginal invariance, PSD |
-| `s10_online_calibration` | S10 online calibration | scaffold | px/ms & px/deg/mm (from S0), R-inflation equivalent, calib NEES |
+| `s10_online_calibration` | S10 online calibration | **wired** | calibration noise budget → R-inflation (1°≈R×4), pose NEES vs R-inflation, the empirical R-deficit |
 
 **S1 reading:** static init levels gravity to machine zero and the stationarity gate rejects an
 over-noisy window; dynamic init recovers the injected metric scale (<1% under excitation) and the
