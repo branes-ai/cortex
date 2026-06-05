@@ -38,7 +38,7 @@ hold), and a sensitivity sweep (how much does violating the pre-condition cost).
 |---|---|---|
 | First-Estimates Jacobians (FEJ) missing | S2/S6 | **Refuted** — implemented and measured; not the cause |
 | Diagonal-only process noise `Q_d` | [S2](/pipeline/overview/) | **Cleared** — propagation cross-terms checked |
-| **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), S10 | **Leading** — explains the `R×4` component (1° extrinsic ≈ 8 px > 4.6 px assumed) |
+| **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), [S10](/pipeline/stages/s10-online-calibration/) | **Leading** — explains the `R×4` component (1° extrinsic ≈ 8 px > 4.6 px assumed; full restore needs ~×32 because Q also undersized) |
 | No parallax gate on triangulation | S5 | **Open** — suspected in the V2_03 divergence |
 | χ² gate threshold / measurement noise `R` | S6 | **Open** |
 
