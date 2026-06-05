@@ -128,6 +128,14 @@ TEST_CASE("the estimator runs the front end and backend end-to-end", "[sdk][vio]
         est.feed_image(t, img.view());
 
         REQUIRE(est.num_tracked_features() > 0);
+        // tracked_features() (for overlaying the live tracks on the scene video)
+        // is consistent with the count, and every position is finite.
+        const auto feats = est.tracked_features();
+        REQUIRE(feats.size() == est.num_tracked_features());
+        for (const auto& tf : feats) {
+            REQUIRE(std::isfinite(tf.x));
+            REQUIRE(std::isfinite(tf.y));
+        }
         REQUIRE(branes::sdk::msckf::is_positive_semidefinite(est.backend().state().covariance()));
         max_clones_seen = std::max(max_clones_seen, est.backend().state().clones.size());
 

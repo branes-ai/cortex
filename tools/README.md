@@ -20,19 +20,38 @@ an estimate stream, measuring how well the filter cleans up the noise. The whole
 VIO premise is additive noise; this shows — and graphs — the filter rejecting it.
 
 ```bash
+# Synthetic source (exact GT — controlled noise studies):
 ./build/tools/vio_pipeline --out build/pipeline               # one run, matched noise
 ./build/tools/vio_pipeline --noise 3 --out build/pipeline     # 3× the assumed sensor noise
 ./build/tools/vio_pipeline --sweep --out build/pipeline       # noise level → robustness curve
 ./build/tools/vio_pipeline --robot drone                      # aggressive-motion preset
 node docs-site/scripts/gen-sensor-model-figures.mjs build/pipeline docs/assessments/figures/pipeline
+
+# EuRoC source (real images through the KLT front end; needs the dataset):
+./build/tools/vio_pipeline --source euroc --dataset /path/to/V1_01_easy/mav0 --video --out build/euroc
+
+# Overlay the metrics + live feature tracks on the scene video (either source):
+./build/tools/vio_pipeline --video --out build/pipeline       # emits scene/ + frames.jsonl
+node docs-site/scripts/gen-overlay.mjs build/pipeline          # → frames/*.svg
 ```
 
 Artifacts: `run.jsonl` (the saveable typed per-frame stream — `gt`/`est` records),
 `trajectory.csv`, `noise_sweep.csv`. Figures: estimated-vs-GT trajectory (top-down),
 position error over time, **error vs noise level** (the robustness cliff), and
 **NIS vs noise level** (consistency — NIS≈1 where injected noise matches the
-filter's model, over-conservative below, over-confident above). Source is
-`sdk/eval/synthetic_world.hpp` (exact GT); EuRoC replay is the planned second source.
+filter's model, over-conservative below, over-confident above).
+
+**Sources** (`--source`): `synthetic` (`sdk/eval/synthetic_world.hpp`, exact GT — the
+controlled-noise studies) and `euroc` (the real EuRoC MAV dataset through the KLT
+front end, with the dataset's mm ground truth; ATE is Horn-aligned).
+
+**Scene-video overlay** (`--video` + `gen-overlay.mjs`): emits, per frame, the camera
+image (real EuRoC frame, or a rendered synthetic scene) plus a `frames.jsonl` of the
+live feature tracks and metrics; the generator composites each into a self-contained
+SVG — the image, the tracked features (red), the true projections (gray, synthetic
+only — so the additive camera noise reads as the red↔gray offset), and a HUD
+(frame, time, #features, NIS, position error). Rasterize the SVGs (`rsvg-convert`) and
+assemble with `ffmpeg` for an `.mp4`.
 
 The reading: the filter holds up to ~2× its assumed noise, NIS crosses 1 right at
 the matched level, then loses lock — a measured operating envelope.

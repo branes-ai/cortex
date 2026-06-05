@@ -12,6 +12,9 @@ add_library(branes::tools ALIAS branes_tools)
 target_include_directories(branes_tools INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(branes_tools INTERFACE cxx_std_20)
 target_link_libraries(branes_tools INTERFACE branes::sdk)
+# vio_pipeline writes annotated scene PNGs via stb_image_write (header-only). The
+# include path is harmless on the other tools (none define the implementation).
+target_link_libraries(branes_tools INTERFACE branes::stb_image)
 
 file(GLOB STAGE_PROBE_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 foreach(src ${STAGE_PROBE_SRC})

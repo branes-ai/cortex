@@ -143,6 +143,23 @@ public:
         return tracks_.size();
     }
 
+    /// One tracked feature for visualization: stable id + current pixel position.
+    struct TrackedFeature {
+        std::uint64_t id = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+    };
+
+    /// The front end's current tracked features (id + pixel), valid after the
+    /// last `feed_image`. For overlaying the live tracks on the scene video.
+    [[nodiscard]] std::vector<TrackedFeature> tracked_features() const {
+        std::vector<TrackedFeature> out;
+        out.reserve(tracks_.size());
+        for (const auto& t : tracks_)
+            out.push_back(TrackedFeature{t.id, t.x, t.y});
+        return out;
+    }
+
 private:
     struct Track {
         std::uint64_t id = 0;
