@@ -22,11 +22,13 @@
 #define BRANES_TOOLS_STAGE_PROBE_HPP
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace branes::tools {
@@ -139,12 +141,18 @@ inline void print_results(const std::string& heading, const std::vector<ResultRo
     rule('-');
 }
 
-/// Open a CSV artifact in the args' output dir. Returns a (possibly closed)
-/// stream — when `--no-out` was given the stream is not open and writes no-op.
+/// Open a CSV artifact in the args' output dir, creating the directory if needed
+/// (otherwise ofstream::open fails silently and nothing is written). Returns a
+/// (possibly closed) stream — when `--no-out` was given the stream is not open.
 [[nodiscard]] inline std::ofstream open_artifact(const ProbeArgs& a, const std::string& name) {
     std::ofstream f;
-    if (!a.out.empty())
+    if (!a.out.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(a.out, ec);
         f.open(a.out + "/" + name);
+        if (!f)
+            std::cerr << "stage-probe: cannot write " << a.out << "/" << name << "\n";
+    }
     return f;
 }
 
