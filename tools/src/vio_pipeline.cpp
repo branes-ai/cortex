@@ -87,7 +87,7 @@ Args parse(int argc, char** argv) {
             a.source = argv[++i];
         else if (v == "--dataset" && next_is_value())
             a.dataset = argv[++i];
-        else if (v == "--noise" && i + 1 < argc) {
+        else if (v == "--noise" && next_is_value()) {
             try {
                 a.noise = std::stod(argv[++i]);
             } catch (const std::exception&) {
