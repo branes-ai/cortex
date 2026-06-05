@@ -11,10 +11,38 @@ They are the executable companion to the contract program in
 the canonical OpenVINS/MINS pipeline deconstructed into stages **S0–S10**, each
 written as a contract. One executable per stage.
 
+## End-to-end noise→robustness demo (`vio_pipeline`)
+
+Where the stage probes study one stage in isolation, `vio_pipeline` runs the
+**whole pipeline as a stream**: a synthetic world with *exact* ground truth →
+an additive-noise injector on the two sensor streams → the real MSCKF backend →
+an estimate stream, measuring how well the filter cleans up the noise. The whole
+VIO premise is additive noise; this shows — and graphs — the filter rejecting it.
+
+```bash
+./build/tools/vio_pipeline --out build/pipeline               # one run, matched noise
+./build/tools/vio_pipeline --noise 3 --out build/pipeline     # 3× the assumed sensor noise
+./build/tools/vio_pipeline --sweep --out build/pipeline       # noise level → robustness curve
+./build/tools/vio_pipeline --robot drone                      # aggressive-motion preset
+node docs-site/scripts/gen-sensor-model-figures.mjs build/pipeline docs/assessments/figures/pipeline
+```
+
+Artifacts: `run.jsonl` (the saveable typed per-frame stream — `gt`/`est` records),
+`trajectory.csv`, `noise_sweep.csv`. Figures: estimated-vs-GT trajectory (top-down),
+position error over time, **error vs noise level** (the robustness cliff), and
+**NIS vs noise level** (consistency — NIS≈1 where injected noise matches the
+filter's model, over-conservative below, over-confident above). Source is
+`sdk/eval/synthetic_world.hpp` (exact GT); EuRoC replay is the planned second source.
+
+The reading: the filter holds up to ~2× its assumed noise, NIS crosses 1 right at
+the matched level, then loses lock — a measured operating envelope.
+
 ## Layout
 
 | Piece | Role |
 |---|---|
+| `tools/src/vio_pipeline.cpp` | end-to-end noise→robustness demo (synthetic source → backend → metrics) |
+| `sdk/include/branes/sdk/eval/synthetic_world.hpp` | synthetic VIO world with exact ground truth (the demo source) |
 | `tools/include/branes/tools/stage_probe.hpp` | harness: contract printer, CLI, native-unit results table, CSV writer |
 | `tools/include/branes/tools/vio_stage_contracts.hpp` | the machine-readable registry of all 11 stage contracts (single source of truth) |
 | `tools/src/sN_*.cpp` | one thin driver per stage |
