@@ -369,16 +369,25 @@ int main(int argc, char** argv) {
                      "  --robot ground|drone       motion aggressiveness (synthetic)\n";
         return 0;
     }
+    // Create the output directory up front — otherwise ofstream::open() fails
+    // silently and no artifacts are written.
+    if (!args.out.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(args.out, ec);
+        if (args.video)
+            std::filesystem::create_directories(args.out + "/scene", ec);
+        if (ec)
+            std::cerr << "vio_pipeline: cannot create output dir '" << args.out << "': " << ec.message() << "\n";
+    }
     auto open = [&](const std::string& name) {
         std::ofstream f;
-        if (!args.out.empty())
+        if (!args.out.empty()) {
             f.open(args.out + "/" + name);
+            if (!f)
+                std::cerr << "vio_pipeline: cannot write " << args.out << "/" << name << "\n";
+        }
         return f;
     };
-    if (args.video && !args.out.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(args.out + "/scene", ec);
-    }
 
     if (args.source == "euroc") {
         auto stream = open("run.jsonl");
