@@ -29,6 +29,13 @@ const opt = (name, def) => {
 };
 const dataPath = opt('data');
 const outPath = opt('out');
+// Optional static scene (landmark cloud + camera). Defaults to scene.json next to
+// the run.jsonl if present.
+let scenePath = opt('scene');
+if (!scenePath && dataPath) {
+  const sibling = join(dirname(dataPath), 'scene.json');
+  if (existsSync(sibling)) scenePath = sibling;
+}
 const W = Number(opt('width', 960));
 const H = Number(opt('height', 600));
 const FPS = Number(opt('fps', 20));
@@ -81,6 +88,12 @@ const stagedData = join(stageDir, 'run.jsonl');
 await copyFile(dataPath, stagedData);
 const dataUrl = '/scripts/.render/run.jsonl';
 
+let sceneUrl = '';
+if (scenePath && existsSync(scenePath)) {
+  await copyFile(scenePath, join(stageDir, 'scene.json'));
+  sceneUrl = '/scripts/.render/scene.json';
+}
+
 // ── frames dir next to the output ────────────────────────────────────────────
 const framesDir = join(stageDir, 'frames');
 await rm(framesDir, { recursive: true, force: true });
@@ -97,7 +110,8 @@ try {
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   page.on('console', (m) => { if (m.type() === 'error') console.error('  [page]', m.text()); });
 
-  const url = `${base}/scripts/scene3d-render.html?data=${encodeURIComponent(dataUrl)}&w=${W}&h=${H}`;
+  const sceneQ = sceneUrl ? `&scene=${encodeURIComponent(sceneUrl)}` : '';
+  const url = `${base}/scripts/scene3d-render.html?data=${encodeURIComponent(dataUrl)}${sceneQ}&w=${W}&h=${H}`;
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction('window.__ready === true', { timeout: 30000 });
   const err = await page.evaluate('window.__error');

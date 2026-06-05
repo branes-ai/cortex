@@ -3,20 +3,23 @@
 // vanilla Astro island. Pass `data` = path (under the site base, e.g. the public/
 // dir) to a run.jsonl produced by `vio_pipeline --out`.
 //
-//   <Scene3D data="data/vio_run.jsonl" height={520} />
+//   <Scene3D data="data/vio_run.jsonl" scene="data/vio_scene.json" height={520} />
 //
-// The data path is resolved against the deploy base (BASE_URL) so it works both
-// at the GitHub-Pages base (/cortex/) and in local dev (/).
+// Paths are resolved against the deploy base (BASE_URL) so they work both at the
+// GitHub-Pages base (/cortex/) and in local dev (/). `scene` is optional — without
+// it the viewer shows just the paths/pose/covariance (no landmark cloud/frustum).
 interface Props {
   data: string;
+  scene?: string;
   height?: number;
 }
-const { data, height = 480 } = Astro.props;
+const { data, scene, height = 480 } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const src = `${base}/${data.replace(/^\//, '')}`;
+const sceneSrc = scene ? `${base}/${scene.replace(/^\//, '')}` : '';
 ---
 
-<div class="scene3d" data-src={src} style={`height:${height}px`}>
+<div class="scene3d" data-src={src} data-scene={sceneSrc} style={`height:${height}px`}>
   <canvas></canvas>
   <div class="scene3d-hud"></div>
   <div class="scene3d-controls">
@@ -28,6 +31,8 @@ const src = `${base}/${data.replace(/^\//, '')}`;
     <span><i style="background:#35c759"></i>ground truth</span>
     <span><i style="background:#ff9f0a"></i>estimate</span>
     <span><i style="background:#ffd60a"></i>3σ covariance</span>
+    <span><i style="background:#4fd1ff"></i>camera frustum</span>
+    <span><i style="background:#8aa6bf"></i>landmarks</span>
   </div>
 </div>
 
@@ -41,41 +46,48 @@ const src = `${base}/${data.replace(/^\//, '')}`;
     const playBtn = root.querySelector('.scene3d-play') as HTMLButtonElement;
     const fitBtn = root.querySelector('.scene3d-fit') as HTMLButtonElement;
     const src = root.dataset.src!;
+    const sceneSrc = root.dataset.scene || '';
 
-    fetch(src)
-      .then((r) => {
+    (async () => {
+      let records, scene;
+      try {
+        const r = await fetch(src);
         if (!r.ok) throw new Error(`${r.status} ${src}`);
-        return r.text();
-      })
-      .then((text) => {
-        const records = parseRunJsonl(text);
-        let playing = false;
-        // onFrame keeps the scrubber in step with the viewer's own play loop.
-        const viewer = createViewer({
-          canvas,
-          hud,
-          records,
-          options: { onFrame: (i: number) => { if (playing) scrub.value = String(i); } },
-        });
-        scrub.max = String(Math.max(0, viewer.frameCount - 1));
-
-        scrub.addEventListener('input', () => {
-          playing = false;
-          playBtn.textContent = '▶';
-          viewer.pause();
-          viewer.setFrame(Number(scrub.value));
-        });
-        playBtn.addEventListener('click', () => {
-          playing = !playing;
-          playBtn.textContent = playing ? '⏸' : '▶';
-          playing ? viewer.play() : viewer.pause();
-        });
-        fitBtn.addEventListener('click', () => viewer.fitView());
-      })
-      .catch((err) => {
-        hud.textContent = `failed to load ${src}: ${err.message}`;
+        records = parseRunJsonl(await r.text());
+        if (sceneSrc) {
+          const sr = await fetch(sceneSrc); // optional landmark cloud + camera
+          if (sr.ok) scene = JSON.parse(await sr.text());
+        }
+      } catch (err) {
+        hud.textContent = `failed to load ${src}: ${(err as Error).message}`;
         hud.classList.add('warn');
+        return;
+      }
+
+      let playing = false;
+      // onFrame keeps the scrubber in step with the viewer's own play loop.
+      const viewer = createViewer({
+        canvas,
+        hud,
+        records,
+        scene,
+        options: { onFrame: (i: number) => { if (playing) scrub.value = String(i); } },
       });
+      scrub.max = String(Math.max(0, viewer.frameCount - 1));
+
+      scrub.addEventListener('input', () => {
+        playing = false;
+        playBtn.textContent = '▶';
+        viewer.pause();
+        viewer.setFrame(Number(scrub.value));
+      });
+      playBtn.addEventListener('click', () => {
+        playing = !playing;
+        playBtn.textContent = playing ? '⏸' : '▶';
+        playing ? viewer.play() : viewer.pause();
+      });
+      fitBtn.addEventListener('click', () => viewer.fitView());
+    })();
   }
 </script>
 

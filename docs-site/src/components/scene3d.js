@@ -28,7 +28,7 @@ function quat(q) {
  * @param {{canvas:HTMLCanvasElement, hud?:HTMLElement, records:Array, options?:object}} cfg
  * @returns {{setFrame:(i:number)=>void, frameCount:number, play:()=>void, pause:()=>void, dispose:()=>void, fitView:()=>void}}
  */
-export function createViewer({ canvas, hud, records, options = {} }) {
+export function createViewer({ canvas, hud, records, scene: sceneData, options = {} }) {
   const sigmaK = options.sigmaK ?? 3; // ellipsoid radius in σ (3σ ≈ 97% per-axis)
   const gt = records.filter((r) => r.type === 'gt');
   const est = records.filter((r) => r.type === 'est');
@@ -50,8 +50,10 @@ export function createViewer({ canvas, hud, records, options = {} }) {
   key.position.set(2, 3, 5);
   scene.add(key);
 
-  // ── World bounds (for grid + camera fit) over the GT path ─────────────────
+  // ── World bounds (for grid + camera fit): the path AND the landmark cloud, so
+  // the drone and the scene it observes are both framed. ────────────────────
   const pts = [...gt, ...est].map((r) => r.p).filter(Boolean);
+  if (sceneData?.landmarks) pts.push(...sceneData.landmarks);
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const p of pts) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
   const ctr = lo.map((v, k) => (v + hi[k]) / 2);
@@ -72,6 +74,46 @@ export function createViewer({ canvas, hud, records, options = {} }) {
   }
   polyline(gt, 0x35c759); // ground truth — green
   polyline(est, 0xff9f0a); // estimate — orange
+
+  // ── Landmark cloud (the static 3-D scene the camera observes) ─────────────
+  if (sceneData?.landmarks?.length) {
+    const g = new THREE.BufferGeometry().setFromPoints(sceneData.landmarks.map((p) => new THREE.Vector3(...p)));
+    const points = new THREE.Points(
+      g,
+      new THREE.PointsMaterial({ color: 0x8aa6bf, size: span * 0.012, sizeAttenuation: true, transparent: true, opacity: 0.85 }),
+    );
+    scene.add(points);
+  }
+
+  // ── Estimated-camera frustum (rebuilt per frame from the pose + extrinsics) ─
+  let frustum = null, fRays = null, qImuCam = null, pImuCam = null, fDepth = 0;
+  if (sceneData?.camera?.frustum_rays) {
+    const cam = sceneData.camera;
+    fRays = cam.frustum_rays.map((r) => new THREE.Vector3(...r));
+    qImuCam = cam.R_imu_cam
+      ? new THREE.Quaternion(cam.R_imu_cam[1], cam.R_imu_cam[2], cam.R_imu_cam[3], cam.R_imu_cam[0])
+      : new THREE.Quaternion();
+    pImuCam = new THREE.Vector3(...(cam.p_imu_cam ?? [0, 0, 0]));
+    fDepth = span * 0.4;
+    // 8 segments: 4 apex→corner + the 4 base edges → 16 vertices.
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(16 * 3), 3));
+    frustum = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x4fd1ff, transparent: true, opacity: 0.85 }));
+    scene.add(frustum);
+  }
+
+  function setFrustum(estP, q) {
+    if (!frustum) return;
+    const qWorldImu = q;
+    const camCenter = pImuCam.clone().applyQuaternion(qWorldImu).add(new THREE.Vector3(...estP));
+    const qWorldCam = qWorldImu.clone().multiply(qImuCam);
+    const c = fRays.map((r) => r.clone().applyQuaternion(qWorldCam).multiplyScalar(fDepth).add(camCenter));
+    const a = camCenter;
+    const segs = [a, c[0], a, c[1], a, c[2], a, c[3], c[0], c[1], c[1], c[2], c[2], c[3], c[3], c[0]];
+    const pos = frustum.geometry.attributes.position;
+    segs.forEach((v, i) => pos.setXYZ(i, v.x, v.y, v.z));
+    pos.needsUpdate = true;
+  }
 
   // ── Moving pose triads (est solid, gt faint) ──────────────────────────────
   const triadEst = new THREE.AxesHelper(span * 0.12);
@@ -124,7 +166,11 @@ export function createViewer({ canvas, hud, records, options = {} }) {
     frame = Math.max(0, Math.min(n - 1, Math.round(i)));
     const e = est[Math.min(frame, est.length - 1)];
     const g = gt[Math.min(frame, gt.length - 1)];
-    if (e?.p) { triadEst.position.set(...e.p); triadEst.quaternion.copy(quat(e.q)); }
+    if (e?.p) {
+      triadEst.position.set(...e.p);
+      triadEst.quaternion.copy(quat(e.q));
+      setFrustum(e.p, quat(e.q));
+    }
     if (g?.p) {
       triadGt.position.set(...g.p); triadGt.quaternion.copy(quat(g.q));
       gtMarker.position.set(...g.p);

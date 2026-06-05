@@ -47,6 +47,8 @@
         <span><i style="background:#35c759"></i>ground truth</span>
         <span><i style="background:#ff9f0a"></i>estimate</span>
         <span><i style="background:#ffd60a"></i>3σ covariance</span>
+        <span><i style="background:#4fd1ff"></i>camera frustum</span>
+        <span><i style="background:#8aa6bf"></i>landmarks</span>
       </div>
     </div>
     <script type="module">
@@ -66,9 +68,16 @@
         const res = await fetch(p.get('data'));
         if (!res.ok) throw new Error(`${res.status} ${p.get('data')}`);
         const records = parseRunJsonl(await res.text());
+        // Optional static scene (landmark cloud + camera) for the frustum/cloud.
+        let scene;
+        const sceneUrl = p.get('scene');
+        if (sceneUrl) {
+          const sr = await fetch(sceneUrl);
+          if (sr.ok) scene = JSON.parse(await sr.text());
+        }
         // Fixed viewpoint for a stable video (the viewer auto-fits to the path).
         // Pass the HUD so the metrics overlay is captured in the screenshot too.
-        window.__viewer = createViewer({ canvas, hud, records });
+        window.__viewer = createViewer({ canvas, hud, records, scene });
         window.__ready = true;
       } catch (e) {
         window.__error = String(e && e.message ? e.message : e);
