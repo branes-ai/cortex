@@ -58,7 +58,7 @@ whole window. Old clones are **marginalized** out.
 |---|---|---|
 | **S0** | [Sensor & calibration models](/pipeline/stages/s0-sensor-models/) | the measurement functions every residual is built from |
 | **S1** | Initialization | bootstrap attitude, biases, gravity, scale + the initial covariance |
-| **S2** | IMU propagation | predict the mean and covariance forward between images |
+| **S2** | [IMU propagation](/pipeline/stages/s2-imu-propagation/) | predict the mean and covariance forward between images |
 | **S3** | State augmentation / cloning | add the new image's pose to the sliding window |
 | **S4** | Visual frontend | KLT tracking + RANSAC → feature tracks |
 | **S5** | Feature triangulation | recover the 3-D point a track corresponds to |
@@ -68,7 +68,7 @@ whole window. Old clones are **marginalized** out.
 | **S9** | Marginalization | drop the oldest clone, keep the window bounded |
 | **S10** | [Online calibration](/pipeline/stages/s10-online-calibration/) | extrinsics, intrinsics, time offset |
 
-*(S0, S6, and S10 are fully written; the rest follow the same template as their
+*(S0, S2, S6, and S10 are fully written; the rest follow the same template as their
 [stage-probe utilities](/pipeline/engineering-status/) land.)*
 
 ## What "good" looks like
