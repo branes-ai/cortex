@@ -121,6 +121,17 @@ std::string v3str(const Vec3& p) {
     o << '[' << p[0] << ',' << p[1] << ',' << p[2] << ']';
     return o.str();
 }
+std::string nums_json(const std::vector<T>& xs) {
+    std::ostringstream o;
+    o << '[';
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        if (i)
+            o << ',';
+        o << xs[i];
+    }
+    o << ']';
+    return o.str();
+}
 std::string feats_json(const std::vector<FrontendObservation<T>>& obs) {
     std::ostringstream o;
     o << '[';
@@ -150,8 +161,9 @@ void render_scene_png(const std::string& path,
                     img[static_cast<std::size_t>(y) * w + x] = val;
             }
     };
+    // Faint backdrop dots — the overlay draws the depth-coloured markers on top.
     for (const auto& o : clean)
-        disk(static_cast<int>(o.u), static_cast<int>(o.v), 3, 200);
+        disk(static_cast<int>(o.u), static_cast<int>(o.v), 2, 70);
     stbi_write_png(path.c_str(), w, h, 1, img.data(), w);
 }
 
@@ -246,8 +258,8 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
             render_scene_png(args.out + "/" + rel, w.frames[f].obs);
             *frames << "{\"frame\":" << f << ",\"t\":" << t << ",\"image\":\"" << rel
                     << "\",\"true\":" << feats_json(w.frames[f].obs) << ",\"obs\":" << feats_json(obs)
-                    << ",\"nfeat\":" << obs.size() << ",\"nis\":" << nis << ",\"pos_err\":" << err
-                    << ",\"noise\":" << ns << "}\n";
+                    << ",\"depth\":" << nums_json(w.frames[f].depth) << ",\"nfeat\":" << obs.size()
+                    << ",\"nis\":" << nis << ",\"pos_err\":" << err << ",\"noise\":" << ns << "}\n";
         }
     }
     r.ate_rms_m = r.frames ? std::sqrt(sq_sum / static_cast<double>(r.frames)) : 0;

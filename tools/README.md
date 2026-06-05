@@ -13,6 +13,8 @@ written as a contract. One executable per stage.
 
 ## End-to-end noise→robustness demo (`vio_pipeline`)
 
+> **New to this tool?** See the guide: [docs/assessments/vio-pipeline-howto.md](../docs/assessments/vio-pipeline-howto.md) — what/why/how, the experiment, results, and how accurate VIO needs to be for different robot form factors.
+
 Where the stage probes study one stage in isolation, `vio_pipeline` runs the
 **whole pipeline as a stream**: a synthetic world with *exact* ground truth →
 an additive-noise injector on the two sensor streams → the real MSCKF backend →
