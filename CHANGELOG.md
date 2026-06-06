@@ -14,6 +14,14 @@ generates entries automatically from Conventional Commits on `main`.
 
 ## Milestones
 
+- **2026-06-05 — VIO Pipeline docs section + 3D visualization (→ v0.40.0).**
+  Published the #212 over-confidence analysis as a Starlight section with six
+  data-backed stage pages (S0 holds, S1 seed-suspect, S2 cleared, S5 gate-missing,
+  S6 algebra-correct, S10 leading), a methodology primer, and the consistency
+  analysis — each stage measured by its own probe (S5's wired from scratch). Plus a
+  two-tier 3D visualization environment: an interactive Three.js path/pose viewer
+  with the position-covariance ellipsoid and an offline mp4 renderer. 10 PRs
+  (#300–#316). See [`docs/sessions/2026-06-05-vio-pipeline-docs-and-3d-viz.md`](docs/sessions/2026-06-05-vio-pipeline-docs-and-3d-viz.md).
 - **2026-05-24 — Phase 1 MVP complete (v0.1.0 → v0.6.0).** Rust Resource
   Manager + cxx bridge in place. All eight MVP sub-issues #13–#20 closed:
   `MemoryProvider` trait, SITL provider (Linux shm + heap), KPU stub,
