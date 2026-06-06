@@ -30,6 +30,16 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.40.1](https://github.com/branes-ai/cortex/compare/v0.40.0...v0.40.1) (2026-06-06)
+
+
+### Documentation
+
+* migrate diagnostic-methodology as the section's method primer ([#316](https://github.com/branes-ai/cortex/issues/316)) ([fd4b7bb](https://github.com/branes-ai/cortex/commit/fd4b7bb288a32eed1278f27f0f186033ad668e63))
+* **session:** wrap up 2026-06-05 — VIO pipeline docs + 3D viz ([#318](https://github.com/branes-ai/cortex/issues/318)) ([7ec2091](https://github.com/branes-ai/cortex/commit/7ec2091398fe6ed7de6d1d0f8c65f11afd0927f6))
+* **session:** wrap up 2026-06-05 — VIO pipeline docs section + 3D viz ([7ec2091](https://github.com/branes-ai/cortex/commit/7ec2091398fe6ed7de6d1d0f8c65f11afd0927f6))
+* **site:** migrate the diagnostic-methodology doc as a section page ([fd4b7bb](https://github.com/branes-ai/cortex/commit/fd4b7bb288a32eed1278f27f0f186033ad668e63))
+
 ## [0.40.0](https://github.com/branes-ai/cortex/compare/v0.39.4...v0.40.0) (2026-06-06)
 
 
