@@ -22,6 +22,19 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.40.0](https://github.com/branes-ai/cortex/compare/v0.39.4...v0.40.0) (2026-06-06)
+
+
+### Features
+
+* S5 feature-triangulation probe + stage page (parallax gate, quantified) ([#313](https://github.com/branes-ai/cortex/issues/313)) ([8fbf1cd](https://github.com/branes-ai/cortex/commit/8fbf1cddfe0863b4cbe1ca806abd513c73c5f591))
+
+
+### Documentation
+
+* S1 initialization stage page (algorithm sound, seed suspect) ([#315](https://github.com/branes-ai/cortex/issues/315)) ([54d8f33](https://github.com/branes-ai/cortex/commit/54d8f33fb227251ab7f5386f82c7822d56ca6b2a))
+* **site:** add the S1 initialization stage page ([54d8f33](https://github.com/branes-ai/cortex/commit/54d8f33fb227251ab7f5386f82c7822d56ca6b2a))
+
 ## [0.39.4](https://github.com/branes-ai/cortex/compare/v0.39.3...v0.39.4) (2026-06-05)
 
 
