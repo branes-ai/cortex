@@ -43,6 +43,7 @@ refuted FEJ experiment — is on
 | Diagonal-only process noise `Q_d` | [S2](/pipeline/stages/s2-imu-propagation/) | **Cleared** — drops only 0.35% of Q; propagation-only NEES consistent at shipped Q |
 | **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), [S10](/pipeline/stages/s10-online-calibration/) | **Leading** — explains the `R×4` component (1° extrinsic ≈ 8 px > 4.6 px assumed; full restore needs ~×32 because Q also undersized) |
 | No parallax gate on triangulation | [S5](/pipeline/stages/s5-triangulation/) | **Open** — measured: shipped triangulate() admits 0.5° features (depth σ ~90%) at full weight; suspected in V2_03 divergence |
+| Isotropic initial covariance `P₀` | [S1](/pipeline/stages/s1-initialization/) | **Open** — measured: yaw seeded at 5.73° σ (same as leveled roll/pitch) despite being unobservable; first-frame over-confidence, resonates with attitude NEES |
 | χ² gate threshold / measurement noise `R` | S6 | **Open** |
 
 <Aside type="tip" title="What 'refuted' means here">
