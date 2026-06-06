@@ -315,6 +315,27 @@ if (exc) {
   );
 }
 
+// ── S5 figures (feature triangulation) — rendered when the S5 artifacts are present ─
+const triang = readCsv('triang_parallax_sweep.csv');
+if (triang?.length) {
+  // Sweep-level facts from the probe (depth, σ budget) — no hard-coded 250/5 m.
+  const tmeta = readCsv('triang_meta.csv')?.[0];
+  const budget = tmeta?.budget_sigma_mm ?? 250;
+  const depthM = tmeta?.depth_m ?? 5;
+  lineChart(
+    [{ name: 'depth σ (1 px noise)', points: triang.map((r) => ({ x: r.parallax_deg, y: r.depth_sigma_mm })) }],
+    { title: 'S5  Triangulated-depth uncertainty vs parallax (no soft gate)', file: 'triang_depth_sigma.svg',
+      xlabel: 'parallax angle (deg)', ylabel: 'depth σ (mm, log)', logY: true, hline: budget,
+      hlineLabel: `5% of ${depthM} m depth — suggested gate` },
+  );
+  lineChart(
+    [{ name: 'condition number', points: triang.map((r) => ({ x: r.parallax_deg, y: r.condition_number })) }],
+    { title: 'S5  Triangulation conditioning vs parallax', file: 'triang_condition.svg',
+      xlabel: 'parallax angle (deg)', ylabel: 'condition number (log)', logY: true, hline: 1e4,
+      hlineLabel: 'ill-conditioned above ~1e4' },
+  );
+}
+
 // ── Equal-aspect 2-D path plot (trajectory overlay) ────────────────────────
 function pathPlot(series, { title, file, xlabel, ylabel }) {
   if (!series.length) return;
