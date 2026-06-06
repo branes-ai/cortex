@@ -108,6 +108,7 @@ export default defineConfig({
             { label: 'The VIO Pipeline', slug: 'pipeline/overview' },
             { label: 'Reading the Metrics', slug: 'pipeline/metrics' },
             { label: 'S0 — Sensor & Calibration Models', slug: 'pipeline/stages/s0-sensor-models' },
+            { label: 'S1 — Initialization', slug: 'pipeline/stages/s1-initialization' },
             { label: 'S2 — IMU Propagation', slug: 'pipeline/stages/s2-imu-propagation' },
             { label: 'S5 — Feature Triangulation', slug: 'pipeline/stages/s5-triangulation' },
             { label: 'S6 — MSCKF Update', slug: 'pipeline/stages/s6-msckf-update' },
