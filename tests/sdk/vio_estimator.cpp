@@ -152,3 +152,43 @@ TEST_CASE("the estimator runs the front end and backend end-to-end", "[sdk][vio]
     // just re-detected fresh each time).
     REQUIRE(est.num_tracked_features() > 0);
 }
+
+TEST_CASE("S4 forward-backward gate drops tracks that fail the round trip", "[sdk][vio]") {
+    // Two estimators fed the same clean translating sequence: one with the FB
+    // gate disabled, one so strict (1e-9 px) that any sub-pixel round-trip error
+    // rejects the track. With FB disabled, tracks persist across frames (their
+    // ids carry over); with the strict gate, every tracked feature is dropped and
+    // re-detected fresh, so no id survives frame-to-frame.
+    auto build = [](double fb) {
+        bs::FrontendParams fe;
+        fe.fb_max_residual = fb;
+        Backend::CameraCalibration cal;
+        cal.intrinsics = Backend::Camera(200.0, 200.0, 120.0, 90.0, 0.0, 0.0, 0.0, 0.0);
+        return Estimator(Backend(std::vector<Backend::CameraCalibration>{cal}), fe);
+    };
+
+    auto ids_after_two_frames = [](Estimator& est) {
+        bs::VioConfig cfg;
+        est.configure(cfg);
+        est.activate();
+        auto frame_ids = [&](double t, double ox, double oy) {
+            const auto img = render(ox, oy);
+            est.feed_image(t, img.view());
+            std::vector<std::uint32_t> ids;
+            for (const auto& f : est.tracked_features())
+                ids.push_back(f.id);
+            std::sort(ids.begin(), ids.end());
+            return ids;
+        };
+        const auto first = frame_ids(0.0, 0.0, 0.0);
+        const auto second = frame_ids(0.05, 1.5, 1.0);  // small translation KLT can follow
+        std::vector<std::uint32_t> persisted;
+        std::set_intersection(first.begin(), first.end(), second.begin(), second.end(), std::back_inserter(persisted));
+        return persisted.size();
+    };
+
+    auto off = build(0.0);
+    auto strict = build(1e-9);
+    REQUIRE(ids_after_two_frames(off) > 0);      // FB disabled → tracks persist
+    REQUIRE(ids_after_two_frames(strict) == 0);  // strict FB → all dropped + re-detected
+}
