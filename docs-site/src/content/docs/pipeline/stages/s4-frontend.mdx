@@ -1,0 +1,51 @@
+---
+title: S4 — Visual Frontend
+description: Track generation — detection, KLT tracking, forward-backward and RANSAC outlier rejection. The contract and the measurement-noise it must hand the backend.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The frontend turns raw images into the feature **tracks** the backend consumes:
+detect corners, follow them frame-to-frame, and reject the ones that don't hold up
+geometrically. Its job is to hand the backend correspondences that are *correct* —
+no backend trick repairs a confidently-wrong match — and to report the *true* pixel
+noise on the ones that survive.
+
+## What it does
+
+FAST / Shi-Tomasi detection with grid-bucketed spatial coverage and min-distance
+suppression; pyramidal **KLT** tracking frame-to-frame (the IMU gyro prior can seed
+the search); a **forward-backward** consistency check; and **RANSAC** on the
+epipolar constraint to drop geometric outliers before the backend sees them.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `track(image_t, prev_tracks) → observations[(id, cam, u, v)]` |
+| **Pre** | image in expected format; previous tracks available; (optional) gyro rotation prior |
+| **Post / invariants** | every surviving track passes forward-backward (round-trip pixel error < τ) · RANSAC inlier ratio above a floor; outliers removed **before** the backend · spatial coverage across the image grid (clusters ⇒ poor rotational DoF) · track-length distribution healthy (not all length-2 — that starves [parallax](/pipeline/stages/s5-triangulation/)) |
+| **cortex** | frontend in `vio_estimator.hpp` (`FrontendParams`); pyramidal KLT |
+
+For the API-level treatment of the tracker, see the
+[Visual Front End](/vio/front-end/) reference.
+
+## Intended assessments
+
+The probe (forthcoming — it needs image input, unlike the algebraic stage probes)
+will report, per frame: track count, **forward-backward residual** distribution,
+**RANSAC inlier ratio**, grid-occupancy histogram, **track-length** histogram, and
+parallax distribution. The decisive sensitivity sweep is **pixel-noise injection**
+(σ ∈ {0.1, 0.5, 1, 2} px): measure track survival and the downstream reprojection
+residual to calibrate the **true measurement noise** the backend should use — which
+ties directly to the [consistency analysis](/pipeline/consistency-analysis/) finding
+that the assumed pixel σ is ~4× too small.
+
+<Aside type="note" title="Status — implemented; probe pending">
+  The frontend (detection + KLT + forward-backward + RANSAC) is implemented. A
+  data-backed probe needs synthetic/real image input, so it is the heaviest of the
+  stage probes and is not yet wired — this page documents the contract. The
+  #212-relevant question it will answer: does the pixel σ handed to
+  [S6](/pipeline/stages/s6-msckf-update/) match the *measured* track noise, or an
+  optimistic constant? Tracked on [Engineering Status](/pipeline/engineering-status/).
+</Aside>
