@@ -1,0 +1,62 @@
+---
+title: S9 — Marginalization
+description: Sliding the window — dropping the oldest clone as exact principal-submatrix extraction, leaving the kept-state marginal unchanged. Measured correct to machine precision.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The sliding window has to stay bounded, so each step S9 **drops the oldest clone**
+(and any features anchored only to it). For a filter, this is exact
+principal-submatrix extraction of the kept states — and its correctness check is a
+clean mathematical identity.
+
+## What it does
+
+Slide the window: remove a clone's 6 error-state rows/columns from the covariance.
+In covariance form this is **principal-submatrix extraction** of the kept states
+(a principal submatrix of a PD matrix stays PD). The clone is selected by policy
+(oldest, or a two-way keyframe / non-keyframe scheme).
+
+## Why it matters
+
+The defining property of marginalization: **marginalizing a variable never alters
+the marginal of the others.** So after dropping a clone, every kept state's
+covariance — and the cross-covariances among kept states — must be *exactly
+unchanged*. If they shift, the extraction is wrong (or the covariance wasn't
+consistent going in). For a filter doing submatrix extraction there is no FEJ /
+marginalization-prior subtlety (unlike a smoother); correctness rides entirely on
+the [S3 augmentation](/pipeline/stages/s3-augmentation/) cross-covariance having
+been right.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `marginalize(x, P, clone_idx) → (x', P')` (slide the window) |
+| **Pre** | clone selected by policy (oldest, or two-way keyframe/non-keyframe) |
+| **Post / invariants** | `P'` symmetric PSD · kept-state marginal **unchanged** by removing a clone (pure extraction) · marginalization does not constrain the 4 gauge directions |
+| **cortex** | `msckf/state_helper.hpp` — `marginalize_clone`, principal submatrix via `cov.marginalize(keep)` |
+
+## Metrics
+
+The [S9 probe](/pipeline/diagnostic-methodology/) builds a three-clone correlated
+covariance, drops the oldest clone via the **shipped** `marginalize_clone`, and
+checks the kept-marginal identity directly:
+
+| invariant | residual | verdict |
+|---|---:|---|
+| kept-state marginal unchanged | **0** | PASS — pure extraction |
+| `P'` positive semidefinite | — | PASS |
+| state dimension | 33 → 27 | shrinks by one 6-DoF clone |
+| window length | 3 → 2 clones | stays bounded |
+
+The kept-marginal residual is **identically zero** — `cov.marginalize(keep)` is an
+exact principal-submatrix extraction, so dropping the oldest clone leaves every
+retained state's covariance untouched, and `P'` stays PSD.
+
+<Aside type="tip" title="Status — correct">
+  S9 is **correct** and **not** a source of the #212 over-confidence. Combined with
+  [S3](/pipeline/stages/s3-augmentation/), the clone-window bookkeeping is exact
+  end to end: augmentation carries the full correlation, marginalization extracts
+  the kept marginal exactly, and the augment∘marginalize round-trip restores `P`.
+</Aside>

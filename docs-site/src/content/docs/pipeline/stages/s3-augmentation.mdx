@@ -1,0 +1,64 @@
+---
+title: S3 — State Augmentation
+description: Stochastic cloning — appending the current pose to the sliding window with the exact correlation P' = G P Gᵀ. The contract clean-rooms most often break; cortex gets it right (measured to machine precision).
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Each camera frame, the MSCKF **clones** the current IMU pose into the sliding
+window so future feature observations can constrain it. The clone is a
+*deterministic copy* of the current pose — and getting its covariance right is the
+single most error-prone piece of MSCKF bookkeeping. The probe confirms cortex does
+it exactly.
+
+## What it does
+
+Stochastic cloning: append the current pose as a new 6-DoF state, expanding the
+covariance with `P' = G P Gᵀ`, where `G = [I; J]` and `J` copies the current IMU
+pose error into the new clone's error block. The clone's pose block is a *copy* of
+the current pose block — so it must be **perfectly correlated** with its source.
+
+## Why it matters
+
+The textbook clean-room failure here is to "just add a new block" — append the
+clone with **zero (or block-diagonal) cross-covariance**, treating it as an
+independent new state. That is wrong: the clone is a deterministic copy, so its
+covariance and its cross-covariance with *every* other state must equal the cloned
+pose's. A zero cross-covariance makes the filter **under-confident at clone time**
+and corrupts every subsequent update that spans clones.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `augment(x, P) → (x', P')` appending a clone of the current pose |
+| **Pre** | clone count < window max; current pose valid; `P` PSD |
+| **Post / invariants** | `P' = G P Gᵀ` exactly, symmetric PSD · clone marginal **==** cloned-pose marginal · cross-cov(clone, every other state) **==** that of the cloned pose (**not** zero/independent) |
+| **cortex** | `msckf/state_helper.hpp` — `augment_clone`, `G = [I; J]`, `cov.transform(G)` |
+
+## Metrics
+
+The [S3 probe](/pipeline/diagnostic-methodology/) builds a genuinely-correlated
+covariance (augment + propagate three clones) and exercises the **shipped**
+`augment_clone`, then measures the cloning invariants directly:
+
+| invariant | residual | verdict |
+|---|---:|---|
+| clone marginal vs cloned-pose marginal | **0** | PASS — clone == cloned pose |
+| clone cross-covariance vs pose's | **0** | PASS — perfectly correlated, not independent |
+| augment∘marginalize round-trip (restores `P`) | **0** | PASS |
+| `P'` positive semidefinite | — | PASS |
+| state dimension | 27 → 33 | grows by one 6-DoF clone |
+
+The residuals are **identically zero** (not merely small): `P' = G P Gᵀ` with a
+copy-selection `G` is an exact algebraic operation, so cortex carries the full
+clone correlation — it does **not** commit the zero-cross-covariance inconsistency.
+Marginalizing the just-added clone restores `P` exactly (the round-trip).
+
+<Aside type="tip" title="Status — correct">
+  S3 is **correct** and **not** a source of the #212 over-confidence. The
+  stochastic-cloning correlation is exact to machine precision, so the clone window
+  is consistent by construction. (This is also a pre-condition for
+  [S9 marginalization](/pipeline/stages/s9-marginalization/) being correct — a
+  marginal extracted from a wrongly-augmented covariance would already be wrong.)
+</Aside>

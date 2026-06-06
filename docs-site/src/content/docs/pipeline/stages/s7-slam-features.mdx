@@ -1,0 +1,35 @@
+---
+title: S7 — SLAM-Feature Update (optional)
+description: Persistent in-state landmarks — an optional layer that bounds drift better than pure MSCKF. Not present in the cortex filter today; documented for pipeline completeness.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An optional layer above the MSCKF core: instead of marginalizing every feature
+after it leaves the window, keep long-lived landmarks **in the state** and update
+them by reprojection. Persistent landmarks re-observed over long spans bound drift
+better than the pure sliding-window MSCKF.
+
+## What it does
+
+Features are kept **in-state** (3 parameters each, or 1 with an anchored
+inverse-depth parameterization) and updated by reprojection **without**
+marginalization. A long-lived landmark seen across many keyframes acts as a
+persistent constraint.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | features kept in-state (3 or 1 params each), updated by reprojection, not marginalized |
+| **Post / invariants** | in-state feature `P` blocks stay PSD and **correlated with the poses that see them** · feature initialization into the state uses **stochastic init** (correct cross-covariance — the same contract as [S3](/pipeline/stages/s3-augmentation/)) · pruning a SLAM feature is a Schur complement, info-preserving |
+| **cortex** | `features/representations.hpp` defines the parameterizations; the SLAM-feature *update* is not wired — the running filter is pure-MSCKF |
+
+<Aside type="note" title="Status — optional, not implemented">
+  The cortex filter is **pure-MSCKF**: it marginalizes every feature ([S6](/pipeline/stages/s6-msckf-update/))
+  and keeps no persistent landmarks in-state. The inverse-depth parameterizations
+  exist (`features/representations.hpp`), but the in-state SLAM update is not wired.
+  This stage is documented for pipeline completeness and is **not relevant to the
+  #212 over-confidence** (which is a pure-MSCKF consistency problem). It becomes
+  relevant when persistent landmarks are added to bound long-horizon drift.
+</Aside>
