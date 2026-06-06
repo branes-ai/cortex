@@ -252,8 +252,11 @@ private:
         return true;
     }
 
+public:
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton
     // reprojection refinements. Solves Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C.
+    // Public so the S5 stage probe (eval/triangulation_probe.hpp) can drive the
+    // shipped triangulator directly; used internally by update().
     template <class Cov>
     bool triangulate(const State<T, Cov>& s, const std::vector<CameraObservation<T>>& obs, Vec3& p_f) const {
         DynMat<T> A(3, 3);
@@ -316,6 +319,7 @@ private:
         return true;
     }
 
+private:
     std::vector<Extrinsics> cameras_;
     Options opts_;
 };
