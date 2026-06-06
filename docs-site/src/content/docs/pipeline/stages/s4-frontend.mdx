@@ -66,22 +66,29 @@ with the image noise:
   tracks; the synthetic sweep gives only the best-case slope.
 </Aside>
 
-## The S4 candidate — no outlier gate
+## The S4 candidate — the outlier gate
 
-The decisive finding: the shipped frontend applies **only KLT's own
-`Lost`/`OutOfBounds` status filter** — there is **no forward-backward check and no
-RANSAC**. On clean texture every track is self-consistent, so no outliers appear
-here; but on real data, a track that drifts onto repetitive texture or across an
-occlusion boundary follows KLT to a **confidently-wrong** location and reaches the
+By default the frontend applies **only KLT's own `Lost`/`OutOfBounds` status
+filter** — no forward-backward check, no RANSAC. On real data a track that drifts
+onto repetitive texture or across an occlusion follows KLT to a
+**confidently-wrong** location and reaches the
 [backend](/pipeline/stages/s6-msckf-update/) **at full weight** — the same
-"optimistic information" failure mode as the missing
+"optimistic information" failure mode as the
 [S5 parallax gate](/pipeline/stages/s5-triangulation/).
 
-<Aside type="caution" title="Status — primitives sound, outlier gate missing">
-  FAST + pyramidal KLT are accurate and well-distributed (measured). The **open**
-  candidate is the absent **forward-backward / RANSAC outlier rejection** before the
-  backend, plus an optimistic measurement σ not calibrated against real-data track
-  noise. Both feed the #212 over-confidence by handing the filter correspondences
-  it should not fully trust. Tracked on
-  [Engineering Status](/pipeline/engineering-status/).
+A **forward-backward gate** is now implemented — `FrontendParams::fb_max_residual`
+re-tracks each survivor back to the previous frame and drops it if the round-trip
+error exceeds the threshold (the [S4-gate unit test](/pipeline/diagnostic-methodology/)
+confirms a strict gate drops every drifted track while a disabled gate keeps them).
+It ships **default-off** and doubles the per-frame KLT cost when enabled, so it
+awaits end-to-end validation before being turned on. (RANSAC remains future work —
+it needs an essential-matrix solver not yet in the codebase.)
+
+<Aside type="caution" title="Status — gate implemented, default-off pending validation">
+  FAST + pyramidal KLT are accurate and well-distributed (measured). The
+  forward-backward outlier gate (`fb_max_residual`) is **implemented and
+  unit-tested** but ships **default-off** pending end-to-end validation; RANSAC and
+  a real-data measurement-σ calibration remain open. Both feed the #212
+  over-confidence by handing the filter correspondences it should not fully trust.
+  Tracked on [Engineering Status](/pipeline/engineering-status/).
 </Aside>
