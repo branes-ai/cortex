@@ -41,7 +41,8 @@ pattern, then tracks A→B and B→A with the **shipped** KLT to measure self-co
 | features detected (FAST) | 80 | level-0 corners |
 | forward-tracked (KLT) | 51 / 80 | status = Tracked |
 | forward-backward residual (median) | **0.0016 px** | tracks are self-consistent |
-| endpoint error vs known warp (RMS) | **0.001 px** | sub-pixel accuracy, no noise |
+| endpoint RMS (all backward-tracked) | **0.001 px** | the un-gated frontend's actual error |
+| RANSAC inlier ratio | **n/a** | RANSAC not shipped — no geometric gate applied |
 | grid coverage occupancy | **100 %** | 8×6 grid — well distributed |
 | mean track length | **7.3 frames** | over a 12-frame sequence |
 
