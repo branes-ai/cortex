@@ -124,7 +124,7 @@ inline const StageInfo kS4{
      {"grid coverage occupancy", "%", "features spread across the frame, not clustered"},
      {"track-length histogram", "frames", "tracks live long enough to build parallax"},
      {"pixel-noise → track survival", "px", "the true measurement noise the backend should use"}},
-    {"frontend_fb_residual.csv", "frontend_coverage.csv", "frontend_tracklen.csv"},
+    {"frontend_fb_residual.csv", "frontend_coverage.csv", "frontend_tracklen.csv", "frontend_noise_sweep.csv"},
     "sdk/vio_estimator.hpp (frontend), cv KLT",
     "scaffold"};
 
