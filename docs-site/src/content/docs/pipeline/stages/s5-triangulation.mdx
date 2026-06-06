@@ -46,7 +46,7 @@ The [S5 probe](/pipeline/consistency-analysis/) drives the **shipped**
 the true depth uncertainty by **Monte Carlo** (the std of recovered depth under
 1 px observation noise) — not an analytic approximation.
 
-### Depth uncertainty vs parallax — and no soft gate
+### Depth uncertainty vs parallax — and the (default-off) soft gate
 
 | parallax | `triangulate()` | condition number | depth σ (1 px) | σ as % of depth |
 |---:|:---:|---:|---:|---:|
@@ -61,14 +61,18 @@ the true depth uncertainty by **Monte Carlo** (the std of recovered depth under
 
 The decisive observation: **`triangulate()` returns success at every level above the
 numerical breakdown** — including 0.5°, where the depth is uncertain to ~90% of its
-value. The only guard in the shipped code is the **hard** one: the Cholesky
-factorization fails for near-parallel rays. There is **no soft gate** on parallax or
-condition number, so a feature triangulated at 0.5–2° parallax is handed to the
-update at full weight. Clean-observation depth error is ~0 throughout (the geometry
-is correct) — the danger is entirely in the *uncertainty* the filter fails to
-account for.
+value. The always-on guard is the **hard** one: the Cholesky factorization fails for
+near-parallel rays. The soft parallax gate is **off by default**, so out of the box a
+feature triangulated at 0.5–2° parallax is still handed to the update at full weight.
+Clean-observation depth error is ~0 throughout (the geometry is correct) — the danger
+is entirely in the *uncertainty* the filter fails to account for.
 
-A reasonable soft gate (depth σ ≤ 5% of depth) would sit at ~**5°** of parallax.
+A reasonable soft gate (depth σ ≤ 5% of depth) sits at ~**5°** of parallax. Such a
+gate is **now implemented** — `CameraUpdaterOptions::min_parallax_deg` rejects a
+triangulation below the threshold (the [S5-gate unit test](/pipeline/diagnostic-methodology/)
+confirms it rejects 0.7° and admits 20°). It ships **default-off** (`0`): enabling
+it trades feature coverage for depth quality and *regresses* the synthetic ATE, so
+it must be validated end-to-end (does it improve EuRoC NEES?) before being turned on.
 
 ## Interactive
 
@@ -77,13 +81,13 @@ camera moves — exactly what the depth-coloured landmark cloud in the
 [3-D viewer](/vio/scene3d/) shows: near dots sweep faster than far ones. Low
 parallax is when that sweep is small, and depth becomes unobservable.
 
-<Aside type="caution" title="Status — open candidate">
-  The shipped triangulator has **only a hard degeneracy guard** (Cholesky
-  breakdown), **no soft parallax / condition gate**. Features triangulated at low
-  parallax are admitted at full weight, injecting optimistic information — a
-  plausible contributor to the **aggressive-motion (V2_03) divergence**, where
-  erratic motion produces many marginal-parallax tracks. This is an **open**
-  over-confidence candidate: the fix is a parallax (or condition-number / depth-σ)
-  gate before admission, or per-feature down-weighting. Full decomposition and the
-  tracking issue on [Engineering Status](/pipeline/engineering-status/).
+<Aside type="caution" title="Status — gate implemented, default-off pending validation">
+  Beyond the **hard** degeneracy guard (Cholesky breakdown), a **soft parallax
+  gate** (`min_parallax_deg`) is now implemented and unit-tested. It ships
+  **default-off** because enabling it regresses the synthetic ATE (it rejects the
+  marginal-parallax features the short synthetic tracks rely on); whether it
+  *improves* the aggressive-motion (V2_03) NEES is the end-to-end validation still
+  owed before turning it on — the characterize→test loop, not a blind flip. Full
+  decomposition and the tracking issue on
+  [Engineering Status](/pipeline/engineering-status/).
 </Aside>
