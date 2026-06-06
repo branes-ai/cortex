@@ -1,0 +1,115 @@
+---
+title: Diagnostic Methodology
+description: Why steering an estimator by end-to-end ATE fails, the compensating-error trap that hides bugs from green CI, and the characterize→assess→hypothesize→model→test workflow the stage-probe program is built on.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This is the *method* behind the whole pipeline section — why each stage is a
+[contract with a probe](/pipeline/overview/) rather than something you debug by
+editing code and watching the trajectory. The short claim: **debugging an
+estimator by editing across the pipeline and reading the end-to-end ATE is a
+methodological error**, not just an inelegant one. Here is why, and the workflow
+that replaces it.
+
+## Why ATE-only debugging fails
+
+When the only instrument is at the exhaust pipe — ATE/RPE on the final aligned
+trajectory — every component is observable *only* through its effect on that one
+number. Three properties of estimators make that fatal:
+
+1. **The symptom is lossy about its cause.** A wrong sign, a wrong scale, a
+   residual gravity tilt, a swapped extrinsic, an over-confident covariance — *all*
+   surface as "innovations blow up, trajectory diverges." The map cause→ATE is
+   many-to-one; you cannot invert it from the symptom.
+2. **ATE has the gauge freedoms subtracted out.** It is a scalar *after* a Horn
+   rigid-SE3 alignment — i.e. after deliberately projecting out the 6 (+scale) DoF
+   that a VIO/init bug actually lives in. You are steering by a number with the
+   relevant dimensions removed.
+3. **The loop is long and the signal is ~1 bit.** A multi-minute replay returning
+   "kilometres = bad / sub-metre = good." Ten iterations buys ~10 bits at enormous
+   cost — and because the metric is error-masking, the search can land on a
+   *compensating second bug* and call it green.
+
+## The compensating-error trap
+
+<Aside type="danger" title="A bug that passed every unit test">
+  A gravity-free sign convention was shared between the preintegrator and the
+  initializer's alignment solver as an **undefined interface contract** —
+  documented only in a header comment. The solver encoded the *opposite* gravity
+  sign; fed real preintegration it recovered `g = −g_true` (the seed's "up" pointed
+  ~178° down) and diverged a sequence to ~48 km.
+
+  The lethal part: the **synthetic fixtures built their deltas with the same
+  flipped sign**. The wrong-sign solve and the wrong-sign oracle cancelled — a
+  textbook compensating error. Every unit test passed while the physical convention
+  was inverted, because *the oracle and the code under test shared the bug*. The
+  tests validated self-consistency, not correctness against an independent
+  definition.
+</Aside>
+
+The lesson the whole probe program is built on: **a test's oracle must come from an
+*independent* convention path**, or a sign/scale/tilt bug survives green CI and
+only manifests on real data. This is why the stage probes drive the *shipped* code
+against analytically-known answers (finite-difference Jacobians, round-trip
+identities, known geometry) rather than against fixtures that re-encode the code's
+own assumptions.
+
+## Instruments that localize a failure *class*
+
+The fix is instruments that observe each component's **internal** signals at its
+boundary, not the trajectory. The program realized them:
+
+| Failure class | Instrument | Where it lives now |
+|---|---|---|
+| frame / extrinsics | extrinsic & time-offset sensitivity; reprojection bias | [S0](/pipeline/stages/s0-sensor-models/), [S10](/pipeline/stages/s10-online-calibration/) |
+| sign / convention | analytic-vs-numeric Jacobian; static-IMU invariant | [S0](/pipeline/stages/s0-sensor-models/) |
+| unobservable / rank | excitation sweep; observability nullspace (nullity 4) | [S1](/pipeline/stages/s1-initialization/), [S2](/pipeline/stages/s2-imu-propagation/) |
+| ill-conditioning / parallax | condition number, depth-σ vs parallax | [S5](/pipeline/stages/s5-triangulation/) |
+| consistency / noise | per-block NEES, NIS, innovation whiteness | [Metrics](/pipeline/metrics/), [S6](/pipeline/stages/s6-msckf-update/) |
+
+Plus the always-on, cross-cutting instruments: **NIS** at every camera update
+(`eval/consistency.hpp`), **NEES** vs ground truth (per-block, to say *which* state
+is over-confident), and **ground-truth injection** — the highest-leverage tool:
+inject GT at stage *k*, and the first stage whose injection makes the failure
+vanish is the culprit.
+
+## The workflow
+
+**CHARACTERIZE → ASSESS → HYPOTHESIZE → MODEL → TEST**, where each stage produces a
+typed, signed, quantitative artifact, and **TEST never runs the whole pipeline** —
+it isolates one component against a known answer.
+
+- **CHARACTERIZE** — measure the inputs and internal signals *before* touching
+  code: Allan-variance the IMU against the configured noise; profile the sequence's
+  excitation/parallax; plot innovations and residuals over time (zero-mean? white?
+  where do they first leave the band?).
+- **ASSESS** — turn raw signals into verdicts: **NEES/NIS** above the χ² band ⇒
+  over-confident covariance/Jacobian/noise, below ⇒ inflated noise; **SVD the
+  linearized system** and confirm exactly the 4 unobservable directions are in the
+  null space.
+- **HYPOTHESIZE** against a *specific* component contract, **with a sign**:
+  "`F[v,θ] = −R⌊a⌋ dt` has the wrong sign," not "init is broken." Name the
+  component, the term, and the expected sign/scale.
+- **MODEL** — predict the quantitative signature *before* testing: "flipped
+  `F[v,θ]` ⇒ NEES grows quadratically from the first propagation." A hypothesis you
+  cannot turn into a predicted signature is not yet testable.
+- **TEST** — isolate ONE component against an **independent** oracle. Only after
+  every component passes do you compose and look at ATE — as *confirmation*, not a
+  search signal.
+
+<Aside type="tip" title="The stop rule">
+  Do not change a line until the symptom is traced to a **named contract violation
+  whose predicted signature matches an observed instrument reading** — i.e. you can
+  state *which* component is wrong, *by how much*, and *in which sign*. If you
+  cannot yet answer "which component, what magnitude, which sign," you are still in
+  the anti-pattern and have not finished characterizing.
+</Aside>
+
+## This is what happened with the over-confidence
+
+The [Consistency Analysis](/pipeline/consistency-analysis/) is this workflow run to
+completion: the Q/R sweeps (ASSESS), the whiteness discriminator (HYPOTHESIZE), the
+FEJ experiment and its refutation (MODEL → TEST), and the stage-by-stage probes
+(S0, S1, S2, S5, S6, S10) that partitioned the fault into a measured, ranked
+[decomposition](/pipeline/engineering-status/) — instead of ten ATE-blind edits.

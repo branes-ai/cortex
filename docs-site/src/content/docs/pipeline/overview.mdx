@@ -14,7 +14,9 @@ This section documents the pipeline cortex implements, **stage by stage**. Each
 stage is treated as a **contract**: a signature, pre-conditions it assumes,
 post-conditions/invariants it must guarantee, the native-unit metrics that prove
 it, and where the current implementation is known to fall short. The framing
-follows the OpenVINS error-state MSCKF — the de-facto reference filter.
+follows the OpenVINS error-state MSCKF — the de-facto reference filter. *Why*
+contracts-and-probes rather than editing-and-watching-ATE is the subject of
+[Diagnostic Methodology](/pipeline/diagnostic-methodology/).
 
 ## The dataflow
 
