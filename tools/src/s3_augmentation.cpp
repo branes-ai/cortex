@@ -80,5 +80,8 @@ int main(int argc, char** argv) {
                  "  exact (it does NOT add a zero/independent block, the classic inconsistency that\n"
                  "  would make the filter under-confident at clone time). The round-trip confirms\n"
                  "  marginalizing the fresh clone restores P. S3 is correct — not a #212 source.\n";
-    return 0;
+
+    // Exit non-zero if any invariant failed, so the probe is usable as a CI gate.
+    const bool ok = r.clone_marginal_err < eps && r.clone_cross_err < eps && r.roundtrip_err < eps && r.psd;
+    return ok ? 0 : 1;
 }

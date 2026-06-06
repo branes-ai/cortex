@@ -28,6 +28,7 @@
 #include <branes/sdk/msckf/propagator.hpp>
 #include <branes/sdk/msckf/state_helper.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>

@@ -74,5 +74,8 @@ int main(int argc, char** argv) {
                  "  cov.marginalize(keep) is an exact extraction and P' stays PSD. For a filter\n"
                  "  (not a smoother) no FEJ prior arises here — correctness rides on S3's augment\n"
                  "  cross-covariance being right, which it is. S9 is correct — not a #212 source.\n";
-    return 0;
+
+    // Exit non-zero if any invariant failed, so the probe is usable as a CI gate.
+    const bool ok = r.kept_marginal_err < eps && r.psd;
+    return ok ? 0 : 1;
 }
