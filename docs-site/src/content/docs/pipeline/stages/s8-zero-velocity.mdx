@@ -1,0 +1,34 @@
+---
+title: S8 — Zero-Velocity Update (optional)
+description: A stationarity pseudo-measurement that prevents drift while the platform is still. An optional robustness layer, not present in the cortex filter today.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An optional robustness layer: when the platform is detected to be **stationary**,
+apply a `v = 0` pseudo-measurement (and suppress clone insertion while still). This
+prevents the spurious motion and feature-starved drift that otherwise accumulate
+when the camera sees nothing new.
+
+## What it does
+
+Detect stationarity (low IMU specific-force/gyro variance + low visual disparity),
+then apply a zero-velocity pseudo-measurement that pins `v = 0`, and pause cloning
+until motion resumes.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | detect stationarity (IMU + visual disparity) → apply a `v = 0` pseudo-measurement; suppress clone insertion while still |
+| **Post / invariants** | prevents spurious motion / feature-starved drift while static · the detector must **not** false-positive during slow motion (a wrong `v = 0` constraint injects a bias) |
+| **cortex** | not present — a known canonical robustness layer |
+
+<Aside type="note" title="Status — optional, not implemented">
+  Zero-velocity updates are **not present** in the cortex filter. They are a
+  deployment-robustness feature (most valuable for ground vehicles and
+  hand-held/stop-and-go motion), and are **not relevant to the EuRoC #212
+  over-confidence**, which is measured on continuously-moving sequences. The main
+  design caution is detector precision: a false-positive during slow motion injects
+  a wrong `v = 0` constraint and biases the estimate.
+</Aside>
