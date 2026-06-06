@@ -43,6 +43,12 @@ struct FrontendParams {
     double fast_threshold = 20.0;        ///< FAST-9 contrast threshold
     std::size_t target_features = 150;   ///< re-detect when tracked count drops below
     double min_feature_distance = 15.0;  ///< px; suppress detections near existing tracks
+    /// S4 forward-backward gate: re-track each survivor back to the previous frame
+    /// and drop it if the round-trip error exceeds this (px). Rejects tracks that
+    /// drifted to a confidently-wrong location before they reach the backend.
+    /// **Default 0 (disabled)**: enabling it (e.g. ~1 px) doubles the KLT cost and
+    /// should be validated end-to-end before being turned on.
+    double fb_max_residual = 0.0;
     cv::KltParams klt{};
 };
 
@@ -188,15 +194,36 @@ private:
                 pts.push_back(cv::KeyPoint{t.x, t.y, 0.0f});
             const auto res = cv::track_klt_pyramidal(prev_pyramid_, next, pts, fe_.klt);
 
+            // Forward-backward consistency: re-track the forward survivors back to
+            // the previous frame; a self-consistent track returns to its origin.
+            std::vector<cv::KeyPoint> back_pts;
+            std::vector<cv::KltResult> back;
+            if (fe_.fb_max_residual > 0.0) {
+                back_pts.reserve(res.size());
+                for (const auto& rr : res)
+                    back_pts.push_back(cv::KeyPoint{rr.x, rr.y, 0.0f});
+                back = cv::track_klt_pyramidal(next, prev_pyramid_, back_pts, fe_.klt);
+            }
+            const double fb2 = fe_.fb_max_residual * fe_.fb_max_residual;
+
             std::vector<Track> kept;
             kept.reserve(tracks_.size());
-            for (std::size_t i = 0; i < res.size(); ++i)
-                if (res[i].status == cv::TrackStatus::Tracked) {
-                    Track t = tracks_[i];
-                    t.x = res[i].x;
-                    t.y = res[i].y;
-                    kept.push_back(t);
+            for (std::size_t i = 0; i < res.size(); ++i) {
+                if (res[i].status != cv::TrackStatus::Tracked)
+                    continue;
+                if (fe_.fb_max_residual > 0.0) {
+                    if (back[i].status != cv::TrackStatus::Tracked)
+                        continue;  // can't verify the round trip → drop
+                    const double dx = static_cast<double>(back[i].x) - pts[i].x;
+                    const double dy = static_cast<double>(back[i].y) - pts[i].y;
+                    if (dx * dx + dy * dy > fb2)
+                        continue;  // failed forward-backward → drop the outlier
                 }
+                Track t = tracks_[i];
+                t.x = res[i].x;
+                t.y = res[i].y;
+                kept.push_back(t);
+            }
             tracks_ = std::move(kept);
         }
 

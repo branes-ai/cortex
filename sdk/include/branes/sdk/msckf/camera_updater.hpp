@@ -27,6 +27,8 @@
 #include <branes/sdk/features/msckf_nullspace.hpp>
 #include <branes/sdk/msckf/state_helper.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -91,6 +93,12 @@ struct CameraUpdaterOptions {
     T chi2_per_dof = T{5};
     bool enable_gating = true;
     std::size_t max_triangulation_iters = 5;  ///< Gauss-Newton refinement steps
+    /// S5 parallax gate: reject a triangulation whose maximum inter-view parallax
+    /// angle is below this (degenerate depth — see eval/triangulation_probe.hpp).
+    /// **Default 0 (disabled)**: enabling it (e.g. ~1–5°) trades feature coverage
+    /// for depth quality and must be validated end-to-end (it regresses the
+    /// synthetic ATE while it may improve EuRoC NEES) before being turned on.
+    T min_parallax_deg = T{0};
 };
 
 template <math::Scalar T>
@@ -261,6 +269,8 @@ public:
     bool triangulate(const State<T, Cov>& s, const std::vector<CameraObservation<T>>& obs, Vec3& p_f) const {
         DynMat<T> A(3, 3);
         DynMat<T> b(3, 1);
+        std::vector<Vec3> bearings;  // world-frame unit rays, for the parallax gate
+        bearings.reserve(obs.size());
         for (const auto& o : obs) {
             const auto& cl = s.clones[o.clone_index];
             const auto& ex = cameras_[o.camera_index];
@@ -271,6 +281,7 @@ public:
             if (!(dn > T{0}))
                 return false;
             d = d * (T{1} / dn);
+            bearings.push_back(d);
             // I − d̂ d̂ᵀ
             for (std::size_t a = 0; a < 3; ++a) {
                 for (std::size_t bb = 0; bb < 3; ++bb) {
@@ -280,6 +291,11 @@ public:
                 }
             }
         }
+        // S5 parallax gate: a low max inter-view parallax means depth is
+        // near-unobservable, so the triangulation would inject optimistic
+        // information into the update. Reject it rather than admit it at full weight.
+        if (opts_.min_parallax_deg > T{0} && !has_sufficient_parallax(bearings, opts_.min_parallax_deg))
+            return false;
         DynMat<T> L;
         if (!cholesky(A, L))
             return false;  // degenerate geometry (parallel rays)
@@ -320,6 +336,22 @@ public:
     }
 
 private:
+    // Max inter-view parallax angle over the unit bearings, in degrees, vs the
+    // gate threshold. < 2 views → no parallax. The widest pair of rays sets it.
+    static bool has_sufficient_parallax(const std::vector<Vec3>& d, T min_deg) {
+        if (d.size() < 2)
+            return false;
+        T min_dot = T{1};  // widest angle ⇔ smallest dot product
+        for (std::size_t i = 0; i < d.size(); ++i)
+            for (std::size_t j = i + 1; j < d.size(); ++j) {
+                const T dot = d[i][0] * d[j][0] + d[i][1] * d[j][1] + d[i][2] * d[j][2];
+                min_dot = std::min(min_dot, dot);
+            }
+        const T pi = std::acos(T{-1});
+        const T max_angle_deg = std::acos(std::clamp(min_dot, T{-1}, T{1})) * T{180} / pi;
+        return max_angle_deg >= min_deg;
+    }
+
     std::vector<Extrinsics> cameras_;
     Options opts_;
 };

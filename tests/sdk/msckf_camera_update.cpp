@@ -155,3 +155,39 @@ TEST_CASE("the filter stays stable over 1000 updates", "[sdk][msckf][camera]") {
     // accepted by the Mahalanobis gate throughout.
     REQUIRE(applied == 1000);
 }
+
+TEST_CASE("S5 parallax gate rejects low-parallax triangulations", "[sdk][msckf][camera]") {
+    using Opts = ms::CameraUpdater<T>::Options;
+    const std::vector<ms::CameraExtrinsics<T>> cams(1);  // identity extrinsics
+
+    // Low parallax: 6 cm baseline, feature 5 m ahead → ~0.7°, below the 1° gate
+    // but above the numerical (Cholesky) breakdown.
+    {
+        const std::vector<SO3> R(2);
+        const std::vector<Vec3> p = {{{0.0, 0.0, 0.0}}, {{0.06, 0.0, 0.0}}};
+        auto s = make_state_with_clones(R, p);
+        const Vec3 f{{0.0, 0.0, 5.0}};
+        const auto tr = make_track(s, f);
+        REQUIRE(tr.observations.size() == 2);
+        Vec3 pf;
+        Opts gated;
+        gated.min_parallax_deg = 1.0;
+        REQUIRE_FALSE(ms::CameraUpdater<T>(cams, gated).triangulate(s, tr.observations, pf));
+        Opts off;
+        off.min_parallax_deg = 0.0;  // gate disabled → the (ill-conditioned) solve still runs
+        REQUIRE(ms::CameraUpdater<T>(cams, off).triangulate(s, tr.observations, pf));
+    }
+
+    // Sufficient parallax: 1.5 m baseline, ~4 m ahead → ~20°, accepted by the gate.
+    {
+        const std::vector<SO3> R(2);
+        const std::vector<Vec3> p = {{{0.0, 0.0, 0.0}}, {{1.5, 0.0, 0.0}}};
+        auto s = make_state_with_clones(R, p);
+        const Vec3 f{{0.7, 0.1, 4.0}};
+        const auto tr = make_track(s, f);
+        Vec3 pf;
+        Opts gated;
+        gated.min_parallax_deg = 1.0;
+        REQUIRE(ms::CameraUpdater<T>(cams, gated).triangulate(s, tr.observations, pf));
+    }
+}
