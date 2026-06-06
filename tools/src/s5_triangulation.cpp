@@ -15,6 +15,7 @@
 #include <branes/sdk/eval/triangulation_probe.hpp>
 #include <branes/tools/vio_stage_contracts.hpp>
 
+#include <cmath>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -77,18 +78,28 @@ int main(int argc, char** argv) {
         for (const auto& p : sweep.curve)
             f << p.parallax_deg << ',' << p.reproj_rms_px << ',' << p.depth_error_mm << '\n';
     }
+    // Sweep-level facts (depth, noise, the σ budget, and the resolved gate) so the
+    // figure generator / readers never have to hard-code them.
+    const double budget_sigma_mm = 0.05 * depth * 1000.0;
+    if (auto f = tl::open_artifact(args, "triang_meta.csv"); f.is_open()) {
+        f << "depth_m,px_noise,budget_sigma_mm,gate_parallax_deg\n";
+        f << depth << ',' << 1.0 << ',' << budget_sigma_mm << ',' << sweep.gate_parallax_deg << '\n';
+    }
 
     tl::print_results("S5 native-unit assessment", rows);
     tl::note_artifacts(args, S);
 
+    const std::string gate = std::isfinite(sweep.gate_parallax_deg)
+                                 ? "sits at ~" + fmt(sweep.gate_parallax_deg, 3) + " deg"
+                                 : "is beyond the swept range (no level met the 5% budget)";
     std::cout << "\n  Reading: the shipped triangulator has only a HARD guard — the Cholesky\n"
                  "  breakdown at near-parallel rays. Across the danger band the linear system is\n"
                  "  already badly conditioned and the true depth uncertainty (Monte-Carlo sigma\n"
                  "  under 1 px noise) is large, yet triangulate() still returns success and the\n"
                  "  feature is admitted to the update at full weight. The suggested SOFT parallax\n"
-                 "  gate (sigma <= 5% of depth) sits at ~"
-              << fmt(sweep.gate_parallax_deg, 3)
-              << " deg. Admitting sub-gate features\n"
-                 "  injects optimistic information — the S5 #212 candidate for the V2_03 divergence.\n";
+                 "  gate (sigma <= 5% of depth) "
+              << gate
+              << ". Admitting sub-gate features injects\n"
+                 "  optimistic information — the S5 over-confidence candidate for the V2_03 divergence.\n";
     return 0;
 }

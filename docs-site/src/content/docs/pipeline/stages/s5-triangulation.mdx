@@ -11,8 +11,8 @@ does that triangulation. The catch: depth is only well-determined when the
 observing cameras saw the point from **sufficiently different angles** — enough
 **parallax**. Triangulate a point seen from nearly the same direction and the depth
 is almost unconstrained, but the filter will use it as if it were precise. This
-page measures exactly that, and it is an **open** [#212](/pipeline/engineering-status/)
-candidate for the aggressive-motion divergence.
+page measures exactly that, and it is an **open** candidate for the aggressive-motion
+over-confidence tracked on [Engineering Status](/pipeline/engineering-status/).
 
 ## What it does
 
@@ -82,8 +82,8 @@ parallax is when that sweep is small, and depth becomes unobservable.
   breakdown), **no soft parallax / condition gate**. Features triangulated at low
   parallax are admitted at full weight, injecting optimistic information — a
   plausible contributor to the **aggressive-motion (V2_03) divergence**, where
-  erratic motion produces many marginal-parallax tracks. This is an **open** #212
-  candidate: the fix is a parallax (or condition-number / depth-σ) gate before
-  admission, or per-feature down-weighting. Full decomposition on
-  [Engineering Status](/pipeline/engineering-status/).
+  erratic motion produces many marginal-parallax tracks. This is an **open**
+  over-confidence candidate: the fix is a parallax (or condition-number / depth-σ)
+  gate before admission, or per-feature down-weighting. Full decomposition and the
+  tracking issue on [Engineering Status](/pipeline/engineering-status/).
 </Aside>

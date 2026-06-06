@@ -101,7 +101,7 @@ struct ParallaxSweep {
     std::vector<ParallaxPoint<T>> curve;
     T depth_m = 0;
     T px_noise = 0;
-    T gate_parallax_deg = 0;  ///< smallest parallax where depth σ ≤ 5% of depth
+    T gate_parallax_deg = 0;  ///< smallest swept parallax where depth σ ≤ 5% of depth (+∞ if none)
 };
 
 /// Sweep two-view parallax exactly and measure the shipped triangulator. The two
@@ -200,11 +200,14 @@ template <math::Scalar T>
         out.curve.push_back(pt);
     }
 
-    // Suggested gate: the smallest parallax whose depth σ is within 5% of depth.
+    // Suggested gate: the smallest swept parallax whose depth σ is within 5% of
+    // depth. If no swept level qualifies, leave the gate at +∞ (an honest "not
+    // found within the swept range") rather than reporting the last sample as if
+    // it were achieved. A point with a valid Monte-Carlo σ has mc_failures < mc.
     const T budget_mm = T{0.05} * depth_m * T{1000};
-    out.gate_parallax_deg = out.curve.back().parallax_deg;
+    out.gate_parallax_deg = std::numeric_limits<T>::infinity();
     for (const auto& p : out.curve)
-        if (p.depth_sigma_mm > T{0} && p.depth_sigma_mm <= budget_mm) {
+        if (p.mc_failures < mc && p.depth_sigma_mm <= budget_mm) {
             out.gate_parallax_deg = p.parallax_deg;
             break;
         }
