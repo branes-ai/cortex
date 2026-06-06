@@ -336,6 +336,24 @@ if (triang?.length) {
   );
 }
 
+// ── S4 figures (visual frontend) — rendered when the S4 artifacts are present ─
+const fsweep = readCsv('frontend_noise_sweep.csv');
+if (fsweep?.length) {
+  lineChart(
+    [{ name: 'track endpoint RMS', points: fsweep.map((r) => ({ x: r.sigma_px, y: r.endpoint_rms_px })) }],
+    { title: 'S4  Track endpoint noise vs image pixel noise (ideal texture)', file: 'frontend_noise.svg',
+      xlabel: 'image noise σ (px)', ylabel: 'track endpoint RMS (px)' },
+  );
+}
+const ftlen = readCsv('frontend_tracklen.csv');
+if (ftlen?.length) {
+  lineChart(
+    [{ name: 'tracks', points: ftlen.map((r) => ({ x: r.track_length_frames, y: r.count })) }],
+    { title: 'S4  Track-length distribution (12-frame sequence)', file: 'frontend_tracklen.svg',
+      xlabel: 'track length (frames)', ylabel: 'number of tracks' },
+  );
+}
+
 // ── Equal-aspect 2-D path plot (trajectory overlay) ────────────────────────
 function pathPlot(series, { title, file, xlabel, ylabel }) {
   if (!series.length) return;

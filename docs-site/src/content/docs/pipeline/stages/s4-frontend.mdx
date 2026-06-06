@@ -1,22 +1,23 @@
 ---
 title: S4 — Visual Frontend
-description: Track generation — detection, KLT tracking, forward-backward and RANSAC outlier rejection. The contract and the measurement-noise it must hand the backend.
+description: Track generation — FAST detection + pyramidal KLT. The shipped primitives are sub-pixel accurate, but the frontend applies no forward-backward check and no RANSAC, so drifted tracks reach the backend un-gated.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 The frontend turns raw images into the feature **tracks** the backend consumes:
-detect corners, follow them frame-to-frame, and reject the ones that don't hold up
-geometrically. Its job is to hand the backend correspondences that are *correct* —
-no backend trick repairs a confidently-wrong match — and to report the *true* pixel
-noise on the ones that survive.
+detect corners, follow them frame-to-frame, and reject the ones that don't hold up.
+Its job is to hand the backend correspondences that are *correct* — no backend
+trick repairs a confidently-wrong match — and to report the *true* pixel noise on
+the ones that survive. The probe drives the shipped FAST detector + pyramidal KLT
+on synthetic textured imagery warped by a known translation.
 
 ## What it does
 
-FAST / Shi-Tomasi detection with grid-bucketed spatial coverage and min-distance
-suppression; pyramidal **KLT** tracking frame-to-frame (the IMU gyro prior can seed
-the search); a **forward-backward** consistency check; and **RANSAC** on the
-epipolar constraint to drop geometric outliers before the backend sees them.
+FAST detection with grid-bucketed coverage and min-distance suppression; pyramidal
+**KLT** tracking frame-to-frame (the IMU gyro prior can seed the search); and — per
+the canonical contract — a **forward-backward** consistency check and **RANSAC** on
+the epipolar constraint to drop outliers before the backend.
 
 ## The contract
 
@@ -24,28 +25,62 @@ epipolar constraint to drop geometric outliers before the backend sees them.
 |---|---|
 | **Signature** | `track(image_t, prev_tracks) → observations[(id, cam, u, v)]` |
 | **Pre** | image in expected format; previous tracks available; (optional) gyro rotation prior |
-| **Post / invariants** | every surviving track passes forward-backward (round-trip pixel error < τ) · RANSAC inlier ratio above a floor; outliers removed **before** the backend · spatial coverage across the image grid (clusters ⇒ poor rotational DoF) · track-length distribution healthy (not all length-2 — that starves [parallax](/pipeline/stages/s5-triangulation/)) |
-| **cortex** | frontend in `vio_estimator.hpp` (`FrontendParams`); pyramidal KLT |
+| **Post / invariants** | every surviving track passes forward-backward (round-trip pixel error < τ) · RANSAC inlier ratio above a floor; outliers removed **before** the backend · spatial coverage across the image grid · track-length distribution healthy (not all length-2 — that starves [parallax](/pipeline/stages/s5-triangulation/)) |
+| **cortex** | frontend in `vio_estimator.hpp` (`FrontendParams`); pyramidal KLT (`cv/klt.hpp`), FAST (`cv/fast.hpp`) |
 
 For the API-level treatment of the tracker, see the
 [Visual Front End](/vio/front-end/) reference.
 
-## Intended assessments
+## Metrics
 
-The probe (forthcoming — it needs image input, unlike the algebraic stage probes)
-will report, per frame: track count, **forward-backward residual** distribution,
-**RANSAC inlier ratio**, grid-occupancy histogram, **track-length** histogram, and
-parallax distribution. The decisive sensitivity sweep is **pixel-noise injection**
-(σ ∈ {0.1, 0.5, 1, 2} px): measure track survival and the downstream reprojection
-residual to calibrate the **true measurement noise** the backend should use — which
-ties directly to the [consistency analysis](/pipeline/consistency-analysis/) finding
-that the assumed pixel σ is ~4× too small.
+The [S4 probe](/pipeline/diagnostic-methodology/) detects FAST corners on a textured
+pattern, then tracks A→B and B→A with the **shipped** KLT to measure self-consistency.
 
-<Aside type="note" title="Status — implemented; probe pending">
-  The frontend (detection + KLT + forward-backward + RANSAC) is implemented. A
-  data-backed probe needs synthetic/real image input, so it is the heaviest of the
-  stage probes and is not yet wired — this page documents the contract. The
-  #212-relevant question it will answer: does the pixel σ handed to
-  [S6](/pipeline/stages/s6-msckf-update/) match the *measured* track noise, or an
-  optimistic constant? Tracked on [Engineering Status](/pipeline/engineering-status/).
+| metric | value | note |
+|---|---:|---|
+| features detected (FAST) | 80 | level-0 corners |
+| forward-tracked (KLT) | 51 / 80 | status = Tracked |
+| forward-backward residual (median) | **0.0016 px** | tracks are self-consistent |
+| endpoint error vs known warp (RMS) | **0.001 px** | sub-pixel accuracy, no noise |
+| grid coverage occupancy | **100 %** | 8×6 grid — well distributed |
+| mean track length | **7.3 frames** | over a 12-frame sequence |
+
+The shipped primitives are **sound**: near-zero forward-backward residual, sub-pixel
+endpoint accuracy, full grid coverage, and healthy track lengths.
+
+### Pixel-noise → track-noise
+
+Sweeping image noise, the recovered-track endpoint error scales roughly linearly
+with the image noise:
+
+![Track endpoint noise vs image pixel noise](/figures/s4/frontend_noise.svg)
+![Track-length distribution](/figures/s4/frontend_tracklen.svg)
+
+<Aside type="note" title="An honest caveat on the noise number">
+  On this *ideal* high-contrast synthetic texture KLT is sub-pixel accurate even at
+  4 px image noise (~0.02 px endpoint error). Real-data track noise is far larger —
+  it comes from motion blur, illumination change, perspective foreshortening, and
+  repetitive texture that this purely-geometric probe does not model. So the
+  measurement-σ the backend should use must ultimately be calibrated on **real**
+  tracks; the synthetic sweep gives only the best-case slope.
+</Aside>
+
+## The S4 candidate — no outlier gate
+
+The decisive finding: the shipped frontend applies **only KLT's own
+`Lost`/`OutOfBounds` status filter** — there is **no forward-backward check and no
+RANSAC**. On clean texture every track is self-consistent, so no outliers appear
+here; but on real data, a track that drifts onto repetitive texture or across an
+occlusion boundary follows KLT to a **confidently-wrong** location and reaches the
+[backend](/pipeline/stages/s6-msckf-update/) **at full weight** — the same
+"optimistic information" failure mode as the missing
+[S5 parallax gate](/pipeline/stages/s5-triangulation/).
+
+<Aside type="caution" title="Status — primitives sound, outlier gate missing">
+  FAST + pyramidal KLT are accurate and well-distributed (measured). The **open**
+  candidate is the absent **forward-backward / RANSAC outlier rejection** before the
+  backend, plus an optimistic measurement σ not calibrated against real-data track
+  noise. Both feed the #212 over-confidence by handing the filter correspondences
+  it should not fully trust. Tracked on
+  [Engineering Status](/pipeline/engineering-status/).
 </Aside>
