@@ -1,0 +1,105 @@
+---
+title: S1 — Initialization
+description: Bootstrapping attitude, biases, gravity, and metric scale — plus the initial covariance. The algorithm checks out; the isotropic covariance seed is the over-confidence suspect.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A filter has to start *somewhere*. S1 bootstraps the initial state — attitude,
+gyro/accel bias, gravity direction, and (for a moving start) metric scale — **and**
+the initial covariance `P₀` that says how sure it is. Two failure modes hide here:
+returning a *confidently wrong* state when the motion can't observe it, and seeding
+`P₀` too tight on the directions initialization could not pin down. The probe shows
+the cortex algorithm handles the first well — and stumbles on the second.
+
+## What it does
+
+- **Static init** — detect a stationary window; average accel → gravity direction
+  (fixes roll/pitch; yaw is a free gauge), average gyro → `b_g`, set `v = 0`. The
+  gravity magnitude is checked against `‖g‖`.
+- **Dynamic init** — a visual-inertial alignment over a short window solving for
+  gravity, velocity, and **scale** by matching SfM motion to preintegrated IMU.
+  Scale and accel-bias are weakly observable under gentle / pure-rotation motion,
+  so a **scale-observability gate** must guard this.
+- **The initial covariance `P₀`** — must honestly reflect what was *not* observed:
+  large variance on yaw, on accel bias, on scale. An over-tight `P₀` is
+  over-confidence injected at t = 0 that the filter never recovers from.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `init(imu_window, [vision_window]) → (R_GI, v, b_g, b_a, g, [scale])` + initial `P` |
+| **Pre** | static: accel/gyro std below stationarity thresholds · dynamic: **sufficient acceleration excitation** (a scale-observability gate must guard it) |
+| **Post / invariants** | `R_GI` aligns measured-accel-mean to gravity (residual ≈ 0); `‖g‖` within tolerance; dynamic scale > 0, finite, alignment condition number bounded · **`P₀` carries large variance on the unobserved directions (yaw, accel bias, scale)** |
+| **cortex** | `imu_init.hpp` (`try_static`, `try_gravity_align`, `try_dynamic`); SfM bootstrap in `sfm/` |
+
+## Metrics
+
+### The algorithm is sound
+
+Driving the real initializer on synthetic data, every functional check passes:
+
+| check | result |
+|---|---|
+| static gravity-leveling residual | 2.2e-16 m/s² — exact |
+| recovered gravity magnitude | 9.80 m/s² (≈ 9.81) |
+| roll/pitch leveling error (accel noise) | 0.026° |
+| gyro-bias recovery error | 1.6e-4 rad/s |
+| dynamic metric-scale recovery error | 0.05% (scale 2.001 vs 2.000) |
+
+![Static init: roll/pitch leveling error vs accel noise](/figures/s1/init_static.svg)
+
+### The observability gate works — it declines, it doesn't guess
+
+Sweeping acceleration excitation, the dynamic-init gate correctly **declines** when
+motion is too gentle to make scale observable, rather than returning a confident
+wrong scale:
+
+| excitation | outcome |
+|---|---|
+| 0.05 m/s² | **declined** (unobservable) |
+| 0.15 m/s² | accept, scale error 0.12% |
+| 1.0 m/s² | accept, scale error 0.05% |
+
+![Dynamic init: the scale-observability cliff](/figures/s1/init_excitation.svg)
+![Dynamic init: metric-scale error vs excitation](/figures/s1/init_scale_error.svg)
+
+### The seed is the suspect — `P₀` is isotropic
+
+This is the S1 over-confidence candidate. The initial covariance is an **isotropic
+`σ·I`** — every block gets the same `σ`:
+
+| state block | initial σ | should be |
+|---|---|---|
+| roll/pitch | 5.73° | small — gravity-leveled |
+| **yaw** | **5.73°** | **large — unobservable at static init** |
+| position | 0.1 m | (global position is a gauge) |
+| accel bias | 0.1 m/s² | larger — weakly observable |
+
+**Yaw gets the same 5.73° as the gravity-leveled roll/pitch — but yaw is
+unobservable from a static accel-only init** (gravity fixes only the two tilt
+axes; the heading is a free gauge). A structured seed would give yaw, scale, and
+accel-bias large variance to reflect that they were *not* observed. The isotropic
+seed instead claims the filter knows its heading to 5.73° at t = 0 — first-frame
+over-confidence the filter never fully recovers from, and a plausible origin for
+the **attitude-localized** over-confidence seen later (per-block NEES is worst on
+attitude — see [Consistency Analysis](/pipeline/consistency-analysis/)).
+
+## Interactive
+
+In the [3-D viewer](/vio/scene3d/), watch the very first frames: the covariance
+ellipsoid starts already-small. A faithful `P₀` would start it *large* along the
+unobserved directions and let the first measurements shrink it — the opposite of
+an over-tight isotropic seed.
+
+<Aside type="caution" title="Status — algorithm sound, seed suspect">
+  The initialization **algorithm checks out**: exact static leveling, gravity and
+  metric scale recovered, and the observability gate declines (rather than guessing)
+  when excitation is too low. The open item is the **isotropic `P₀` seed** — yaw,
+  scale, and accel-bias are seeded with the same small σ as the observed states,
+  understating the uncertainty on exactly the directions init could not pin down.
+  This is a structural over-confidence source at t = 0 that resonates with the
+  attitude-localized NEES. Tracked, with the full decomposition, on
+  [Engineering Status](/pipeline/engineering-status/).
+</Aside>
