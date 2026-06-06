@@ -107,6 +107,7 @@ export default defineConfig({
           items: [
             { label: 'The VIO Pipeline', slug: 'pipeline/overview' },
             { label: 'Reading the Metrics', slug: 'pipeline/metrics' },
+            { label: 'Diagnostic Methodology', slug: 'pipeline/diagnostic-methodology' },
             { label: 'S0 — Sensor & Calibration Models', slug: 'pipeline/stages/s0-sensor-models' },
             { label: 'S1 — Initialization', slug: 'pipeline/stages/s1-initialization' },
             { label: 'S2 — IMU Propagation', slug: 'pipeline/stages/s2-imu-propagation' },
