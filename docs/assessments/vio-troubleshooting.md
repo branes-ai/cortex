@@ -157,3 +157,128 @@ So #212 splits into two real, measured problems — (1) re-tune the noise (fixes
 V2_03 diverges under honest noise (the actual hard case: triangulation/gating/linearization under fast rotation, window length, etc.). FEJ addresses
 neither well enough to ship.
 
+
+
+
+
+
+● Done — clean, verifiable milestone reached. Here's what happened and what it means.
+
+  What I found when I looked closely
+
+  The thing you're worried about — confident prose that was never executed — was literally sitting in the tree. The S3, S5, S9 stage probes were fully wired
+  but had never been run in this session's memory and had no regression tests. Worse, the S3 and S9 drivers already printed conclusions as fact — "S3 is
+  correct — not a #212 source" — baked into the output text regardless of whether the numbers backed it. The canonical design doc compounded this by listing
+  S3–S9 as unfinished "scaffolds." That's the automation-bias trap from your ai-coding-assistant-failures.md in miniature: an assertion of correctness with
+  no executed measurement behind it.
+
+  So I refused to trust the prose and ran them.
+
+  Measured results (not assertions)
+
+  ┌──────────────┬────────────────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────┐
+  │    Stage     │                                        Reading                                         │                   Verdict                    │
+  ├──────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+  │ S3 augment   │ clone-marginal, cross-covariance, round-trip residuals all identically 0               │ Eliminated — P'=G P Gᵀ is exact; full clone  │
+  │              │                                                                                        │ correlation carried                          │
+  ├──────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+  │ S9           │ kept-marginal residual identically 0, stays PSD                                        │ Eliminated — exact submatrix extraction      │
+  │ marginalize  │                                                                                        │                                              │
+  ├──────────────┼────────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────┤
+  │ S5           │ clean depth correct everywhere, but no soft gate on the admit path; at 0.1–1° parallax │ Confirmed optimistic-information injection — │
+  │ triangulate  │  depth σ is 90–127% of the depth (cond up to 1.3e6) yet admitted at full weight;       │  the V2_03 candidate, now quantified         │
+  │              │ 5%-of-depth budget met only at ~5°                                                     │                                              │
+  └──────────────┴────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────┘
+
+  So two suspects are definitively off the board, and S5 is now a measured lead with a concrete gate threshold (~5°, not the 1° currently coded), not a
+  hunch.
+
+  What I locked in
+
+  - tests/sdk/clone_window_probe.cpp (S3+S9) and tests/sdk/triangulation_probe.cpp (S5) — previously zero regression tests existed for these stages. 7 new
+  cases, 44 assertions, all green. The MC is fixed-seed so they're deterministic CI gates, no EuRoC dataset needed. These tests will now scream if anyone
+  regresses the cloning algebra or quietly changes the triangulator.
+  - Corrected the stale status in docs/arch/vio-pipeline-canonical.md §4 and §6 (S3/S5/S9 are wired + tested, not scaffolds). The S3/S5/S9 docs-site pages
+  were already coherent and carry the real numbers — today's work validates that prose with execution + tests, which is the whole point.
+
+  The one real remaining gap — and your next move
+
+  After today, the over-confidence (NEES≈43 vs ~15 on MH_05) has only two places left to hide:
+
+  1. S6 — the MSCKF update — still completely uninstrumented. No probe header exists. This is the stage the canonical doc calls "where the three globals are
+  won or lost," and it's the last uninstrumented stage on the critical path. Building an update_probe.hpp that drives the real CameraUpdater and reads
+  NIS-per-update vs χ²(dof), null-space orthonormality, and FEJ divergence is the single highest-value next step — NIS-per-update is the local mirror of the
+  global NEES symptom.
+  2. S5 gate end-to-end validation — enable min_parallax_deg at ~2–5° and re-run V2_03. This needs the EuRoC dataset (~1.5 GB, env-gated), which I can't pull
+  here — that one's yours to run with CORTEX_EUROC_V203=/path/to/mav0.
+
+  I'd go S6 probe next — it's self-contained, runs on the synthetic world that already reproduces NEES≈43, and it's the measurement that finally decides
+  between "filter-algebra bug" and "noise-budget/calibration deficit." Want me to build the S6 update probe + test now, and write its docs-site page as it
+  confirms, same as we just did for S3/S5/S9?
+
+
+
+
+
+
+● Heads-up before I summarize: I found an unexpected change I did not make — docs/assessments/vio-troubleshooting.md has my previous turn's chat summary
+  (terminal box-drawing and all) appended to it (63 lines). That looks like a Stop-hook or a stray ! cat >> capturing my message into the doc. It's junk in a
+  real assessment file. I left it untouched rather than silently reverting — say the word and I'll strip it.
+
+  S6 update probe + test — built, and the result is decisive
+
+  The whole point was to measure, not assume. The verdict:
+
+  The S6 update algebra is measured-consistent — NIS/dof = 1.002.
+
+  Driven in isolation on a self-consistent (P, R) scene (clone poses perturbed by a draw from the filter's own covariance, image noise at exactly the assumed
+  σ), the shipped CameraUpdater::update produces innovations sized exactly as predicted:
+
+  ┌────────────────────────────────────┬─────────────────────────────────────────┐
+  │            measurement             │                 result                  │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ ‖NᵀH_f‖ (feature marginalized)     │ 2.8 × 10⁻¹⁶                             │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ ‖NᵀN − I‖ (null-space orthonormal) │ 2.2 × 10⁻¹⁶                             │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ projected dim                      │ 5 = 2m−3 ✓                              │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ NIS/dof @ matched (P, R)           │ 1.002 (band [0.98, 1.02], 4000 updates) │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ Joseph keeps P⁺ PSD                │ yes, every update                       │
+  ├────────────────────────────────────┼─────────────────────────────────────────┤
+  │ noise-mismatch lever               │ NIS/dof = 0.84 → 1.00 → 1.64 → 4.17     │
+  └────────────────────────────────────┴─────────────────────────────────────────┘
+
+  What this means — the localization loop is closed
+
+  Fed honest inputs, the triangulation + Jacobians + null-space + innovation covariance + Joseph update are all correct. So the #212 over-confidence is not
+  in the EKF math — it enters through the inputs P⁻ and R. Combined with the rest of today's measurements, every stage on the critical path is now
+  instrumented:
+
+  - S0 camera ✓ (machine precision) · S2 propagation ✓ (~consistent) · S3 augment ✓ (exact) · S5 triangulate ✗ (no soft parallax gate) · S6 update ✓
+  (NIS/dof=1.00) · S9 marginalize ✓ (exact) · S10 calibration (the R×4 component)
+
+  The over-confidence is conclusively input-side: S10 unmodeled calibration + S5 low-parallax admission. The fix is to model the inputs — not rewrite the
+  filter.
+
+  Delivered this session
+
+  - sdk/include/branes/sdk/eval/update_probe.hpp — the S6 probe (NIS consistency + null-space algebra + Joseph PSD + noise lever).
+  - tools/src/s6_msckf_update.cpp wired (was a scaffold); kS6 status → wired.
+  - tests/sdk/update_probe.cpp — 3 new regression cases. All 11 probe tests (S3/S5/S6/S9) green; all 11 stage tools build.
+  - Docs converted from claim → evidence: the S6 docs-site page now carries the measured tables, plus updates to vio-pipeline-canonical.md §4/§6 and
+  engineering-status.mdx. Persistent #212 memory updated.
+
+  The remaining decisive test is yours to run
+
+  The one thing I can't do here is the EuRoC validation (1.5 GB, env-gated). The fix-path confirmation:
+
+  # Enable the S5 parallax gate at ~2–5° (today's probe says the 5%-depth budget needs ~5°, not the 1° currently coded)
+  CORTEX_EUROC_V203=/path/to/V2_03_difficult/mav0 ctest -R V2_03_difficult --output-on-failure
+
+  and on the calibration side (S10), the structural fix is to model T_CI/t_d uncertainty (online estimation or a calibration term in R) rather than the blunt
+  global R×4. Want me to draft that next — either wire the S5 gate end-to-end with a config knob, or sketch the S10 calibration-uncertainty term?
+
+
+

@@ -11,8 +11,9 @@ does that triangulation. The catch: depth is only well-determined when the
 observing cameras saw the point from **sufficiently different angles** — enough
 **parallax**. Triangulate a point seen from nearly the same direction and the depth
 is almost unconstrained, but the filter will use it as if it were precise. This
-page measures exactly that, and it is an **open** candidate for the aggressive-motion
-over-confidence tracked on [Engineering Status](/pipeline/engineering-status/).
+page measures exactly that — and reports the end-to-end result that **gating those
+features is *not* the fix** for the aggressive-motion over-confidence tracked on
+[Engineering Status](/pipeline/engineering-status/).
 
 ## What it does
 
@@ -70,9 +71,30 @@ is entirely in the *uncertainty* the filter fails to account for.
 A reasonable soft gate (depth σ ≤ 5% of depth) sits at ~**5°** of parallax. Such a
 gate is **now implemented** — `CameraUpdaterOptions::min_parallax_deg` rejects a
 triangulation below the threshold (the [S5-gate unit test](/pipeline/diagnostic-methodology/)
-confirms it rejects 0.7° and admits 20°). It ships **default-off** (`0`): enabling
-it trades feature coverage for depth quality and *regresses* the synthetic ATE, so
-it must be validated end-to-end (does it improve EuRoC NEES?) before being turned on.
+confirms it rejects 0.7° and admits 20°), plumbed through `VioConfig::min_parallax_deg`
+and the `CORTEX_MIN_PARALLAX_DEG` replay knob. It ships **default-off** (`0`).
+
+### End-to-end on real data — the gate is *refuted* as the V2_03 fix
+
+The decisive experiment: enable the gate on EuRoC **V2_03** (the aggressive-motion
+sequence) and measure. It does **not** help — it monotonically *regresses* both
+accuracy and consistency, because gating starves the fast-motion filter of the
+short-baseline features it depends on:
+
+| V2_03 | gate off | gate 2° | gate 5° |
+|---|---:|---:|---:|
+| ATE (m) | **0.27** | 0.89 | 1.99 |
+| NIS (≈1 ideal) | **14.7** | 17.5 | 26.7 |
+| NEES (≈1 ideal) | **140** | 170 | 322 |
+| updates applied | **21 585** | 16 772 | 10 180 |
+
+The harder the gate, the fewer features survive (a 5° gate drops more than half),
+and the filter ends up *less* accurate and *more* over-confident. So the S5
+low-parallax admission — though a genuine contract gap — is **not** what drives the
+V2_03 over-confidence; rejecting those features costs more than it saves. The
+over-confidence is dominated by the other input-side source, the
+[S10 unmodeled calibration](/pipeline/stages/s10-online-calibration/). This is the
+measure-don't-assume discipline working: a plausible lead, refuted by one experiment.
 
 ## Interactive
 
@@ -81,13 +103,13 @@ camera moves — exactly what the depth-coloured landmark cloud in the
 [3-D viewer](/vio/scene3d/) shows: near dots sweep faster than far ones. Low
 parallax is when that sweep is small, and depth becomes unobservable.
 
-<Aside type="caution" title="Status — gate implemented, default-off pending validation">
+<Aside type="caution" title="Status — gate implemented, validated, and kept default-off (refuted as the fix)">
   Beyond the **hard** degeneracy guard (Cholesky breakdown), a **soft parallax
-  gate** (`min_parallax_deg`) is now implemented and unit-tested. It ships
-  **default-off** because enabling it regresses the synthetic ATE (it rejects the
-  marginal-parallax features the short synthetic tracks rely on); whether it
-  *improves* the aggressive-motion (V2_03) NEES is the end-to-end validation still
-  owed before turning it on — the characterize→test loop, not a blind flip. Full
-  decomposition and the tracking issue on
-  [Engineering Status](/pipeline/engineering-status/).
+  gate** (`min_parallax_deg`) is implemented, unit-tested, and now **validated
+  end-to-end on EuRoC V2_03** — where it *regresses* ATE (0.27 → 1.99 m at 5°) and
+  NEES (140 → 322), because aggressive motion needs the very short-baseline features
+  the gate rejects. So it stays **default-off**: the low-parallax admission is a real
+  contract gap but **not** the V2_03 over-confidence driver. The remaining input-side
+  lead is the [S10 unmodeled calibration](/pipeline/stages/s10-online-calibration/).
+  Full decomposition on [Engineering Status](/pipeline/engineering-status/).
 </Aside>
