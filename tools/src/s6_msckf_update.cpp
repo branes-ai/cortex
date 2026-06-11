@@ -96,7 +96,9 @@ int main(int argc, char** argv) {
             rows.push_back({"NIS / dof @ injected noise ×" + fmt(p.noise_scale, 2),
                             fmt(p.nis_over_dof, 3),
                             "-",
-                            p.noise_scale == 1.0 ? "matched" : (p.noise_scale > 1.0 ? "under-modeled R ⇒ NIS↑" : "over-modeled R ⇒ NIS↓")});
+                            p.noise_scale == 1.0
+                                ? "matched"
+                                : (p.noise_scale > 1.0 ? "under-modeled R ⇒ NIS↑" : "over-modeled R ⇒ NIS↓")});
             if (f.is_open())
                 f << p.noise_scale << ',' << p.nis_over_dof << ',' << p.dof << ',' << p.samples << '\n';
         }
@@ -127,7 +129,7 @@ int main(int argc, char** argv) {
     // consistent.
     const auto& ns = probe.nullspace;
     const auto& mt = probe.matched;
-    const bool ok = ns.ntHf_max < 1e-10 && ns.orth_max < 1e-10 && ns.rows_out == ns.rows_expected &&
-                    mt.joseph_pd_all && mt.consistent;
+    const bool ok = ns.ntHf_max < 1e-10 && ns.orth_max < 1e-10 && ns.rows_out == ns.rows_expected && mt.joseph_pd_all &&
+                    mt.consistent;
     return ok ? 0 : 1;
 }

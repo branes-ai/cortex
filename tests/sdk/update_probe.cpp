@@ -26,12 +26,11 @@
 namespace {
 namespace ev = branes::sdk::eval;
 using T = double;
-constexpr std::size_t kM = 4;        // clones per feature ⇒ dof = 2m−3 = 5
+constexpr std::size_t kM = 4;  // clones per feature ⇒ dof = 2m−3 = 5
 constexpr std::size_t kTrials = 3000;
 }  // namespace
 
-TEST_CASE("S6 left-null-space projection marginalizes the feature with orthonormal reflectors",
-          "[sdk][s6][update]") {
+TEST_CASE("S6 left-null-space projection marginalizes the feature with orthonormal reflectors", "[sdk][s6][update]") {
     const auto ns = ev::update_nullspace_check<T>(kM);
     // Feature eliminated: NᵀH_f ≈ 0.
     REQUIRE(ns.ntHf_max < 1e-10);
@@ -42,7 +41,7 @@ TEST_CASE("S6 left-null-space projection marginalizes the feature with orthonorm
     REQUIRE(ns.rows_out == 2 * kM - 3);
 }
 
-TEST_CASE("S6 update is consistent at matched (P, R): NIS ≈ dof, Joseph keeps P PSD", "[sdk][s6][update]") {
+TEST_CASE("S6 update is consistent at matched (P, R): NIS approx dof, Joseph keeps P PSD", "[sdk][s6][update]") {
     const auto run = ev::update_nis_run<T>(kM, kTrials, /*noise_scale=*/1.0, 0xC0FFEEull);
     REQUIRE(run.samples > kTrials / 2);  // the geometry triangulates every trial
     REQUIRE(run.dof == 2 * kM - 3);
@@ -54,8 +53,7 @@ TEST_CASE("S6 update is consistent at matched (P, R): NIS ≈ dof, Joseph keeps 
     REQUIRE(run.joseph_pd_all);
 }
 
-TEST_CASE("S6 NIS is the local over-confidence lever: understating R drives NIS above dof",
-          "[sdk][s6][update]") {
+TEST_CASE("S6 NIS is the local over-confidence lever: understating R drives NIS above dof", "[sdk][s6][update]") {
     const auto lo = ev::update_nis_run<T>(kM, kTrials, 0.5, 0xC0FFEEull);
     const auto matched = ev::update_nis_run<T>(kM, kTrials, 1.0, 0xC0FFEEull);
     const auto hi = ev::update_nis_run<T>(kM, kTrials, 2.0, 0xC0FFEEull);

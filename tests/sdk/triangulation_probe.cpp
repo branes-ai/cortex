@@ -34,13 +34,12 @@ TEST_CASE("S5 triangulate recovers correct depth from clean observations at ever
         // The geometry is correct everywhere: clean-observation depth error and
         // reprojection are both ~0. The danger is the UNCERTAINTY, not the point.
         REQUIRE(p.status_ok);
-        REQUIRE(p.depth_error_mm < 1.0);   // sub-mm on a 5 m point
-        REQUIRE(p.reproj_rms_px < 0.05);   // the solution reprojects on top of the obs
+        REQUIRE(p.depth_error_mm < 1.0);  // sub-mm on a 5 m point
+        REQUIRE(p.reproj_rms_px < 0.05);  // the solution reprojects on top of the obs
     }
 }
 
-TEST_CASE("S5 triangulation condition number improves monotonically with parallax",
-          "[sdk][s5][triangulation]") {
+TEST_CASE("S5 triangulation condition number improves monotonically with parallax", "[sdk][s5][triangulation]") {
     const auto sweep = ev::triangulation_parallax_sweep<T>(5.0, 1.0, 400);
     // cond(A) is a deterministic function of the geometry — strictly decreasing as
     // the rays separate. This is the geometric conditioner of depth.
@@ -69,8 +68,7 @@ TEST_CASE("S5 low-parallax depth is uncertain past budget while high-parallax is
     REQUIRE(hi.condition_number < 1e4);  // well-conditioned
 }
 
-TEST_CASE("S5 the suggested soft parallax gate sits at a finite, sane threshold",
-          "[sdk][s5][triangulation]") {
+TEST_CASE("S5 the suggested soft parallax gate sits at a finite, sane threshold", "[sdk][s5][triangulation]") {
     const auto sweep = ev::triangulation_parallax_sweep<T>(5.0, 1.0, 400);
     // The probe reports the smallest swept parallax whose depth σ is within the 5%
     // budget. It must be a real, finite threshold inside the swept band — the basis

@@ -57,12 +57,12 @@ using SO3 = math::lie::SO3<T>;
 // UPDATE, not triangulation degeneracy (that is S5's probe).
 template <math::Scalar T>
 struct Scene {
-    T baseline = T{4} / T{10};                       // clone-to-clone translation (m)
-    Vec3<T> F{{T{3} / T{10}, T{-1} / T{5}, T{5}}};    // feature in world (m)
-    T sigma_theta = T{873} / T{100000};              // clone attitude σ ≈ 0.5° (rad)
-    T sigma_pos = T{2} / T{100};                      // clone position σ (m)
-    T sigma_meas = T{5} / T{1000};                    // assumed normalized image σ
-    T sigma_imu = T{1} / T{100};                       // IMU-block σ (untouched by cam update)
+    T baseline = T{4} / T{10};                      // clone-to-clone translation (m)
+    Vec3<T> F{{T{3} / T{10}, T{-1} / T{5}, T{5}}};  // feature in world (m)
+    T sigma_theta = T{873} / T{100000};             // clone attitude σ ≈ 0.5° (rad)
+    T sigma_pos = T{2} / T{100};                    // clone position σ (m)
+    T sigma_meas = T{5} / T{1000};                  // assumed normalized image σ
+    T sigma_imu = T{1} / T{100};                    // IMU-block σ (untouched by cam update)
 };
 }  // namespace upd_detail
 
@@ -70,14 +70,14 @@ struct Scene {
 /// mismatch. `noise_scale` = 1 is the self-consistent case (NIS/dof → 1).
 template <math::Scalar T>
 struct NisRun {
-    T noise_scale = T{1};     ///< injected σ ÷ assumed σ (1 = matched)
-    T mean_nis = T{0};        ///< mean projected NIS over the updates
-    T nis_over_dof = T{0};    ///< mean_nis / dof — the headline (target 1 at matched)
-    std::size_t dof = 0;      ///< projected residual dimension per update (2m−3)
-    std::size_t samples = 0;  ///< updates accumulated
+    T noise_scale = T{1};              ///< injected σ ÷ assumed σ (1 = matched)
+    T mean_nis = T{0};                 ///< mean projected NIS over the updates
+    T nis_over_dof = T{0};             ///< mean_nis / dof — the headline (target 1 at matched)
+    std::size_t dof = 0;               ///< projected residual dimension per update (2m−3)
+    std::size_t samples = 0;           ///< updates accumulated
     T band_lo = T{0}, band_hi = T{0};  ///< χ² consistency band on nis_over_dof
-    bool consistent = false;  ///< nis_over_dof within the band
-    bool joseph_pd_all = true;  ///< P stayed positive-definite after every update
+    bool consistent = false;           ///< nis_over_dof within the band
+    bool joseph_pd_all = true;         ///< P stayed positive-definite after every update
 };
 
 /// Drive the SHIPPED CameraUpdater::update `trials` times on the isolated scene.
@@ -87,10 +87,8 @@ struct NisRun {
 /// accumulates the projected NIS. Returns the mean NIS/dof and whether Joseph kept
 /// P PSD throughout.
 template <math::Scalar T>
-[[nodiscard]] NisRun<T> update_nis_run(std::size_t m = 4,
-                                       std::size_t trials = 4000,
-                                       T noise_scale = T{1},
-                                       std::uint64_t seed = 0xC0FFEEull) {
+[[nodiscard]] NisRun<T>
+update_nis_run(std::size_t m = 4, std::size_t trials = 4000, T noise_scale = T{1}, std::uint64_t seed = 0xC0FFEEull) {
     using namespace upd_detail;
     namespace ms = branes::sdk::msckf;
     using Obs = ms::CameraObservation<T>;
@@ -141,7 +139,8 @@ template <math::Scalar T>
             // Belief = true ⊞ draw from P: R ← Exp(δθ), p ← p + δp.
             const Vec3<T> dth{{sc.sigma_theta * g(), sc.sigma_theta * g(), sc.sigma_theta * g()}};
             const Vec3<T> dp{{sc.sigma_pos * g(), sc.sigma_pos * g(), sc.sigma_pos * g()}};
-            s.clones.push_back({SO3<T>::exp(dth), Vec3<T>{{p_true[0] + dp[0], p_true[1] + dp[1], p_true[2] + dp[2]}},
+            s.clones.push_back({SO3<T>::exp(dth),
+                                Vec3<T>{{p_true[0] + dp[0], p_true[1] + dp[1], p_true[2] + dp[2]}},
                                 static_cast<double>(c)});
             // True observation from the TRUE pose (identity rotation) + image noise.
             const Vec3<T> pc{{sc.F[0] - p_true[0], sc.F[1] - p_true[1], sc.F[2] - p_true[2]}};
@@ -238,7 +237,7 @@ template <math::Scalar T>
 template <math::Scalar T>
 struct UpdateProbe {
     NullspaceCheck<T> nullspace;
-    NisRun<T> matched;          ///< noise_scale = 1
+    NisRun<T> matched;             ///< noise_scale = 1
     std::vector<NisRun<T>> sweep;  ///< NIS/dof vs injected-noise mismatch
 };
 

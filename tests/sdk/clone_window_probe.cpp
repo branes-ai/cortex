@@ -50,7 +50,7 @@ TEST_CASE("S3 augment then marginalize the fresh clone restores P exactly (round
     REQUIRE(r.roundtrip_err < kEps);
 }
 
-TEST_CASE("S9 marginalize is exact principal-submatrix extraction — kept marginal unchanged",
+TEST_CASE("S9 marginalize is exact principal-submatrix extraction - kept marginal unchanged",
           "[sdk][s9][marginalization][clone-window]") {
     const auto r = ev::marginalization_probe<T>();
 
