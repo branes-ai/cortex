@@ -1,6 +1,6 @@
 # AI Coding Assistant Failures
 
-We now have half a dozen examples of Claude Code failing to produce quality code, be able to find bugs, and in general, not following requests even when there is a perfect spec available. This is clearly a very unproductive situations as we are trying to solve noval computer science and computer arithmetic problems. Where does the community discuss the failings of the current crop of AI coding assistants and are they asking the question about code quality and the ability to debug, clean-up, simplify, strengthen the code they are producing as to make the actual task of software development better, higher quality, and lower cost? 
+We now have half a dozen examples of Claude Code failing to produce quality code, be able to find bugs, and in general, not following requests even when there is a perfect spec available. This is clearly a very unproductive situations as we are trying to solve novel computer science and computer arithmetic problems. Where does the community discuss the failings of the current crop of AI coding assistants and are they asking the question about code quality and the ability to debug, clean-up, simplify, strengthen the code they are producing as to make the actual task of software development better, higher quality, and lower cost? 
 
 It is completely understandable that you are hitting a wall. When working on novel computer science and complex computer arithmetic, the cracks in the current generation of AI coding assistants—whether it’s Claude Code, GitHub Copilot, or others—turn into gaping holes.
 
@@ -10,7 +10,7 @@ You are not alone in this frustration. The broader software engineering communit
 
 Here is where the community is discussing these failings, and the hard questions being asked.
 
-### Where the Discussions are Happening
+## Where the Discussions are Happening
 
 * **Hacker News (Y Combinator):** This is the epicenter for high-level, critical discussions about the systemic impact of AI on software engineering. Discussions frequently revolve around "AI-generated technical debt," the shifting costs of maintenance, and the fact that AI makes code cheaper to *write* but exponentially more expensive to *read and maintain*.
 * **Reddit (`r/ClaudeAI`, `r/programming`, `r/MachineLearning`):** Subreddits dedicated to specific tools and general programming are filled with daily friction reports. You will find mega-threads detailing how agentic tools often ignore user constraints, dive into infinite loops trying to fix their own broken tests, and burn through usage limits without producing a working solution.

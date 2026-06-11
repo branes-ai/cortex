@@ -37,6 +37,7 @@
 #include <branes/sdk/msckf/state.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -89,6 +90,8 @@ struct NisRun {
 template <math::Scalar T>
 [[nodiscard]] NisRun<T>
 update_nis_run(std::size_t m = 4, std::size_t trials = 4000, T noise_scale = T{1}, std::uint64_t seed = 0xC0FFEEull) {
+    // MSCKF needs >= 2 observations (2m > 3); fewer underflows the size_t dof `2m-3`.
+    assert(m >= 2 && "update_nis_run: m (clones/observations) must be >= 2");
     using namespace upd_detail;
     namespace ms = branes::sdk::msckf;
     using Obs = ms::CameraObservation<T>;
@@ -184,6 +187,8 @@ struct NullspaceCheck {
 
 template <math::Scalar T>
 [[nodiscard]] NullspaceCheck<T> update_nullspace_check(std::size_t m = 4) {
+    // MSCKF needs >= 2 observations (2m > 3); fewer underflows the size_t dim `2m-3`.
+    assert(m >= 2 && "update_nullspace_check: m must be >= 2");
     using std::abs;
     const std::size_t rows = 2 * m;
 
