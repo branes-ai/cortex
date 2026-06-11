@@ -43,9 +43,10 @@ refuted FEJ experiment — is on
 | Diagonal-only process noise `Q_d` | [S2](/pipeline/stages/s2-imu-propagation/) | **Cleared** — drops only 0.35% of Q; propagation-only NEES consistent at shipped Q |
 | **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), [S10](/pipeline/stages/s10-online-calibration/) | **Leading** — explains the `R×4` component (1° extrinsic ≈ 8 px > 4.6 px assumed; full restore needs ~×32 because Q also undersized) |
 | Forward-backward outlier gate | [S4](/pipeline/stages/s4-frontend/) | **Gate added** (`fb_max_residual`), unit-tested, **default-off** pending end-to-end validation; RANSAC still future work |
-| Parallax gate on triangulation | [S5](/pipeline/stages/s5-triangulation/) | **Gate added** (`min_parallax_deg`), unit-tested, **default-off** — enabling it regresses synthetic ATE; needs EuRoC NEES validation |
+| Parallax gate on triangulation | [S5](/pipeline/stages/s5-triangulation/) | **Refuted as the fix** — gate (`min_parallax_deg`) validated end-to-end on V2_03: enabling it *regresses* ATE (0.27 → 1.99 m) and NEES (140 → 322) by starving the filter; the low-parallax admission is a real gap but not the driver. Kept **default-off** |
 | Isotropic initial covariance `P₀` | [S1](/pipeline/stages/s1-initialization/) | **Open** — measured: yaw seeded at 5.73° σ (same as leveled roll/pitch) despite being unobservable; first-frame over-confidence, resonates with attitude NEES |
-| χ² gate threshold / measurement noise `R` | S6 | **Open** |
+| Update algebra (null-space, Joseph, `S`) | [S6](/pipeline/stages/s6-msckf-update/) | **Cleared** — measured NIS/dof = 1.00 on a self-consistent `(P, R)` scene; null-space residual ~2e-16, Joseph PSD. The update faithfully propagates its inputs ⇒ over-confidence is **input-side** (`P⁻`/`R`), not the EKF math |
+| Measurement noise `R` understated (the lever) | [S6](/pipeline/stages/s6-msckf-update/) / [S10](/pipeline/stages/s10-online-calibration/) | **Leading** — S6 sweep shows NIS/dof rises 1 → 1.64 → 4.17 as true noise outgrows modeled `R`; the innovation-level image of the calibration `R×4` |
 
 <Aside type="tip" title="What 'refuted' means here">
   A candidate is only crossed off when a *measurement* rules it out. FEJ was a

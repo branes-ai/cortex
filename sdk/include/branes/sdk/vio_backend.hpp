@@ -45,6 +45,11 @@ struct VioConfig {
     /// Visual measurement σ in normalized image coordinates — the MSCKF camera
     /// update's R. Default matches the updater's historical hardcoded value.
     double camera_noise_normalized = 1.0e-2;
+    /// S5 parallax gate: reject a triangulation whose maximum inter-view parallax
+    /// is below this many degrees (degenerate depth — see the S5 probe). Default 0
+    /// = disabled; ~2–5° trades feature coverage for depth quality and must be
+    /// validated end-to-end before being turned on (docs/arch/vio-pipeline-canonical.md).
+    double min_parallax_deg = 0.0;
     int num_cameras = 1;  ///< 1 = mono, 2 = stereo
     int max_clones = 11;  ///< MSCKF sliding-window length
     /// Skip the stationary-window static init and bootstrap from the dynamic

@@ -619,16 +619,16 @@ compose. Probes that already exist in `sdk/include/branes/sdk/eval/` are marked 
 | S1 init | gravity residual≈0; ‖g‖ ok; init `P` honest on yaw/scale/b_a | init-P eigen check | partial |
 | S2 mean | `R∈SO(3)`; GT-injection error bounded | orthonormality; GT harness (#266) | partial |
 | S2 cov | `P` PSD; `Q_d` has θ–v–p cross terms; nullspace preserved | PSD monitor; **Q-structure test** | new |
-| S3 augment | clone marginal==pose marginal; cross-cov==pose cross-cov | block-equality assert | new |
+| S3 augment | clone marginal==pose marginal; cross-cov==pose cross-cov | block-equality assert | ✓ (tested, residual 0) |
 | S4 frontend | FB-consistent; coverage; inlier ratio | track stats; pixel-noise sweep | partial |
-| S5 triangulate | reproj<thresh; depth>0; parallax-gated | parallax / cond-number probe | new |
+| S5 triangulate | reproj<thresh; depth>0; parallax-gated | parallax / cond-number probe | ✓ (tested; no soft gate on admit path) |
 | S6a Jacobian | `rank(H_f)=3`; analytic==numeric; FEJ divergence | jacobian-diff; FEJ-divergence log | ✓ (FEJ log) |
-| S6b nullspace | `NᵀH_f≈0`; `NᵀN=I`; rows=2m−3 | orthonormality assert | new |
+| S6b nullspace | `NᵀH_f≈0`; `NᵀN=I`; rows=2m−3 | orthonormality assert | ✓ (tested, residual ~2e-16) |
 | S6c compress | exact (result == uncompressed) | equivalence test | n/a (absent) |
 | S6d gate | **NIS ~ χ²(dof)** | `eval/consistency.hpp` | ✓ |
 | S6e update | `P⁺` PSD (Joseph); on-manifold; FEJ frozen | PSD monitor | ✓ |
 | **filter** | **NEES≈dim, NIS≈dof, innovations white** | `eval/nav_consistency.hpp`, `innovation_whiteness.hpp` | ✓ |
-| S9 marg | `P'` PSD; kept-marginal invariant | extraction-invariance assert | new |
+| S9 marg | `P'` PSD; kept-marginal invariant | extraction-invariance assert | ✓ (tested, residual 0) |
 | S10 calib | calibration uncertainty represented | extrinsic/`t_d` sensitivity; calib-NEES | new |
 
 ---
@@ -659,10 +659,17 @@ ranked candidates, each a contract above with a test that decides it:
    `NEES ∝ 1/Q` — so the IMU process noise is approximately *consistent on its own*. The
    over-confidence is therefore **not** an S2/`Q` fault; it must enter at the update (S6) or via
    unmodeled calibration (S10). Fix the diagonal `Q` for correctness, but it is not the driver.
-3. **S5 — no parallax / conditioning gate on triangulated features.** Low-parallax features used
-   at full weight inject optimistic information; a prime suspect for the *V2_03 aggressive-motion
-   divergence* (separate from the tracked-sequence over-confidence). *Decisive test:* the parallax
-   sweep + a conditioning gate, then re-run V2_03.
+3. **S5 — no parallax / conditioning gate on triangulated features — gate REFUTED as the V2_03 fix
+   (measured 2026-06-11).** The shipped triangulator admits low-parallax features at full weight
+   (S5 probe: depth σ up to ~127% of depth, no soft gate). The decisive test was run end-to-end:
+   `min_parallax_deg` was plumbed through `VioConfig` + a `CORTEX_MIN_PARALLAX_DEG` knob and swept on
+   EuRoC **V2_03**. Enabling the gate **monotonically regressed both accuracy and consistency** —
+   ATE 0.27 m → 0.89 m (2°) → 1.99 m (5°); NIS 14.7 → 17.5 → 26.7; NEES 140 → 170 → 322 — because the
+   gate starves the fast-motion filter of the short-baseline features it depends on (a 5° gate drops
+   >half the updates: 21 585 → 10 180). So the low-parallax admission is a genuine contract gap but
+   **not** the V2_03 over-confidence driver; rejecting those features costs more than it saves. Keep
+   the gate **default-off**. The over-confidence is dominated by the other input-side source,
+   **S10 unmodeled calibration** (candidate #1).
 4. **S6d — gate threshold under aggressive motion.** A too-tight χ² gate rejects good measurements
    exactly when motion is hard, starving corrections → divergence. *Decisive test:* gate-threshold
    sweep on V2_03.
@@ -731,11 +738,47 @@ cleanly accounts for the **`R×4` component**, but full restoration needs more (
 raised `Q`), so #212 is multi-source — calibration + process noise + the S5 parallax gate. Figures:
 `docs/assessments/figures/s10/`.
 
-**The remaining stages (S3–S9) are scaffolds** — each prints its full contract and planned
-assessments and has an explicit fill-in point (add the computation to a `sdk/eval/*_probe.hpp`
-header, drive it from the `sN_*.cpp` like S0/S1/S2/S10). Wired: **S0, S1, S2, S10**. Next for #212:
-**S6** (update: NIS, null-space, χ² gating) and **S5** (parallax gate, for the V2_03 divergence) —
-the remaining over-confidence sources beyond the calibration `R×4` that S10 quantified.
+**S3, S5, and S9 are also wired** (drivers `s3_augmentation`, `s5_triangulation`,
+`s9_marginalization`; probe headers `clone_window_probe.hpp`, `triangulation_probe.hpp`) and now
+carry regression tests (`tests/sdk/clone_window_probe.cpp`, `tests/sdk/triangulation_probe.cpp`)
+that lock their readings as CI gates. Their measured verdicts:
+
+- **S3 augment — eliminated.** Clone marginal, cross-covariance, and augment∘marginalize round-trip
+  residuals are all **identically zero**: `P' = G P Gᵀ` with a copy-selection `G` is exact algebra,
+  so the clone carries the full correlation (no zero-cross-covariance inconsistency). Not a #212 source.
+- **S9 marginalize — eliminated.** Kept-marginal residual **identically zero**; `cov.marginalize` is
+  exact principal-submatrix extraction, `P'` stays PSD. Not a #212 source.
+- **S5 triangulate — confirmed optimistic-information injection.** Clean-geometry depth is correct at
+  every parallax, but the only guard is the *hard* Cholesky breakdown — there is **no soft parallax /
+  conditioning gate on the admit path**. At 0.1–1° parallax the depth σ under 1 px noise is 90–127% of
+  the depth itself (cond up to 1.3e6), yet `triangulate()` returns success and the feature reaches the
+  EKF update at full weight. The 5%-of-depth uncertainty budget is met only at **~5°**. The
+  `min_parallax_deg` gate exists but is **default-off** — the leading S5 candidate for the V2_03 divergence.
+
+**S6 is now wired** (`s6_msckf_update`, probe `sdk/eval/update_probe.hpp`, test
+`tests/sdk/update_probe.cpp`) — the consistency-critical stage, and its verdict closes the
+localization loop:
+
+- **S6 update — algebra measured-CONSISTENT.** Driven in isolation on a self-consistent `(P, R)`
+  scene (clone poses perturbed by a draw from the filter's own `P`, image noise at exactly the
+  assumed σ), the shipped `CameraUpdater::update` returns **NIS/dof = 1.002** (χ² band [0.98, 1.02],
+  4000 updates), with the left-null-space projection marginalizing the feature (`‖NᵀH_f‖ = 2.8e-16`)
+  via orthonormal reflectors (`‖NᵀN − I‖ = 2.2e-16`, so projected noise stays σ²I) at the correct
+  dimension `2m−3`, and Joseph keeping `P⁺` PSD on every update. A noise-mismatch sweep confirms the
+  lever: NIS/dof = 0.84 → **1.00** → 1.64 → 4.17 as injected noise outgrows the modeled `R`. **The
+  #212 over-confidence is therefore not in the update math — it enters via the INPUTS `P⁻`/`R`**
+  (the S2 process noise and the S10 unmodeled calibration), exactly as §5 hypothesized.
+  *Not yet instrumented:* the analytic-vs-numeric Jacobian check and FEJ-divergence telemetry (the
+  updater currently linearizes at the live poses, not a frozen first estimate).
+
+**The remaining scaffolds are S4, S7, S8.** With S0/S2/S3/S5/S6/S9/S10 measured, the over-confidence
+is conclusively localized to the **noise budget entering the update** (`P⁻`/`R`), with the EKF
+algebra itself measured-consistent (S6) and the S5 parallax-gate fix **refuted end-to-end** on V2_03.
+The leading driver is **S10 unmodeled calibration** (the quantified `R×4` component) alongside the
+process-noise budget — the fix is to *model those inputs* (online `T_CI`/`t_d` or a calibration term
+in `R`), not to gate features or rewrite the update. Next decisive measurement: the `CORTEX_R_SCALE`
+/ `CORTEX_Q_SCALE` sweep on V2_03/MH_05 to quantify how much of the residual NEES the honest
+calibration+process noise budget recovers.
 
 ### End-to-end noise→robustness demo
 
