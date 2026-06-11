@@ -276,6 +276,20 @@ void run_euroc_replay(
             WARN(label << ": CORTEX_R_SCALE='" << rs << "' ignored — not a positive number");
         }
     }
+    // S5 parallax-gate knob (#212 / V2_03 divergence): CORTEX_MIN_PARALLAX_DEG sets
+    // the minimum inter-view parallax (degrees) a triangulation must show to be
+    // admitted to the update. The S5 probe found the shipped triangulator admits
+    // 0.1–5° features (depth σ up to ~127% of depth) at full weight; this enables
+    // the gate end-to-end so its effect on ATE/NEES can be measured on real data.
+    if (const char* ps = std::getenv("CORTEX_MIN_PARALLAX_DEG")) {
+        double k = 0.0;
+        if (parse_scale(ps, k)) {
+            cfg.min_parallax_deg = k;
+            WARN(label << ": CORTEX_MIN_PARALLAX_DEG=" << k << " — S5 parallax gate enabled");
+        } else {
+            WARN(label << ": CORTEX_MIN_PARALLAX_DEG='" << ps << "' ignored — not a positive number");
+        }
+    }
 
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the

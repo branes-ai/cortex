@@ -166,6 +166,7 @@ public:
         // alongside the IMU process noise (the camera update's normalized σ).
         typename msckf::CameraUpdater<T>::Options uopts;
         uopts.normalized_sigma = static_cast<T>(config.camera_noise_normalized);
+        uopts.min_parallax_deg = static_cast<T>(config.min_parallax_deg);
         updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
 
         ImuInitConfig<T> icfg;

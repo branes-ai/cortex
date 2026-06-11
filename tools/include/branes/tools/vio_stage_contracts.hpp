@@ -163,7 +163,7 @@ inline const StageInfo kS6{"S6",
                             {"FEJ clone divergence", "deg / cm", "how far the frozen linearization point has drifted"}},
                            {"update_nis.csv", "update_jacobian.csv", "update_nullspace.csv", "update_fej_div.csv"},
                            "sdk/msckf/camera_updater.hpp, features/msckf_nullspace.hpp, msckf/covariance.hpp",
-                           "scaffold"};
+                           "wired"};
 
 // ── S7  SLAM-feature update (optional) ─────────────────────────────────────
 inline const StageInfo kS7{"S7",

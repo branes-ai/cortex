@@ -79,22 +79,62 @@ guarantees it under numeric error); `x⁺` retracted **on-manifold** (`R ⊞ δ�
 - **FEJ divergence** — `‖R_fej − R‖`, `‖p_fej − p‖` per clone, to confirm FEJ is
   actually engaging.
 
+### Measured — the update algebra is *consistent*, not just plausible
+
+The [S6 probe](/pipeline/diagnostic-methodology/) drives the **shipped**
+`CameraUpdater::update` in isolation on a self-consistent scene: each trial perturbs
+the clone poses by a draw from the filter's *own* covariance `P` and adds image
+noise of exactly the σ the filter assumes. Under correct linearization and an honest
+`(P, R)` the projected innovation is `χ²(2m−3)`, so **NIS/dof must converge to 1** —
+if the shipped code mis-scaled `R`, mis-built `H`, or broke the null-space noise
+structure, it would not. It does (4 clones ⇒ dof = 5; 4000 Monte-Carlo updates):
+
+| measurement | result | meaning |
+|---|---:|---|
+| `‖NᵀH_f‖` (feature marginalized) | **2.8 × 10⁻¹⁶** | the null-space eliminates the feature exactly |
+| `‖NᵀN − I‖` (orthonormality) | **2.2 × 10⁻¹⁶** | reflectors orthonormal ⇒ projected noise stays `σ²·I` |
+| projected residual dimension | **5 = 2m−3** | correct compressed dimension |
+| **NIS / dof @ matched `(P, R)`** | **1.002** (band [0.98, 1.02]) | **the update algebra is consistent** |
+| Joseph keeps `P⁺` PSD | **yes, every update** | the covariance update is numerically sound |
+
+The decisive row is **NIS/dof = 1.00**: fed honest inputs, the shipped triangulation,
+Jacobians, null-space projection, innovation covariance `S`, and Joseph update produce
+innovations sized *exactly* as predicted. So the #212 over-confidence is **not** in the
+S6 math — it enters through the **inputs** `P⁻` and `R`.
+
+The noise-mismatch sweep makes that lever explicit — hold the modeled `R` fixed and
+inject noise at a multiple of the assumed σ:
+
+| injected noise (× assumed σ) | NIS / dof |
+|---:|---:|
+| 0.5× | 0.84 |
+| **1× (matched)** | **1.00** |
+| 2× | 1.64 |
+| 4× | 4.17 |
+
+NIS climbs above dof exactly as the *true* measurement noise outgrows the *modeled*
+`R` — the **innovation-level image of the empirical "R×4"** that
+[S10](/pipeline/stages/s10-online-calibration/) attributes to unmodeled calibration.
+
 ## Interactive
 
 The **NIS** readout in the [3-D viewer](/vio/scene3d/) is this stage's health,
 live: it is the per-update χ² of S6d. When it climbs past 1 while the covariance
 ellipsoid stays small, S6's post-conditions are being violated.
 
-<Aside type="caution" title="Status">
-  The S6 **algebra is textbook-correct** — null-space orthonormality, QR exactness,
-  and the Joseph update check out; this stage is faithful to OpenVINS. The defect
-  behind the #212 over-confidence is therefore **not** the S6 algebra but **what
-  `R` and `P⁻` contain entering `S`** — which points back to
+<Aside type="tip" title="Status — algebra measured-consistent; over-confidence is upstream of S6">
+  The S6 **algebra is measured-consistent**, not merely plausible: on a
+  self-consistent `(P, R)` scene the shipped update returns **NIS/dof = 1.00** with
+  machine-zero null-space residuals and PSD-preserving Joseph updates. The defect
+  behind the #212 over-confidence is therefore **not** the S6 math but **what `R`
+  and `P⁻` contain entering `S`** — which points back to
   [S2 process noise](/pipeline/overview/) and
   [S0](/pipeline/stages/s0-sensor-models/) /
   [S10](/pipeline/stages/s10-online-calibration/) unmodeled calibration. Notably,
   the S6a **FEJ** fix — the prime textbook suspect — was implemented and **refuted
-  by measurement**. The full diagnostic chain is on
+  by measurement**. **Not yet instrumented here:** the analytic-vs-numeric Jacobian
+  check and FEJ-divergence telemetry (the current updater linearizes at the live
+  poses). The full diagnostic chain is on
   [Consistency Analysis](/pipeline/consistency-analysis/); the live decomposition
   on [Engineering Status](/pipeline/engineering-status/).
 </Aside>
