@@ -1155,6 +1155,8 @@ Here is how the `branes-ai/cortex` architecture must adapt to support an "all-kn
 
 ### The "Host Broker + Thin Client" Topology
 
+![Cortex runtime topology: unprivileged thin-client daemons (vio_daemon, slam_daemon, …) talk over a UDS + POSIX shared-memory IPC channel to the single privileged Resource Manager (Rust) broker, which owns /dev/kpu and dispatches domain-flow programs to the KPU spatial dataflow fabric.](../assessments/figures/architecture/cortex-topology.svg)
+
 To protect the computational spacetime of the KPU, the Rust Resource Manager must be decoupled from the individual algorithm containers. It must become the singular gateway to the hardware.
 
 **1. The Central Resource Manager (Host Level)**
