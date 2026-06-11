@@ -30,6 +30,20 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.43.0](https://github.com/branes-ai/cortex/compare/v0.42.0...v0.43.0) (2026-06-06)
+
+
+### Features
+
+* add the S4 forward-backward and S5 parallax outlier gates ([#323](https://github.com/branes-ai/cortex/issues/323)) ([73bcd81](https://github.com/branes-ai/cortex/commit/73bcd81c404d0f9e396680e190291da4c0e2e2f9))
+
+## [0.42.0](https://github.com/branes-ai/cortex/compare/v0.41.0...v0.42.0) (2026-06-06)
+
+
+### Features
+
+* wire the S4 visual-frontend probe + data-backed page ([#321](https://github.com/branes-ai/cortex/issues/321)) ([67ac45c](https://github.com/branes-ai/cortex/commit/67ac45c2282bdf23202339750c127d477e69e801))
+
 ## [0.41.0](https://github.com/branes-ai/cortex/compare/v0.40.1...v0.41.0) (2026-06-06)
 
 
