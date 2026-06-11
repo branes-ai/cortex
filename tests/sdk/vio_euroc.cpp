@@ -291,6 +291,21 @@ void run_euroc_replay(
         }
     }
 
+    // S10 calibration-uncertainty knob (#212): CORTEX_CALIB_ROT_SIGMA_DEG folds a
+    // camera↔IMU extrinsic-rotation σ (degrees) into the visual measurement noise R,
+    // so the filter stops treating the EuRoC T_CI as perfectly known. The S10 probe
+    // showed ~1° reproduces the empirical R×4; this enables the term end-to-end so
+    // its effect on NEES/NIS/ATE can be measured against the blunt CORTEX_R_SCALE.
+    if (const char* cs = std::getenv("CORTEX_CALIB_ROT_SIGMA_DEG")) {
+        double k = 0.0;
+        if (parse_scale(cs, k)) {
+            cfg.calib_ext_rot_sigma_deg = k;
+            WARN(label << ": CORTEX_CALIB_ROT_SIGMA_DEG=" << k << " — S10 calibration-uncertainty term enabled");
+        } else {
+            WARN(label << ": CORTEX_CALIB_ROT_SIGMA_DEG='" << cs << "' ignored — not a positive number");
+        }
+    }
+
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the
     // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests

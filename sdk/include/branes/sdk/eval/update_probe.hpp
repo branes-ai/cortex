@@ -88,8 +88,11 @@ struct NisRun {
 /// accumulates the projected NIS. Returns the mean NIS/dof and whether Joseph kept
 /// P PSD throughout.
 template <math::Scalar T>
-[[nodiscard]] NisRun<T>
-update_nis_run(std::size_t m = 4, std::size_t trials = 4000, T noise_scale = T{1}, std::uint64_t seed = 0xC0FFEEull) {
+[[nodiscard]] NisRun<T> update_nis_run(std::size_t m = 4,
+                                       std::size_t trials = 4000,
+                                       T noise_scale = T{1},
+                                       std::uint64_t seed = 0xC0FFEEull,
+                                       T calib_rot_sigma = T{0}) {
     // MSCKF needs >= 2 observations (2m > 3); fewer underflows the size_t dof `2m-3`.
     assert(m >= 2 && "update_nis_run: m (clones/observations) must be >= 2");
     using namespace upd_detail;
@@ -101,6 +104,9 @@ update_nis_run(std::size_t m = 4, std::size_t trials = 4000, T noise_scale = T{1
     opts.normalized_sigma = sc.sigma_meas;
     opts.enable_gating = false;  // collect the full NIS distribution, untruncated
     opts.min_parallax_deg = T{0};
+    // S10 calibration-uncertainty term: when set, it inflates the modeled R, so a
+    // run with injected noise_scale·σ becomes consistent again (the compensation).
+    opts.calib_rot_sigma = calib_rot_sigma;
     const ms::CameraUpdater<T> upd(std::vector<ms::CameraExtrinsics<T>>(1), opts);
 
     std::mt19937_64 rng(seed);
@@ -253,6 +259,38 @@ template <math::Scalar T>
     out.matched = update_nis_run<T>(m, trials, T{1}, 0xC0FFEEull);
     for (const T sc : {T{1} / T{2}, T{1}, T{2}, T{4}})
         out.sweep.push_back(update_nis_run<T>(m, trials, sc, 0xC0FFEEull));
+    return out;
+}
+
+/// S10 reading: the calibration-uncertainty term as the *principled* cure for the
+/// over-confidence the noise-mismatch sweep exposes. The filter is fed true image
+/// noise of `noise_scale·σ` but models only `σ` ⇒ NIS/dof ≫ 1 (the local image of
+/// the empirical "R×4"). The fix is not to rewrite the update but to put the
+/// missing variance where it belongs — in `R` — via the calibration term
+/// `calib_rot_sigma = σ·√(noise_scale²−1)`, which makes the modeled variance
+/// `σ² + calib_rot_sigma² = (noise_scale·σ)²` match the truth. NIS/dof then returns
+/// to ≈ 1. This is the innovation-level proof that **modeling the inputs** (S10),
+/// not the EKF algebra (S6, already measured-consistent), removes the #212 fault.
+template <math::Scalar T>
+struct CalibCompensation {
+    T noise_scale = T{2};      ///< true image noise ÷ assumed σ (the under-model)
+    T calib_rot_sigma = T{0};  ///< the S10 term applied to match it
+    NisRun<T> uncompensated;   ///< calib term off: NIS/dof ≫ 1 (over-confident)
+    NisRun<T> compensated;     ///< calib term on at the matching σ: NIS/dof ≈ 1
+};
+
+template <math::Scalar T>
+[[nodiscard]] CalibCompensation<T>
+update_calib_compensation(std::size_t m = 4, std::size_t trials = 4000, T noise_scale = T{2}) {
+    using std::sqrt;
+    assert(noise_scale >= T{1} && "update_calib_compensation: noise_scale must be >= 1");
+    const upd_detail::Scene<T> sc;
+    CalibCompensation<T> out;
+    out.noise_scale = noise_scale;
+    // The exact term that lifts the modeled variance σ² to (noise_scale·σ)².
+    out.calib_rot_sigma = sc.sigma_meas * sqrt(noise_scale * noise_scale - T{1});
+    out.uncompensated = update_nis_run<T>(m, trials, noise_scale, 0xC0FFEEull, T{0});
+    out.compensated = update_nis_run<T>(m, trials, noise_scale, 0xC0FFEEull, out.calib_rot_sigma);
     return out;
 }
 
