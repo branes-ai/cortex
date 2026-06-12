@@ -29,6 +29,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -114,8 +115,13 @@ struct State {
     /// `init`. The prior is what lets the filter *correct* the calibration
     /// rather than trust it perfectly (S10, issue #332).
     void enable_calibration(std::vector<CalibState> init, T rot_sigma, T trans_sigma) {
-        assert(clones.empty() && "enable_calibration must precede any clone");
-        assert(calib.empty() && "calibration already enabled");
+        // Layout invariants enforced in ALL builds (not just under assert): a late
+        // or repeated call would expand `cov` while every offset helper assumes the
+        // calibration block sits fixed right after the IMU.
+        if (!clones.empty())
+            throw std::logic_error("enable_calibration must precede any clone");
+        if (!calib.empty())
+            throw std::logic_error("enable_calibration: calibration already enabled");
         const std::size_t add = kCalibBlock * init.size();
         if (add == 0)
             return;

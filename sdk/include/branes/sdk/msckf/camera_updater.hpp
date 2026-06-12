@@ -185,7 +185,10 @@ public:
             // Online calibration (S10): every observation through this camera
             // contributes to its shared extrinsic block — that coupling across
             // the window is what makes T_CI observable. Off ⇒ no calib columns.
-            if (!s.calib.empty()) {
+            // Guard per-observation on the camera index: a partially-calibrated
+            // multi-camera setup estimates only the leading cameras (matching the
+            // `extrinsic_of` fallback), so cameras without a block contribute none.
+            if (obs[i].camera_index < s.calib.size()) {
                 const std::size_t coff = s.calib_offset(obs[i].camera_index);
                 for (std::size_t a = 0; a < 2; ++a)
                     for (std::size_t b = 0; b < 3; ++b) {
