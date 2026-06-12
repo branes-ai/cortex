@@ -99,6 +99,22 @@ struct CameraUpdaterOptions {
     /// for depth quality and must be validated end-to-end (it regresses the
     /// synthetic ATE while it may improve EuRoC NEES) before being turned on.
     T min_parallax_deg = T{0};
+    /// S10 calibration-uncertainty term (radians). The filter otherwise treats
+    /// the camera↔IMU calibration (extrinsics `T_CI`, time offset, intrinsics) as
+    /// PERFECTLY known, so its true uncertainty appears nowhere in the noise
+    /// budget and the update is over-confident (the #212 symptom; the empirical
+    /// "R×4 restores NEES" — see eval/calibration_probe.hpp). This carries the
+    /// dominant, depth-independent piece of that uncertainty — a camera↔IMU
+    /// **extrinsic-rotation** σ — directly in `R`: a bearing uncertainty δθ maps to
+    /// a normalized-image σ of ≈δθ, so the effective per-measurement variance
+    /// becomes `normalized_sigma² + calib_rot_sigma²`. The term is isotropic, so
+    /// the left-null-space projection still yields `σ²·I` on the surviving rows
+    /// (the S6 algebra is unchanged). **Default 0 (disabled).** At 1° (0.0175 rad)
+    /// with the default `normalized_sigma` this reproduces the empirical R×4
+    /// (variance ×(1 + (0.0175/0.01)²) ≈ ×4). The depth-dependent translation and
+    /// motion-dependent time-offset pieces are deferred — they are per-feature and
+    /// would break the isotropy this relies on.
+    T calib_rot_sigma = T{0};
 };
 
 template <math::Scalar T>
@@ -121,6 +137,8 @@ public:
             throw std::invalid_argument("CameraUpdater: normalized_sigma must be positive");
         if (opts_.enable_gating && !(opts_.chi2_per_dof > T{0}))
             throw std::invalid_argument("CameraUpdater: chi2_per_dof must be positive when gating");
+        if (opts_.calib_rot_sigma < T{0})
+            throw std::invalid_argument("CameraUpdater: calib_rot_sigma must be non-negative");
     }
 
     /// Triangulate, marginalize, gate, and (if accepted) apply the EKF
@@ -177,7 +195,11 @@ public:
         for (std::size_t i = 0; i < proj.rows; ++i)
             for (std::size_t j = 0; j < n; ++j)
                 H(i, j) = proj.H_x[i * n + j];
-        const T r2 = opts_.normalized_sigma * opts_.normalized_sigma;
+        // Effective per-measurement variance: the assumed image noise plus the
+        // S10 calibration-uncertainty term (isotropic, so the projected noise
+        // stays σ²·I on the surviving rows — the S6 invariant holds).
+        const T r2 = opts_.normalized_sigma * opts_.normalized_sigma + opts_.calib_rot_sigma * opts_.calib_rot_sigma;
+        const T meas_sigma = std::sqrt(r2);
         std::vector<T> R_diag(proj.rows, r2);
 
         // Innovation NIS (γ = rᵀ S⁻¹ r, dof = proj.rows), computed once (only
@@ -191,7 +213,7 @@ public:
                 T isum{0};
                 for (std::size_t k = 0; k < proj.rows; ++k)
                     isum += proj.r[k];
-                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid, isum / opts_.normalized_sigma};
+                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid, isum / meas_sigma};
             }
         }
         if (opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(proj.rows)))
