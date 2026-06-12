@@ -17,24 +17,7 @@ Operator containers (the SDK consumers and daemons) are **unprivileged thin
 clients**. They never touch hardware directly. They request execution over a Unix
 Domain Socket + POSIX shared-memory IPC channel, and the broker places the work.
 
-```text
-   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-   │ vio_daemon  │   │ slam_daemon │   │   …         │   unprivileged
-   │ (thin client)│  │ (thin client)│  │ thin clients│
-   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
-          │  UDS + POSIX shm (request / replay)
-          ▼                 ▼                 ▼
-   ┌──────────────────────────────────────────────────┐
-   │  Resource Manager (Rust)   ── the ONE broker      │
-   │  /dev/kpu · tile+memory allocation map · conflict  │
-   │  detection · release-on-completion                 │
-   └──────────────────────────────────────────────────┘
-                         │
-                         ▼  domain flow programs
-                   ┌───────────┐
-                   │    KPU    │   spatial dataflow fabric
-                   └───────────┘
-```
+![Cortex runtime topology: unprivileged thin-client daemons (vio_daemon, slam_daemon, …) talk over a UDS + POSIX shared-memory IPC channel to the single privileged Resource Manager (Rust) broker, which owns /dev/kpu and dispatches domain flow programs to the KPU spatial dataflow fabric.](/figures/architecture/cortex-topology.svg)
 
 ## The four surfaces
 
