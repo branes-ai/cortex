@@ -306,6 +306,20 @@ void run_euroc_replay(
         }
     }
 
+    // FEJ knob (#339): CORTEX_USE_FEJ evaluates the camera measurement Jacobians at
+    // each clone's frozen first-estimate pose, preserving the unobservable yaw null
+    // space (#337). The decisive measurement: does attitude-NEES fall from ~993 on
+    // the slow V1_01 sequence toward ~1 — the structural #212 fix?
+    if (const char* fj = std::getenv("CORTEX_USE_FEJ")) {
+        double k = 0.0;
+        if (parse_scale(fj, k)) {
+            cfg.use_fej = true;
+            WARN(label << ": CORTEX_USE_FEJ on — First-Estimates Jacobians enabled");
+        } else {
+            WARN(label << ": CORTEX_USE_FEJ='" << fj << "' ignored — not a positive number");
+        }
+    }
+
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the
     // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests

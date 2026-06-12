@@ -58,6 +58,13 @@ struct VioConfig {
     /// inflation. Validate end-to-end before turning on
     /// (docs/arch/vio-pipeline-canonical.md §S10).
     double calib_ext_rot_sigma_deg = 0.0;
+    /// First-Estimates Jacobians (FEJ): evaluate the camera measurement Jacobians
+    /// at each clone's frozen first-estimate pose instead of its current estimate
+    /// (residual still at the current pose). Preserves the unobservable yaw null
+    /// space so the filter stops fabricating information along it — the structural
+    /// fix for the #212 NEES over-confidence (issue #339; the leak the #337 probe
+    /// measures). Default off until the EuRoC attitude-NEES gate confirms it.
+    bool use_fej = false;
     int num_cameras = 1;  ///< 1 = mono, 2 = stereo
     int max_clones = 11;  ///< MSCKF sliding-window length
     /// Skip the stationary-window static init and bootstrap from the dynamic

@@ -1,9 +1,13 @@
 # The Canonical VIO Pipeline — Distilled for Contract-Driven Reconstruction
 
 > **Purpose.** We have a clean-room OpenVINS-style MSCKF that runs but is structurally
-> over-confident (NEES ≫ 1) and we have not been able to find the defect by trial and error
-> (FEJ was implemented and *refuted* by measurement — see `docs/assessments/vio-troubleshooting.md`).
-> This document goes back to first principles: it distills the **canonical** VIO pipeline as
+> over-confident (NEES ≫ 1). The defect is now **localized by measurement** to a **yaw
+> observability leak** (the `observability_probe`, #337): the camera Jacobian preserves the
+> 4-DoF unobservable null space at one consistent linearization but leaks into yaw at the
+> evolving estimate — matching attitude-NEES ≈ 993 on slow V1_01. The textbook fix is FEJ;
+> an early *unmeasured* FEJ attempt was "refuted", and a **measurement-only** FEJ (#339)
+> measurably **diverges** (it needs propagation-`Φ` FEJ too — `Φ`/`P` and `H` must share one
+> linearization). This document goes back to first principles: it distills the **canonical** VIO pipeline as
 > designed by OpenVINS (and contrasts MINS / VINS-Mono / ROVIO / ORB-SLAM3), decomposed into
 > discrete **stages**. Each stage is written as a *contract*: a type signature, the
 > **pre-conditions** that must hold on its inputs, the **post-conditions / invariants** that must
@@ -699,8 +703,22 @@ ranked candidates, each a contract above with a test that decides it:
 4. **S6d — gate threshold under aggressive motion.** A too-tight χ² gate rejects good measurements
    exactly when motion is hard, starving corrections → divergence. *Decisive test:* gate-threshold
    sweep on V2_03.
+5. **Yaw observability leak — the LEADING candidate for the dominant NEES symptom (measured
+   2026-06-12, #337/#339).** A motion-spectrum sweep split the over-confidence in two: NIS
+   (innovation) is motion-dependent (1.5 slow → 14.5 aggressive — the `t_d`/kinematics lever,
+   parked), but **NEES (state) is worst on the *slowest* sequence** (V1_01 NEES 436, **attitude-NEES
+   993**, with NIS a healthy 1.5). That inverse-with-motion signature is **spurious information gain
+   along the unobservable manifold**. The `observability_probe` confirms it: the camera Jacobian
+   annihilates the 4-DoF null space (translation + gravity-yaw) at one consistent linearization
+   (‖H·N‖_yaw = 2e-16) but **leaks into yaw** (0.15 at σ=2 cm, monotonic) when linearized at the
+   evolving estimate — the EKF has no FEJ anchor. *Fix:* FEJ — **but it must be applied to BOTH the
+   propagation `Φ` and the measurement `H`.** A measurement-only FEJ (#339) was measured and
+   **diverges** (MH_05 ATE 0.76 → 20.9 m, attitude-NEES 73 → 107k; V1_01 993 → 1336): with `P`/`Φ`
+   current-linearized and `H` first-estimate, the gain is inconsistent and the mean corrupts —
+   partial FEJ is worse than none (and likely why the original unmeasured FEJ was "refuted"). The
+   acceptance gate is the probe's yaw-leak-vs-σ curve → ~0; the system gate is attitude-NEES → ~1.
 
-These four are independent and individually testable. The discipline the user proposed —
+These five are independent and individually testable. The discipline the user proposed —
 probe + test + sensitivity per stage — is exactly what separates them: instead of one more global
 re-tune, each candidate has a *local* measurement that confirms or kills it. Per the standing
 guidance (`cortex-212-overconfidence-structural`), do not edit the estimator for #212 until the

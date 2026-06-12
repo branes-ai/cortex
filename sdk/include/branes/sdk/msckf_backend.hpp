@@ -170,6 +170,7 @@ public:
         // S10 calibration-uncertainty term: deg → rad, folded into R by the updater.
         constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
         uopts.calib_rot_sigma = static_cast<T>(config.calib_ext_rot_sigma_deg * kDegToRad);
+        uopts.use_fej = config.use_fej;  // FEJ: freeze the measurement linearization point (#339)
         updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
 
         ImuInitConfig<T> icfg;
