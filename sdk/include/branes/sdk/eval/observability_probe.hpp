@@ -204,18 +204,18 @@ observability_probe(std::size_t m = 5, std::size_t k = 6, T sigma = T{2} / T{100
     // standard-library implementations, whereas std::normal/uniform_distribution
     // is NOT — so the probe gates deterministically everywhere. Sign and growth
     // with σ are all the leak metric needs (it is not a statistical estimate).
-    auto g = [&]() -> T {
+    auto urand = [&]() -> T {
         const std::uint64_t bits = rng() >> 11;  // 53 high bits
         return T(static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0);
     };
     auto perturbed = [&](T s) {
         Scene<T> e = truth;
         for (auto& c : e.clones) {
-            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * g(), s * g(), s * g()}});
-            c.p = Vec3<T>{{c.p[0] + s * g(), c.p[1] + s * g(), c.p[2] + s * g()}};
+            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * urand(), s * urand(), s * urand()}});
+            c.p = Vec3<T>{{c.p[0] + s * urand(), c.p[1] + s * urand(), c.p[2] + s * urand()}};
         }
         for (auto& f : e.feats)
-            f = Vec3<T>{{f[0] + s * g(), f[1] + s * g(), f[2] + s * g()}};
+            f = Vec3<T>{{f[0] + s * urand(), f[1] + s * urand(), f[2] + s * urand()}};
         return e;
     };
 
