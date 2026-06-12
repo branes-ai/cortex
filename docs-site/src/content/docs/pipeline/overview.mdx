@@ -26,33 +26,7 @@ image triggers a **clone** of the current pose into a sliding window, the
 the resulting reprojection residuals drive the **MSCKF update** that corrects the
 whole window. Old clones are **marginalized** out.
 
-```
-            IMU (200–1000 Hz)                    Camera (20–30 Hz)
-                  │                                     │
-                  ▼                                     ▼
-        ┌───────────────────┐                 ┌───────────────────┐
-        │ S2 PROPAGATE      │                 │ S4 FRONTEND       │
-        │ mean + cov (Φ,Qd) │                 │ KLT track + RANSAC│
-        └─────────┬─────────┘                 └─────────┬─────────┘
-                  │ predicted state + P                 │ tracks
-                  ▼                                     ▼
-        ┌───────────────────┐  (new image)    ┌───────────────────┐
-        │ S3 AUGMENT/CLONE  │<────────────────│ S5 TRIANGULATE    │
-        └─────────┬─────────┘                 └─────────┬─────────┘
-                  │                                     │ p_f, observations
-                  │                                     ▼
-                  │                            ┌───────────────────┐
-                  │                            │ S6 MSCKF UPDATE   │
-                  │                            │ null-space → QR   │
-                  │                            │ → χ² gate → EKF   │
-                  │                            └─────────┬─────────┘
-                  ▼                                      │ corrected state + P
-        ┌───────────────────┐                            │
-        │ S9 MARGINALIZE    │<───────────────────────────┘
-        └───────────────────┘
-   S0 sensor models underlie everything; S1 init bootstraps;
-   S7 SLAM-features, S8 zero-velocity, S10 online-calibration are optional layers.
-```
+![VIO pipeline S0–S10 stage flow: a one-shot S1 initialization seeds the per-frame MSCKF cycle (S2 IMU propagation → S3 state augmentation → S4 visual frontend → S5 triangulation → S6 update → S9 marginalization), which loops every camera frame on the S0 sensor/calibration substrate; S7/S8/S10 are optional layers. Colour marks the measured #212 verdict — green stages are measured-consistent, amber stages (S1 initial covariance, S10 calibration) are the open input-side over-confidence candidates.](/figures/pipeline/vio_stage_flow.svg)
 
 ## The stages
 
