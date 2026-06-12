@@ -30,6 +30,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.45.1](https://github.com/branes-ai/cortex/compare/v0.45.0...v0.45.1) (2026-06-12)
+
+
+### Documentation
+
+* add VIO S0–S10 stage-flow SVG and replace the pipeline ASCII dataflow ([2b93b51](https://github.com/branes-ai/cortex/commit/2b93b512fd3405d3fcb69a6c8b4322f60869ee78))
+* add VIO S0–S10 stage-flow SVG; replace pipeline ASCII dataflow ([#330](https://github.com/branes-ai/cortex/issues/330)) ([2b93b51](https://github.com/branes-ai/cortex/commit/2b93b512fd3405d3fcb69a6c8b4322f60869ee78))
+
 ## [0.45.0](https://github.com/branes-ai/cortex/compare/v0.44.0...v0.45.0) (2026-06-12)
 
 
