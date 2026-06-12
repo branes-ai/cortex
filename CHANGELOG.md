@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.44.0](https://github.com/branes-ai/cortex/compare/v0.43.0...v0.44.0) (2026-06-11)
+
+
+### Features
+
+* **sdk:** S6 update probe; lock S3/S5/S6/S9 contracts by measurement ([#325](https://github.com/branes-ai/cortex/issues/325)) ([df6cafe](https://github.com/branes-ai/cortex/commit/df6cafe53035a9c7861852163a7afeafa7315aa5))
+
 ## [0.43.0](https://github.com/branes-ai/cortex/compare/v0.42.0...v0.43.0) (2026-06-06)
 
 
