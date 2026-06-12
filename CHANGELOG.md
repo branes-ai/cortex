@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.45.2](https://github.com/branes-ai/cortex/compare/v0.45.1...v0.45.2) (2026-06-12)
+
+
+### Bug Fixes
+
+* **docs:** make topology + VIO stage-flow SVGs readable in dark theme ([#334](https://github.com/branes-ai/cortex/issues/334)) ([623b34e](https://github.com/branes-ai/cortex/commit/623b34ec4924da28cda583b0a2fe240a792b4717))
+
 ## [0.45.1](https://github.com/branes-ai/cortex/compare/v0.45.0...v0.45.1) (2026-06-12)
 
 
