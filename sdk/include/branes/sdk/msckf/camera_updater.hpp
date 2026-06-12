@@ -182,6 +182,20 @@ public:
                     Hx[(row + a) * n + off + 3 + b] = -J.Hf(a, b);  // δp block = −Hf
                 }
             }
+            // Online calibration (S10): every observation through this camera
+            // contributes to its shared extrinsic block — that coupling across
+            // the window is what makes T_CI observable. Off ⇒ no calib columns.
+            // Guard per-observation on the camera index: a partially-calibrated
+            // multi-camera setup estimates only the leading cameras (matching the
+            // `extrinsic_of` fallback), so cameras without a block contribute none.
+            if (obs[i].camera_index < s.calib.size()) {
+                const std::size_t coff = s.calib_offset(obs[i].camera_index);
+                for (std::size_t a = 0; a < 2; ++a)
+                    for (std::size_t b = 0; b < 3; ++b) {
+                        Hx[(row + a) * n + coff + b] = J.Hext_theta(a, b);  // δθ_ic
+                        Hx[(row + a) * n + coff + 3 + b] = J.Hext_p(a, b);  // δp_ic
+                    }
+            }
         }
 
         // Marginalize the feature: left-null-space projection. The
@@ -234,19 +248,35 @@ public:
 
 private:
     // Per-observation projection h(p_f) and its Jacobians w.r.t. the
-    // feature position (Hf) and the clone orientation error (Htheta).
+    // feature position (Hf), the clone orientation error (Htheta), and — for
+    // online calibration (S10) — the camera↔IMU extrinsic error (Hext_theta on
+    // δθ_ic, Hext_p on δp_ic). The extrinsic blocks are always computed but only
+    // wired into H_x when calibration is being estimated.
     struct Jacobians {
         Vec2 h{};
         math::lie::detail::Mat<T, 2, 3> Hf{};
         math::lie::detail::Mat<T, 2, 3> Htheta{};
+        math::lie::detail::Mat<T, 2, 3> Hext_theta{};
+        math::lie::detail::Mat<T, 2, 3> Hext_p{};
     };
+
+    // The extrinsics to use for camera `cam`: the in-state estimate when online
+    // calibration is enabled (a calibration block exists for it), else the fixed
+    // construction-time value. Returned by value (CalibState and CameraExtrinsics
+    // share the same R_imu_cam / p_imu_cam fields).
+    template <class Cov>
+    Extrinsics extrinsic_of(const State<T, Cov>& s, std::size_t cam) const {
+        if (cam < s.calib.size())
+            return Extrinsics{s.calib[cam].R_imu_cam, s.calib[cam].p_imu_cam};
+        return cameras_[cam];
+    }
 
     // Camera-frame point of `p_f` for observation `o`. `y` is the feature
     // in the clone's IMU frame (needed for the orientation Jacobian).
     template <class Cov>
     bool to_camera(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
         const auto& cl = s.clones[o.clone_index];
-        const auto& ex = cameras_[o.camera_index];
+        const Extrinsics ex = extrinsic_of(s, o.camera_index);
         const Mat3 Rit = cl.R.inverse().matrix();
         const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
         y = Rit * (p_f - cl.p);          // feature in IMU frame
@@ -271,7 +301,7 @@ private:
         dh(1, 2) = -p_c[1] * inv * inv;
 
         const auto& cl = s.clones[o.clone_index];
-        const auto& ex = cameras_[o.camera_index];
+        const Extrinsics ex = extrinsic_of(s, o.camera_index);
         const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
         const Mat3 Rit = cl.R.inverse().matrix();
         const Mat3 M = Rct * Rit;  // ∂p_c/∂p_f
@@ -279,10 +309,47 @@ private:
         const Mat3 dpc_dtheta = Rct * math::lie::detail::hat(y);
         J.Hf = dh * M;
         J.Htheta = dh * dpc_dtheta;
+
+        // Online-calibration (S10) Jacobians. With p_c = R_icᵀ·(y − p_ic) and the
+        // right perturbation R_ic ← R_ic·Exp(δθ_ic): R_icᵀ ← Exp(−δθ_ic)·R_icᵀ, so
+        //   ∂p_c/∂δθ_ic = [p_c]×   and   ∂p_c/∂δp_ic = −R_icᵀ = −R_ct.
+        const Mat3 dpc_dext_theta = math::lie::detail::hat(p_c);
+        const math::lie::detail::Mat<T, 2, 3> dh_Rct = dh * Rct;
+        J.Hext_theta = dh * dpc_dext_theta;
+        for (std::size_t a = 0; a < 2; ++a)
+            for (std::size_t b = 0; b < 3; ++b)
+                J.Hext_p(a, b) = -dh_Rct(a, b);  // ∂h/∂δp_ic = −dh·R_ct
         return true;
     }
 
 public:
+    // Test/probe seam: the per-observation projection `h(p_f)` and its analytic
+    // Jacobians w.r.t. the feature, the clone orientation, and (S10) the
+    // extrinsic rotation/translation — exactly what `update()` stacks into H.
+    // Exposed so the S10 probe / tests can finite-difference the calibration
+    // Jacobians (the S5 triangulator is exposed the same way). `valid` is false
+    // if the feature is behind the camera.
+    struct ObsJacobians {
+        Vec2 h{};
+        math::lie::detail::Mat<T, 2, 3> Hf{};
+        math::lie::detail::Mat<T, 2, 3> Htheta{};
+        math::lie::detail::Mat<T, 2, 3> Hext_theta{};
+        math::lie::detail::Mat<T, 2, 3> Hext_p{};
+        bool valid = false;
+    };
+    template <class Cov>
+    ObsJacobians projection_jacobians(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f) const {
+        Jacobians J;
+        ObsJacobians out;
+        out.valid = project(s, o, p_f, J);
+        out.h = J.h;
+        out.Hf = J.Hf;
+        out.Htheta = J.Htheta;
+        out.Hext_theta = J.Hext_theta;
+        out.Hext_p = J.Hext_p;
+        return out;
+    }
+
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton
     // reprojection refinements. Solves Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C.
     // Public so the S5 stage probe (eval/triangulation_probe.hpp) can drive the
@@ -295,7 +362,7 @@ public:
         bearings.reserve(obs.size());
         for (const auto& o : obs) {
             const auto& cl = s.clones[o.clone_index];
-            const auto& ex = cameras_[o.camera_index];
+            const Extrinsics ex = extrinsic_of(s, o.camera_index);
             const Mat3 Rwc = (cl.R * ex.R_imu_cam).matrix();  // world ← camera
             const Vec3 center = cl.p + cl.R.matrix() * ex.p_imu_cam;
             Vec3 d = Rwc * Vec3{{o.xy[0], o.xy[1], T{1}}};

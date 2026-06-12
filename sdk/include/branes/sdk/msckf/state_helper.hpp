@@ -76,12 +76,19 @@ struct StateHelper {
         const std::vector<T> dx = s.cov.update(H, r, R_diag);
         assert(dx.size() == d && "ekf_update: covariance policy returned wrong δx length");
 
-        // Box-plus the mean: nav state then each clone.
+        // Box-plus the mean: nav state, then each calibration block, then each clone.
         s.R = s.R * SO3::exp(slice3(dx, State<T>::kTheta));
         s.p = s.p + slice3(dx, State<T>::kPos);
         s.v = s.v + slice3(dx, State<T>::kVel);
         s.bg = s.bg + slice3(dx, State<T>::kBg);
         s.ba = s.ba + slice3(dx, State<T>::kBa);
+        // Online extrinsics (S10): right-perturb the camera↔IMU rotation, add the
+        // translation. Empty unless calibration estimation is enabled (no-op then).
+        for (std::size_t j = 0; j < s.calib.size(); ++j) {
+            const std::size_t off = s.calib_offset(j);
+            s.calib[j].R_imu_cam = s.calib[j].R_imu_cam * SO3::exp(slice3(dx, off));
+            s.calib[j].p_imu_cam = s.calib[j].p_imu_cam + slice3(dx, off + 3);
+        }
         for (std::size_t c = 0; c < s.clones.size(); ++c) {
             const std::size_t off = s.clone_offset(c);
             s.clones[c].R = s.clones[c].R * SO3::exp(slice3(dx, off));

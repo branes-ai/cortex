@@ -58,8 +58,18 @@ struct VioConfig {
     /// inflation. Validate end-to-end before turning on
     /// (docs/arch/vio-pipeline-canonical.md §S10).
     double calib_ext_rot_sigma_deg = 0.0;
-    int num_cameras = 1;  ///< 1 = mono, 2 = stereo
-    int max_clones = 11;  ///< MSCKF sliding-window length
+    /// S10 online extrinsic calibration: estimate the camera↔IMU extrinsics
+    /// `T_CI` as filter state (one 6-DoF block per camera) instead of trusting
+    /// the configured value, so the filter *corrects* the calibration error
+    /// rather than down-weighting vision (issue #332 — the principled fix for the
+    /// #212 over-confidence, vs the blunt `calib_ext_rot_sigma_deg` R-term).
+    /// Default false. The two priors below seed the block's initial covariance —
+    /// how far the filter is allowed to move the calibration from the seed.
+    bool estimate_extrinsics = false;
+    double calib_ext_rot_prior_deg = 1.0;    ///< extrinsic-rotation prior σ (deg)
+    double calib_ext_trans_prior_mm = 10.0;  ///< extrinsic-translation prior σ (mm)
+    int num_cameras = 1;                     ///< 1 = mono, 2 = stereo
+    int max_clones = 11;                     ///< MSCKF sliding-window length
     /// Skip the stationary-window static init and bootstrap from the dynamic
     /// visual-inertial alignment instead. For a known moving start (the drone
     /// is already in motion at the first sample) the static check would only
