@@ -323,16 +323,26 @@ void run_euroc_replay(
             WARN(label << ": CORTEX_ESTIMATE_EXTRINSICS='" << es << "' ignored — not a positive number");
         }
     }
+    // The prior knobs only affect the filter when estimation is on; warn rather
+    // than silently configure an inert prior (or drop an invalid value).
     if (const char* rp = std::getenv("CORTEX_CALIB_ROT_PRIOR_DEG")) {
         double k = 0.0;
-        if (parse_scale(rp, k)) {
+        if (!parse_scale(rp, k)) {
+            WARN(label << ": CORTEX_CALIB_ROT_PRIOR_DEG='" << rp << "' ignored — not a positive number");
+        } else if (!cfg.estimate_extrinsics) {
+            WARN(label << ": CORTEX_CALIB_ROT_PRIOR_DEG=" << k << " ignored — CORTEX_ESTIMATE_EXTRINSICS is off");
+        } else {
             cfg.calib_ext_rot_prior_deg = k;
             WARN(label << ": CORTEX_CALIB_ROT_PRIOR_DEG=" << k);
         }
     }
     if (const char* tp = std::getenv("CORTEX_CALIB_TRANS_PRIOR_MM")) {
         double k = 0.0;
-        if (parse_scale(tp, k)) {
+        if (!parse_scale(tp, k)) {
+            WARN(label << ": CORTEX_CALIB_TRANS_PRIOR_MM='" << tp << "' ignored — not a positive number");
+        } else if (!cfg.estimate_extrinsics) {
+            WARN(label << ": CORTEX_CALIB_TRANS_PRIOR_MM=" << k << " ignored — CORTEX_ESTIMATE_EXTRINSICS is off");
+        } else {
             cfg.calib_ext_trans_prior_mm = k;
             WARN(label << ": CORTEX_CALIB_TRANS_PRIOR_MM=" << k);
         }
