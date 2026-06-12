@@ -148,9 +148,9 @@ template <math::Scalar T>
             // Belief = true ⊞ draw from P: R ← Exp(δθ), p ← p + δp.
             const Vec3<T> dth{{sc.sigma_theta * g(), sc.sigma_theta * g(), sc.sigma_theta * g()}};
             const Vec3<T> dp{{sc.sigma_pos * g(), sc.sigma_pos * g(), sc.sigma_pos * g()}};
-            s.clones.push_back({SO3<T>::exp(dth),
-                                Vec3<T>{{p_true[0] + dp[0], p_true[1] + dp[1], p_true[2] + dp[2]}},
-                                static_cast<double>(c)});
+            const SO3<T> Rc = SO3<T>::exp(dth);
+            const Vec3<T> cp{{p_true[0] + dp[0], p_true[1] + dp[1], p_true[2] + dp[2]}};
+            s.clones.push_back({Rc, cp, Rc, cp, static_cast<double>(c)});  // R_fej = R, p_fej = p
             // True observation from the TRUE pose (identity rotation) + image noise.
             const Vec3<T> pc{{sc.F[0] - p_true[0], sc.F[1] - p_true[1], sc.F[2] - p_true[2]}};
             obs.push_back(Obs{c, 0, {{pc[0] / pc[2] + inj * g(), pc[1] / pc[2] + inj * g()}}});

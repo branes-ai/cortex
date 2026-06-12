@@ -46,9 +46,21 @@ struct State {
     /// A cloned IMU pose (taken at an image time), kept in the window.
     /// Timestamps are wall-clock seconds — intentionally `double` (not the
     /// state scalar T), matching VioBackend / ImuMeasurement.
+    ///
+    /// `R_fej` / `p_fej` are the **first-estimate** pose: the value of `R`/`p`
+    /// captured when the clone was first augmented, then frozen for the clone's
+    /// lifetime. The EKF update keeps moving `R`/`p` (the best mean) but must
+    /// NOT touch `R_fej`/`p_fej`. First-Estimates Jacobians (FEJ) linearize the
+    /// measurement at this frozen point — with all clones sharing a consistent
+    /// set of linearization points, the observability null space is preserved
+    /// and the filter stops fabricating information along the unobservable yaw
+    /// direction (issue #339; the leak the #337 probe measures). Residuals are
+    /// still evaluated at the current `R`/`p`.
     struct Clone {
         SO3 R{};
         Vec3 p{};
+        SO3 R_fej{};
+        Vec3 p_fej{};
         double timestamp = 0.0;
     };
 

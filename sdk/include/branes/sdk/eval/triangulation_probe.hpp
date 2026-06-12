@@ -132,8 +132,8 @@ template <math::Scalar T>
 
         // Two clones offset along x; both world-aligned (look +z).
         ms::State<T> s(T{1});
-        s.clones.push_back({SO3{}, Vec3{{-half_b, T{0}, T{0}}}, 0.0});
-        s.clones.push_back({SO3{}, Vec3{{half_b, T{0}, T{0}}}, 1.0});
+        s.clones.push_back({SO3{}, Vec3{{-half_b, T{0}, T{0}}}, SO3{}, Vec3{{-half_b, T{0}, T{0}}}, 0.0});
+        s.clones.push_back({SO3{}, Vec3{{half_b, T{0}, T{0}}}, SO3{}, Vec3{{half_b, T{0}, T{0}}}, 1.0});
 
         auto project_norm = [&](std::size_t i, const Vec3& p) {
             const auto& cl = s.clones[i];

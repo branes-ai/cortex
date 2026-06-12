@@ -115,6 +115,15 @@ struct CameraUpdaterOptions {
     /// motion-dependent time-offset pieces are deferred — they are per-feature and
     /// would break the isotropy this relies on.
     T calib_rot_sigma = T{0};
+    /// First-Estimates Jacobians (FEJ): evaluate the measurement Jacobians at each
+    /// clone's frozen first-estimate pose (`Clone::R_fej`/`p_fej`) instead of its
+    /// current estimate, while still computing the residual at the current pose.
+    /// This keeps the window's linearization points mutually consistent so the
+    /// stacked H preserves the unobservable null space (yaw) — the filter stops
+    /// fabricating information along it (issue #339; the leak the #337 observability
+    /// probe measures). **Default off** until the probe + EuRoC NEES gate confirm
+    /// it; on a window with no per-clone drift it is a no-op (R_fej == R).
+    bool use_fej = false;
 };
 
 template <math::Scalar T>
@@ -241,48 +250,93 @@ private:
         math::lie::detail::Mat<T, 2, 3> Htheta{};
     };
 
-    // Camera-frame point of `p_f` for observation `o`. `y` is the feature
-    // in the clone's IMU frame (needed for the orientation Jacobian).
-    template <class Cov>
-    bool to_camera(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
-        const auto& cl = s.clones[o.clone_index];
-        const auto& ex = cameras_[o.camera_index];
-        const Mat3 Rit = cl.R.inverse().matrix();
+    // Camera-frame point of `p_f` seen from an explicit clone pose (R_c, p_c_clone)
+    // through extrinsics `ex`. `y` is the feature in the IMU frame (needed for the
+    // orientation Jacobian). Pose-explicit so the residual can use the current
+    // estimate while the Jacobian uses the FEJ point.
+    bool
+    cam_point(const Extrinsics& ex, const SO3& R_c, const Vec3& p_c_clone, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
+        const Mat3 Rit = R_c.inverse().matrix();
         const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
-        y = Rit * (p_f - cl.p);          // feature in IMU frame
+        y = Rit * (p_f - p_c_clone);     // feature in IMU frame
         p_c = Rct * (y - ex.p_imu_cam);  // feature in camera frame
         return p_c[2] > T{0};            // must be in front of the camera
     }
 
+    // Camera-frame point at the clone's CURRENT estimate (used by triangulation).
+    template <class Cov>
+    bool to_camera(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Vec3& p_c, Vec3& y) const {
+        const auto& cl = s.clones[o.clone_index];
+        return cam_point(cameras_[o.camera_index], cl.R, cl.p, p_f, p_c, y);
+    }
+
     template <class Cov>
     bool project(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f, Jacobians& J) const {
-        Vec3 p_c, y;
-        if (!to_camera(s, o, p_f, p_c, y))
-            return false;
-        const T z = p_c[2];
-        const T inv = T{1} / z;
-        J.h = Vec2{{p_c[0] * inv, p_c[1] * inv}};
-
-        // ∂h/∂p_c = (1/z)[[1,0,−x/z],[0,1,−y/z]].
-        math::lie::detail::Mat<T, 2, 3> dh{};
-        dh(0, 0) = inv;
-        dh(0, 2) = -p_c[0] * inv * inv;
-        dh(1, 1) = inv;
-        dh(1, 2) = -p_c[1] * inv * inv;
-
         const auto& cl = s.clones[o.clone_index];
         const auto& ex = cameras_[o.camera_index];
+
+        // Residual: ALWAYS at the current estimate (the best mean).
+        Vec3 p_c, y;
+        if (!cam_point(ex, cl.R, cl.p, p_f, p_c, y))
+            return false;
+        {
+            const T inv = T{1} / p_c[2];
+            J.h = Vec2{{p_c[0] * inv, p_c[1] * inv}};
+        }
+
+        // Jacobian linearization point: the frozen first estimate under FEJ, else
+        // the current estimate. Falls back to current if the FEJ point is behind
+        // the camera (early, large-drift clones — rare).
+        Vec3 p_l = p_c, y_l = y;
+        if (opts_.use_fej) {
+            Vec3 p_cl, y_cl;
+            if (cam_point(ex, cl.R_fej, cl.p_fej, p_f, p_cl, y_cl)) {
+                p_l = p_cl;
+                y_l = y_cl;
+            }
+        }
+        const T inv = T{1} / p_l[2];
+        // ∂h/∂p_c = (1/z)[[1,0,−x/z],[0,1,−y/z]], at the linearization point.
+        math::lie::detail::Mat<T, 2, 3> dh{};
+        dh(0, 0) = inv;
+        dh(0, 2) = -p_l[0] * inv * inv;
+        dh(1, 1) = inv;
+        dh(1, 2) = -p_l[1] * inv * inv;
+
         const Mat3 Rct = ex.R_imu_cam.inverse().matrix();
-        const Mat3 Rit = cl.R.inverse().matrix();
+        const Mat3 Rit = (opts_.use_fej ? cl.R_fej : cl.R).inverse().matrix();
         const Mat3 M = Rct * Rit;  // ∂p_c/∂p_f
         // ∂p_c/∂δθ = R_camᵀ · [y]×  (right perturbation R ← R·Exp(δθ)).
-        const Mat3 dpc_dtheta = Rct * math::lie::detail::hat(y);
+        const Mat3 dpc_dtheta = Rct * math::lie::detail::hat(y_l);
         J.Hf = dh * M;
         J.Htheta = dh * dpc_dtheta;
         return true;
     }
 
 public:
+    // Test/probe seam: the per-observation prediction `h` and its Jacobians, as
+    // update() builds them — including the FEJ split (residual at the current
+    // pose, Jacobians at the frozen first estimate when `use_fej`). Exposed so the
+    // FEJ test (#339) can confirm the Jacobian is pinned to R_fej/p_fej while the
+    // residual tracks the current estimate. `valid` is false if behind the camera.
+    struct ObsPrediction {
+        Vec2 h{};
+        math::lie::detail::Mat<T, 2, 3> Hf{};
+        math::lie::detail::Mat<T, 2, 3> Htheta{};
+        bool valid = false;
+    };
+    template <class Cov>
+    [[nodiscard]] ObsPrediction
+    prediction(const State<T, Cov>& s, const CameraObservation<T>& o, const Vec3& p_f) const {
+        Jacobians J;
+        ObsPrediction out;
+        out.valid = project(s, o, p_f, J);
+        out.h = J.h;
+        out.Hf = J.Hf;
+        out.Htheta = J.Htheta;
+        return out;
+    }
+
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton
     // reprojection refinements. Solves Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C.
     // Public so the S5 stage probe (eval/triangulation_probe.hpp) can drive the

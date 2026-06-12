@@ -39,7 +39,10 @@ struct StateHelper {
             G(d + 3 + i, St::kPos + i) = T{1};  // clone δp_c = δp
         }
         s.cov.transform(G);
-        s.clones.push_back({s.R, s.p, s.timestamp});
+        // The first-estimate pose (R_fej, p_fej) is captured here, equal to the
+        // current pose, and then frozen — the EKF update moves R/p but never the
+        // _fej copies, so FEJ linearizes at a fixed point (issue #339).
+        s.clones.push_back({s.R, s.p, s.R, s.p, s.timestamp});
     }
 
     /// Drop clone `idx`: delete its 6 error-state rows/cols (a principal
