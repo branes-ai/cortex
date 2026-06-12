@@ -2,11 +2,26 @@
   <title id="title">Cortex runtime topology: Host Broker + Thin Client</title>
   <desc id="desc">Unprivileged thin-client daemons talk over a UDS + POSIX shared-memory IPC channel to the single privileged Resource Manager (Rust) broker, which dispatches domain flow programs to the KPU spatial dataflow fabric.</desc>
 
+  <style>
+    /* SVGs embedded via &lt;img&gt; cannot inherit the page's text colour, so
+       currentColor would fall back to black and vanish on a dark site theme.
+       Set the colour (which every currentColor fill/stroke inherits) and a
+       self-contained background here, switched by the viewer's colour scheme. */
+    svg { color: #1a1a1a; }
+    .theme-bg { fill: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      svg { color: #e6e6e9; }
+      .theme-bg { fill: #1c1e26; }
+    }
+  </style>
+
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
     </marker>
   </defs>
+
+  <rect class="theme-bg" x="0" y="0" width="720" height="600"/>
 
   <!-- ===== Thin clients (top row) ===== -->
   <text x="648" y="30" text-anchor="end" font-size="12" fill="currentColor" opacity="0.7" font-style="italic">unprivileged thin clients</text>
