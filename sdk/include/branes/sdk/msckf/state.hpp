@@ -7,8 +7,11 @@
 //
 // Error-state layout (world-centric, R = R_world_imu, right perturbation
 // R ← R·Exp(δθ)):
-//   [ δθ(3) δp(3) δv(3) δbg(3) δba(3) | per clone: δθ_c(3) δp_c(3) ... ]
-// so the covariance is (15 + 6·#clones) square.
+//   [ δθ(3) δp(3) δv(3) δbg(3) δba(3) | (opt) per cam: δθ_ic(3) δp_ic(3)
+//     | per clone: δθ_c(3) δp_c(3) ... ]
+// so the covariance is (15 + 6·#cams_calibrated + 6·#clones) square. The
+// optional per-camera calibration block (S10 online extrinsics) sits right
+// after the IMU and is absent unless `enable_calibration` was called.
 //
 // The covariance representation is a policy (`Cov`): `FullCovariance` carries
 // the dense P, `SqrtCovariance` carries the Cholesky factor S (P = S·Sᵀ). The
@@ -24,7 +27,9 @@
 #include <branes/sdk/msckf/covariance.hpp>
 #include <branes/sdk/msckf/dense.hpp>
 
+#include <cassert>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace branes::sdk::msckf {
@@ -42,6 +47,10 @@ struct State {
     static constexpr std::size_t kBa = 12;
     static constexpr std::size_t kImuDim = 15;
     static constexpr std::size_t kCloneDim = 6;
+    /// Per-camera online-calibration error-state block: extrinsic rotation
+    /// δθ_ic(3) + translation δp_ic(3). Optional (S10) — present only when
+    /// online extrinsic estimation is enabled (see `enable_calibration`).
+    static constexpr std::size_t kCalibBlock = 6;
 
     /// A cloned IMU pose (taken at an image time), kept in the window.
     /// Timestamps are wall-clock seconds — intentionally `double` (not the
@@ -52,6 +61,14 @@ struct State {
         double timestamp = 0.0;
     };
 
+    /// One camera's estimated extrinsics (camera pose in the IMU frame) when
+    /// online calibration is on — the in-state mirror of `CameraExtrinsics`.
+    /// `R_imu_cam` rotates camera axes into the IMU frame.
+    struct CalibState {
+        SO3 R_imu_cam{};
+        Vec3 p_imu_cam{};
+    };
+
     // Inertial navigation state (world frame).
     SO3 R{};    ///< world ← imu
     Vec3 p{};   ///< world position
@@ -60,6 +77,10 @@ struct State {
     Vec3 ba{};  ///< accel bias
     double timestamp = 0.0;
 
+    /// Optional in-state camera↔IMU extrinsics (one per camera). Empty unless
+    /// online calibration is enabled; when empty the layout and covariance are
+    /// bit-for-bit the fixed-calibration filter (the S10 term is inert).
+    std::vector<CalibState> calib;
     std::vector<Clone> clones;
     Cov cov;  ///< joint error-state covariance (representation-policy), dim() square
 
@@ -69,12 +90,56 @@ struct State {
     [[nodiscard]] std::size_t num_clones() const {
         return clones.size();
     }
-    [[nodiscard]] std::size_t dim() const {
-        return kImuDim + kCloneDim * clones.size();
+    /// Total error-state dimension of the optional calibration block.
+    [[nodiscard]] std::size_t calib_dim() const {
+        return kCalibBlock * calib.size();
     }
-    /// Error-state offset of clone `i`'s δθ block.
+    [[nodiscard]] std::size_t dim() const {
+        return kImuDim + calib_dim() + kCloneDim * clones.size();
+    }
+    /// Error-state offset of camera `j`'s calibration block (right after the IMU).
+    [[nodiscard]] std::size_t calib_offset(std::size_t j) const {
+        return kImuDim + kCalibBlock * j;
+    }
+    /// Error-state offset of clone `i`'s δθ block (after IMU + calibration).
     [[nodiscard]] std::size_t clone_offset(std::size_t i) const {
-        return kImuDim + kCloneDim * i;
+        return kImuDim + calib_dim() + kCloneDim * i;
+    }
+
+    /// Turn on online extrinsic calibration: append a fixed calibration block
+    /// right after the IMU, seeded with the given extrinsics mean and an
+    /// isotropic prior (rotation σ in rad, translation σ in metres). Must be
+    /// called before any clone exists (at initialization), so the new block
+    /// lands at `kImuDim` with no clone columns to shift. No-op for an empty
+    /// `init`. The prior is what lets the filter *correct* the calibration
+    /// rather than trust it perfectly (S10, issue #332).
+    void enable_calibration(std::vector<CalibState> init, T rot_sigma, T trans_sigma) {
+        assert(clones.empty() && "enable_calibration must precede any clone");
+        assert(calib.empty() && "calibration already enabled");
+        const std::size_t add = kCalibBlock * init.size();
+        if (add == 0)
+            return;
+        const std::size_t d0 = cov.dim();  // == kImuDim here (no clones yet)
+        // Expand P with a zero calibration block: P ← G P Gᵀ, G = [[I],[0]].
+        DynMat<T> G(d0 + add, d0);
+        for (std::size_t i = 0; i < d0; ++i)
+            G(i, i) = T{1};
+        cov.transform(G);
+        // Seed the prior on the calibration diagonal via P ← I P Iᵀ + diag(σ²).
+        DynMat<T> Iden(d0 + add, d0 + add);
+        for (std::size_t i = 0; i < d0 + add; ++i)
+            Iden(i, i) = T{1};
+        std::vector<NoiseTerm<T>> q;
+        q.reserve(add);
+        for (std::size_t j = 0; j < init.size(); ++j) {
+            const std::size_t off = kImuDim + kCalibBlock * j;
+            for (std::size_t a = 0; a < 3; ++a)
+                q.push_back({off + a, rot_sigma * rot_sigma});
+            for (std::size_t a = 0; a < 3; ++a)
+                q.push_back({off + 3 + a, trans_sigma * trans_sigma});
+        }
+        cov.predict(Iden, q);
+        calib = std::move(init);
     }
 
     /// Dense error-state covariance P for inspection / PSD checks. For the
