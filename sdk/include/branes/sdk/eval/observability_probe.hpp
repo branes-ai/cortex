@@ -81,11 +81,13 @@ template <math::Scalar T>
                  Vec3<T>{{T{4} / T{100} * std::sin(u), T{3} / T{100} * u - T{1} / T{10}, T{5} / T{100} * std::cos(u)}}),
              Vec3<T>{{T{3} / T{10} * u, T{1} / T{10} * std::sin(u), T{5} / T{100} * u}}});
     }
-    std::size_t made = 0;
-    for (int ix = -1; ix <= 1 && made < k; ++ix)
-        for (int iy = -1; iy <= 1 && made < k; ++iy, ++made)
-            s.feats.push_back(
-                Vec3<T>{{static_cast<T>(ix), static_cast<T>(iy), T{6} + T{1} / T{2} * static_cast<T>(made)}});
+    // Spread `k` features across a repeating 5×5 bearing grid at increasing depth —
+    // honours any requested count (not just a 3×3 = 9 cap).
+    for (std::size_t made = 0; made < k; ++made) {
+        const int ix = static_cast<int>(made % 5) - 2;
+        const int iy = static_cast<int>((made / 5) % 5) - 2;
+        s.feats.push_back(Vec3<T>{{static_cast<T>(ix), static_cast<T>(iy), T{6} + T{1} / T{4} * static_cast<T>(made)}});
+    }
     return s;
 }
 
@@ -198,15 +200,22 @@ observability_probe(std::size_t m = 5, std::size_t k = 6, T sigma = T{2} / T{100
     }
 
     std::mt19937_64 rng(seed);
-    std::normal_distribution<double> N01(0.0, 1.0);
+    // Portable uniform draw in [−1, 1): mt19937_64's output IS reproducible across
+    // standard-library implementations, whereas std::normal/uniform_distribution
+    // is NOT — so the probe gates deterministically everywhere. Sign and growth
+    // with σ are all the leak metric needs (it is not a statistical estimate).
+    auto g = [&]() -> T {
+        const std::uint64_t bits = rng() >> 11;  // 53 high bits
+        return T(static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0);
+    };
     auto perturbed = [&](T s) {
         Scene<T> e = truth;
         for (auto& c : e.clones) {
-            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * T(N01(rng)), s * T(N01(rng)), s * T(N01(rng))}});
-            c.p = Vec3<T>{{c.p[0] + s * T(N01(rng)), c.p[1] + s * T(N01(rng)), c.p[2] + s * T(N01(rng))}};
+            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * g(), s * g(), s * g()}});
+            c.p = Vec3<T>{{c.p[0] + s * g(), c.p[1] + s * g(), c.p[2] + s * g()}};
         }
         for (auto& f : e.feats)
-            f = Vec3<T>{{f[0] + s * T(N01(rng)), f[1] + s * T(N01(rng)), f[2] + s * T(N01(rng))}};
+            f = Vec3<T>{{f[0] + s * g(), f[1] + s * g(), f[2] + s * g()}};
         return e;
     };
 
