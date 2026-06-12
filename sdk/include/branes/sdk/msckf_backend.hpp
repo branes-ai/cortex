@@ -176,7 +176,7 @@ public:
         icfg.gravity_magnitude = static_cast<T>(config.gravity_magnitude);
         initializer_ = ImuInitializer<T>(icfg);
 
-        state_ = msckf::State<T, Cov>(kInitialSigma());
+        state_ = fresh_state();
         init_diag_ = InitDiagnostics<T>{};
         initialized_ = false;
         have_last_time_ = false;
@@ -344,6 +344,27 @@ private:
     static constexpr T kInitialSigma() {
         return T{1} / T{10};
     }
+
+    /// A fresh uninitialized state: isotropic IMU covariance, plus — when online
+    /// extrinsic calibration is enabled (#332) — a per-camera calibration block
+    /// seeded from the configured extrinsics and the configured prior σ. Used at
+    /// every state reset (initialize and both init-completion paths) so the
+    /// calibration block survives re-seeding. Inert when the flag is off.
+    [[nodiscard]] msckf::State<T, Cov> fresh_state() const {
+        msckf::State<T, Cov> s(kInitialSigma());
+        if (config_.estimate_extrinsics && !cameras_.empty()) {
+            using Calib = typename msckf::State<T, Cov>::CalibState;
+            std::vector<Calib> init;
+            init.reserve(cameras_.size());
+            for (const auto& cam : cameras_)
+                init.push_back(Calib{cam.extrinsics.R_imu_cam, cam.extrinsics.p_imu_cam});
+            constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+            const T rot_sigma = static_cast<T>(config_.calib_ext_rot_prior_deg * kDegToRad);
+            const T trans_sigma = static_cast<T>(config_.calib_ext_trans_prior_mm / 1000.0);
+            s.enable_calibration(std::move(init), rot_sigma, trans_sigma);
+        }
+        return s;
+    }
     static constexpr std::size_t kInitSamples = 50;      ///< static-init window
     static constexpr std::size_t kInitMaxSamples = 400;  ///< fall back past this (~2 s @ 200 Hz)
     /// Longer runway before the gravity-only fallback when the caller prefers
@@ -431,7 +452,7 @@ private:
     // Seed the state from an init result, record the diagnostics (measured
     // up-direction + gravity residual over the window), and finish.
     void apply_init(const ImuInitResult<T>& res, InitMethod method, double t) {
-        state_ = msckf::State<T, Cov>(kInitialSigma());
+        state_ = fresh_state();
         state_.R = res.R_world_imu;  // identity for a default-constructed result
         state_.bg = res.gyro_bias;
         state_.ba = res.accel_bias;
@@ -523,7 +544,7 @@ private:
     // attitude of the *first* keyframe; carry the vision relative rotation to
     // the last keyframe (the current pose) and take its velocity.
     void apply_dynamic_init(const ImuInitResult<T>& r, const sfm::InitWindowResult<T>& win, double t) {
-        state_ = msckf::State<T, Cov>(kInitialSigma());
+        state_ = fresh_state();
         const auto rel = win.keyframes.front().R_world_imu.inverse() * win.keyframes.back().R_world_imu;
         state_.R = r.R_world_imu * rel;
         state_.v = r.velocities_world.empty() ? DVec3{} : r.velocities_world.back();
