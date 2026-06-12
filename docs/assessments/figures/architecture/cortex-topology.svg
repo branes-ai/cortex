@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" role="img" aria-labelledby="title desc">
   <title id="title">Cortex runtime topology: Host Broker + Thin Client</title>
-  <desc id="desc">Unprivileged thin-client daemons talk over a UDS + POSIX shared-memory IPC channel to the single privileged Resource Manager (Rust) broker, which dispatches domain-flow programs to the KPU spatial dataflow fabric.</desc>
+  <desc id="desc">Unprivileged thin-client daemons talk over a UDS + POSIX shared-memory IPC channel to the single privileged Resource Manager (Rust) broker, which dispatches domain flow programs to the KPU spatial dataflow fabric.</desc>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
