@@ -30,6 +30,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.46.0](https://github.com/branes-ai/cortex/compare/v0.45.2...v0.46.0) (2026-06-12)
+
+
+### Features
+
+* **sdk:** online extrinsic calibration (S10-as-state), mechanism + synthetic proof ([#332](https://github.com/branes-ai/cortex/issues/332)) ([#333](https://github.com/branes-ai/cortex/issues/333)) ([e5fc23f](https://github.com/branes-ai/cortex/commit/e5fc23f235bd31cda7f82e5df8822b47fd5bf335))
+* **test:** EuRoC verdict — online extrinsic calibration cleared as [#212](https://github.com/branes-ai/cortex/issues/212) driver ([#332](https://github.com/branes-ai/cortex/issues/332)) ([#343](https://github.com/branes-ai/cortex/issues/343)) ([98488f6](https://github.com/branes-ai/cortex/commit/98488f6a0e5b8aa2a204accf52c0e380320277eb))
+
 ## [0.45.2](https://github.com/branes-ai/cortex/compare/v0.45.1...v0.45.2) (2026-06-12)
 
 
