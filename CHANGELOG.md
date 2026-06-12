@@ -30,6 +30,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.45.0](https://github.com/branes-ai/cortex/compare/v0.44.0...v0.45.0) (2026-06-12)
+
+
+### Features
+
+* **sdk:** add S10 calibration-uncertainty R-term; measure it end-to-end on V2_03 ([#328](https://github.com/branes-ai/cortex/issues/328)) ([bce345f](https://github.com/branes-ai/cortex/commit/bce345ff897d35134b8fb02479551ea682d1ea7a))
+
+
+### Documentation
+
+* render architecture topology as SVG; wire in orphaned S0 fisheye figures ([#327](https://github.com/branes-ai/cortex/issues/327)) ([af801c6](https://github.com/branes-ai/cortex/commit/af801c6dfd69fae88e5299f807a416ea80a14f41))
+
 ## [0.44.0](https://github.com/branes-ai/cortex/compare/v0.43.0...v0.44.0) (2026-06-11)
 
 
