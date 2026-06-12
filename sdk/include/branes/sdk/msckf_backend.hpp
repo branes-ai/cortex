@@ -167,6 +167,9 @@ public:
         typename msckf::CameraUpdater<T>::Options uopts;
         uopts.normalized_sigma = static_cast<T>(config.camera_noise_normalized);
         uopts.min_parallax_deg = static_cast<T>(config.min_parallax_deg);
+        // S10 calibration-uncertainty term: deg → rad, folded into R by the updater.
+        constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+        uopts.calib_rot_sigma = static_cast<T>(config.calib_ext_rot_sigma_deg * kDegToRad);
         updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
 
         ImuInitConfig<T> icfg;

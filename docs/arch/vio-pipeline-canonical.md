@@ -559,6 +559,14 @@ require.** Test directly: add a fixed extrinsic/time-offset uncertainty block (o
 toward dim without the blunt global `R ×4`, the over-confidence is unmodeled-calibration, not a
 filter-algebra bug.
 
+**Result (measured 2026-06-11, §1 candidate #1).** This was built (`calib_rot_sigma`, an
+isotropic extrinsic-rotation `R`-term) and swept on V2_03. The innovation responds exactly as
+predicted — **NIS 14.7 → 1.41** as the term grows — confirming `R` was understated. But **NEES and
+ATE regress** (the aggressive-motion filter is starved of vision and dead-reckons), so a *fixed
+isotropic* term is refuted as the fix for the same reason the global `R×4` is a crude proxy. The
+remaining principled path is **estimating** the calibration online (`T_CI`/`t_d` as state), which
+corrects the bias rather than down-weighting the signal — not a uniform noise inflation.
+
 ---
 
 ## 2. Cross-system contrast — what each reference changes per stage
@@ -640,17 +648,35 @@ marginalization-by-submatrix, FEJ storage all present and right). FEJ was implem
 by measurement. So the over-confidence is **not** in the parts that look hard in the papers. The
 ranked candidates, each a contract above with a test that decides it:
 
-1. **S10 — unmodeled calibration uncertainty — MEASURED, a quantified contributor.** The
-   `s10_online_calibration` probe (run 2026-06-05) confirms the analytic link: a realistic **1°
-   extrinsic uncertainty induces ~8 px of reprojection error — larger than the filter's assumed
-   ~4.6 px — for an R-inflation of ~4×, quantitatively matching the empirical `R×4`** from #212.
-   The end-to-end R-sweep reproduces the EuRoC over-confidence almost exactly (synthetic pose
-   **NEES ≈ 43 at R×1 ≈ MH_05's 43**), and R-inflation drives NEES back toward dof. Honest nuance:
-   R-*only* needs ~×33 for full consistency (the empirical fix paired `R×4` with `Q×10`), so
-   calibration cleanly accounts for the **`R×4` component** but is one contributor — the
-   over-confidence is multi-source (calibration + process noise + the S5 parallax gate). *Fix:*
-   model calibration uncertainty (estimate `T_CI`/`t_d` online, OpenVINS/MINS-style, or a
-   calibration term in `R`) rather than a blunt global `R`-scale.
+1. **S10 — unmodeled calibration uncertainty — diagnosis CONFIRMED, blunt `R`-term REFUTED as the
+   V2_03 fix (measured 2026-06-11).** The `s10_online_calibration` probe (run 2026-06-05) confirms
+   the analytic link: a realistic **1° extrinsic uncertainty induces ~8 px of reprojection error —
+   larger than the filter's assumed ~4.6 px — for an R-inflation of ~4×, quantitatively matching the
+   empirical `R×4`** from #212. The end-to-end R-sweep reproduces the EuRoC over-confidence almost
+   exactly (synthetic pose **NEES ≈ 43 at R×1 ≈ MH_05's 43**), and R-inflation drives NEES back
+   toward dof. **A physically-derived calibration term was then built and validated end-to-end:**
+   `CameraUpdaterOptions::calib_rot_sigma` folds a camera↔IMU extrinsic-rotation σ into the
+   measurement noise (isotropic, so the S6 null-space/Joseph algebra is unchanged), plumbed through
+   `VioConfig::calib_ext_rot_sigma_deg` + a `CORTEX_CALIB_ROT_SIGMA_DEG` knob; a unit test confirms
+   it restores NIS/dof → 1 on a self-consistent scene. **The decisive V2_03 sweep is a sharp,
+   instructive split:**
+
+   | V2_03 | calib off | 1° | 2° |
+   |---|---:|---:|---:|
+   | ATE (m) | **0.27** | 0.62 | 4.74 (diverged) |
+   | NIS (ideal ≈ dof) | 14.7 | 3.95 | **1.41** |
+   | NEES (ideal ≈ dim) | 140 | 101 | 3074 |
+
+   The term does **exactly** what the S6 probe predicted at the **innovation** level — NIS collapses
+   14.7 → 3.95 → 1.41, near-consistent at 2°, confirming R was genuinely understated and unmodeled
+   calibration is real. **But the *state* estimate regresses**: ATE blows up and NEES explodes,
+   because a blunt **global isotropic** `R`-inflation down-weights *all* vision uniformly, starving
+   the aggressive-motion filter into IMU dead-reckoning. This is the same lesson as the empirical
+   `R×4` (a "crude proxy") and the S5 gate: it **cures the symptom (NIS) and worsens the disease
+   (state divergence)**. *Verdict:* the calibration-uncertainty diagnosis holds, but the fix is to
+   **estimate** the calibration (online `T_CI`/`t_d` states, OpenVINS/MINS-style) — correcting the
+   bias — not to drown the visual signal under a uniform `R`-scale. Keep the term **default-off**;
+   it is a diagnostic instrument and a per-feature/anisotropic future, not the shipped remedy.
 2. **S2 — diagonal `Q_d` — MEASURED and largely DE-PRIORITIZED.** The `s2_propagation` probe
    (run 2026-06-04) confirms the cortex `Q_d` is diagonal and drops the canonical position-block
    (`¼σ_a²Δt³`) and v–p cross (`½σ_a²Δt²`) terms — but quantifies the cost as **~7% position-σ

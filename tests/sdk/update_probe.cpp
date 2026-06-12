@@ -68,3 +68,25 @@ TEST_CASE("S6 NIS is the local over-confidence lever: understating R drives NIS 
     REQUIRE(hi.nis_over_dof > 1.3);
     REQUIRE(hi2.nis_over_dof > 2.0);
 }
+
+TEST_CASE("S10 calibration-uncertainty term restores NIS to approx dof under under-modeled noise",
+          "[sdk][s10][update]") {
+    // True image noise is 2x the assumed sigma (filter treats calibration as
+    // perfect) => over-confident. Folding the missing variance into R via the S10
+    // calibration term is the principled cure: NIS/dof returns toward 1, with no
+    // change to the EKF algebra (S6 stays consistent).
+    const auto c = ev::update_calib_compensation<T>(kM, kTrials, /*noise_scale=*/2.0);
+
+    // Uncompensated: the under-modeled noise shows up as over-confidence.
+    REQUIRE(c.uncompensated.nis_over_dof > 1.3);
+    // The applied term is the exact sqrt(noise_scale^2 - 1) * sigma compensation.
+    REQUIRE(c.calib_rot_sigma > 0.0);
+    // Compensated: modeling the input restores consistency.
+    REQUIRE(c.compensated.nis_over_dof > 0.9);
+    REQUIRE(c.compensated.nis_over_dof < 1.1);
+    REQUIRE(c.compensated.consistent);
+    // Joseph still keeps P PSD with the inflated R.
+    REQUIRE(c.compensated.joseph_pd_all);
+    // The term strictly reduces the over-confidence.
+    REQUIRE(c.compensated.nis_over_dof < c.uncompensated.nis_over_dof);
+}
