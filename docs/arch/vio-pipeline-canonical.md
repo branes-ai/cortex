@@ -677,6 +677,30 @@ ranked candidates, each a contract above with a test that decides it:
    **estimate** the calibration (online `T_CI`/`t_d` states, OpenVINS/MINS-style) — correcting the
    bias — not to drown the visual signal under a uniform `R`-scale. Keep the term **default-off**;
    it is a diagnostic instrument and a per-feature/anisotropic future, not the shipped remedy.
+
+   **Online extrinsic estimation built and measured — spatial calibration largely CLEARED as the
+   driver (measured 2026-06-12, #332).** Following that verdict, the camera↔IMU extrinsics `T_CI`
+   (6-DoF/cam) were promoted to in-state estimation: a calibration block after the IMU, the
+   `∂h/∂δθ_ic`/`∂h/∂δp_ic` Jacobians (FD-validated to 1e-16), a prior, and the box-plus — gated by
+   `VioConfig::estimate_extrinsics` (default-off) + a `CORTEX_ESTIMATE_EXTRINSICS` knob. A synthetic
+   recovery test confirms the mechanism *works*: seeded ~2.9° off, the filter drives `T_CI` back to
+   <25% of the error. **But on V2_03 it does not resolve #212:**
+
+   | V2_03 | estimate off | on, 1°/10mm prior | on, 3°/30mm prior |
+   |---|---:|---:|---:|
+   | ATE (m) | **0.27** | 0.35 | 0.32 |
+   | NIS (ideal ≈ dof) | 14.7 | 14.7 | 14.5 |
+   | NEES (ideal ≈ dim) | 140 | 153 | **110** |
+   | innovation bias (mean_z) | −4.35 | −5.00 | −3.12 |
+
+   A generous prior extracts a *minor* real effect — NEES 140 → 110 (~21%) and the innovation bias
+   eases — so there is a *small* genuine extrinsic error. But the decisive number, **NIS, is
+   unchanged across the whole sweep** (~14.5–14.7): the innovations stay ~15× oversized no matter
+   what the extrinsic estimate does, and ATE never beats baseline. *Verdict:* the **spatial**
+   extrinsics are accurate enough on EuRoC that estimating them is **not** the #212 lever — the
+   unchanged NIS pins the dominant cause to understated **measurement noise `R`** and the unmodeled
+   **time offset `t_d`** (the EuRoC cam↔IMU temporal offset — the deferred Tier-2 calibration state),
+   not the spatial transform. Kept **default-off**. Next S10 lever: `t_d` as state.
 2. **S2 — diagonal `Q_d` — MEASURED and largely DE-PRIORITIZED.** The `s2_propagation` probe
    (run 2026-06-04) confirms the cortex `Q_d` is diagonal and drops the canonical position-block
    (`¼σ_a²Δt³`) and v–p cross (`½σ_a²Δt²`) terms — but quantifies the cost as **~7% position-σ

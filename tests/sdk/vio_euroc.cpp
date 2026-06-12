@@ -306,6 +306,38 @@ void run_euroc_replay(
         }
     }
 
+    // S10 online extrinsic-calibration knob (#332): CORTEX_ESTIMATE_EXTRINSICS
+    // estimates the camera↔IMU T_CI as state instead of trusting the EuRoC value,
+    // so the filter *corrects* the calibration rather than down-weighting vision
+    // (the refuted CORTEX_CALIB_ROT_SIGMA_DEG path). Measured on V2_03 (canonical
+    // §S10): it only minorly helps (NEES 140→110 at a 3° prior) and leaves NIS
+    // unchanged (~14.6) — the spatial extrinsics are accurate enough, so this is
+    // NOT the #212 lever; the time offset t_d (Tier-2) is. Kept default-off. The
+    // optional prior knobs tune how far the filter may move the seed.
+    if (const char* es = std::getenv("CORTEX_ESTIMATE_EXTRINSICS")) {
+        double k = 0.0;
+        if (parse_scale(es, k)) {
+            cfg.estimate_extrinsics = true;
+            WARN(label << ": CORTEX_ESTIMATE_EXTRINSICS on — T_CI estimated online (S10-as-state)");
+        } else {
+            WARN(label << ": CORTEX_ESTIMATE_EXTRINSICS='" << es << "' ignored — not a positive number");
+        }
+    }
+    if (const char* rp = std::getenv("CORTEX_CALIB_ROT_PRIOR_DEG")) {
+        double k = 0.0;
+        if (parse_scale(rp, k)) {
+            cfg.calib_ext_rot_prior_deg = k;
+            WARN(label << ": CORTEX_CALIB_ROT_PRIOR_DEG=" << k);
+        }
+    }
+    if (const char* tp = std::getenv("CORTEX_CALIB_TRANS_PRIOR_MM")) {
+        double k = 0.0;
+        if (parse_scale(tp, k)) {
+            cfg.calib_ext_trans_prior_mm = k;
+            WARN(label << ": CORTEX_CALIB_TRANS_PRIOR_MM=" << k);
+        }
+    }
+
     // NEES consistency vs ground truth (#264): per frame, sample the live nav
     // state + core covariance, anchor the unobservable yaw+position gauge at the
     // first post-init matched frame, and accumulate eᵀ P_core⁻¹ e. NEES tests
