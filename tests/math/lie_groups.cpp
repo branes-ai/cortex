@@ -4,6 +4,7 @@
 // finite-difference Jacobian checks run in double (FD needs the
 // precision). The exhaustive type-genericity matrix lives in #31.
 
+#include <branes/math/lie/se23.hpp>
 #include <branes/math/lie/se3.hpp>
 #include <branes/math/lie/sim3.hpp>
 #include <branes/math/lie/so3.hpp>
@@ -396,4 +397,54 @@ TEST_CASE("Sim3 admits a small positive scale and inverts it", "[math][lie][sim3
     const auto I = S * Si;
     REQUIRE(std::abs(double(I.scale()) - 1.0) < 1e-9);
     require_vec_close(I.translation(), det::Vec<double, 3>{{0.0, 0.0, 0.0}}, 1e-9);
+}
+
+// ── SE₂(3) extended pose (issue #347, the R-IEKF state manifold) ──────────────
+namespace {
+// Compare two SE₂(3) elements by (rotation geodesic, velocity, position).
+void require_se23_close(const lie::SE23<double>& a, const lie::SE23<double>& b, double tol) {
+    require_vec_close((a.rotation().inverse() * b.rotation()).log(), det::Vec<double, 3>{{0, 0, 0}}, tol);
+    require_vec_close(a.velocity(), b.velocity(), tol);
+    require_vec_close(a.position(), b.position(), tol);
+}
+}  // namespace
+
+TEST_CASE("SE23 exp/log round-trip", "[math][lie][se23]") {
+    using Tan = det::Vec<double, 9>;
+    const Tan xi{{0.1, -0.2, 0.15, 0.3, -0.1, 0.2, -0.4, 0.5, 0.1}};
+    const auto X = lie::SE23<double>::exp(xi);
+    require_vec_close(X.log(), xi, 1e-12);
+    // exp(0) is the identity.
+    const auto I = lie::SE23<double>::exp(Tan{});
+    require_se23_close(I, lie::SE23<double>{}, 1e-15);
+}
+
+TEST_CASE("SE23 compose and inverse", "[math][lie][se23]") {
+    using Tan = det::Vec<double, 9>;
+    const auto X = lie::SE23<double>::exp(Tan{{0.2, 0.1, -0.3, 0.5, -0.2, 0.4, 1.0, -0.5, 0.7}});
+    // X · X⁻¹ = identity.
+    require_se23_close(X * X.inverse(), lie::SE23<double>{}, 1e-12);
+    // Composition matches the 5×5 matrix product on the rotation/translation parts.
+    const auto Y = lie::SE23<double>::exp(Tan{{-0.1, 0.3, 0.2, -0.4, 0.1, 0.3, 0.2, 0.6, -0.3}});
+    const auto Z = X * Y;
+    require_vec_close(Z.velocity(), X.rotation() * Y.velocity() + X.velocity(), 1e-12);
+    require_vec_close(Z.position(), X.rotation() * Y.position() + X.position(), 1e-12);
+}
+
+TEST_CASE("SE23 adjoint satisfies X·exp(xi)·X^-1 = exp(Ad_X·xi)", "[math][lie][se23]") {
+    using Tan = det::Vec<double, 9>;
+    const auto X = lie::SE23<double>::exp(Tan{{0.3, -0.2, 0.1, 0.6, 0.2, -0.4, -0.7, 0.3, 0.5}});
+    const Tan xi{{0.02, -0.03, 0.05, 0.07, -0.04, 0.02, -0.06, 0.03, 0.04}};
+    const auto lhs = X * lie::SE23<double>::exp(xi) * X.inverse();
+    // Ad_X · xi (9×9 times 9-vector).
+    const auto Ad = X.adjoint();
+    Tan adxi{};
+    for (std::size_t i = 0; i < 9; ++i) {
+        double s = 0.0;
+        for (std::size_t j = 0; j < 9; ++j)
+            s += Ad(i, j) * xi[j];
+        adxi[i] = s;
+    }
+    const auto rhs = lie::SE23<double>::exp(adxi);
+    require_se23_close(lhs, rhs, 1e-10);
 }
