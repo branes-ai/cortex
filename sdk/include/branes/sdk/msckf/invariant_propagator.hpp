@@ -97,9 +97,19 @@ public:
         push_diag(q, 6, State::kBg, noise_.gyro_bias * noise_.gyro_bias * dt);
         push_diag(q, 9, State::kBa, noise_.accel_bias * noise_.accel_bias * dt);
         cov.predict(F, std::span<const NoiseTerm<T>>{q});
+        propagate_mean(s, gyro, accel, dt);
+    }
 
-        // Mean: the same strapdown integration as the body-frame filter (identical
-        // physics), carried on the SE₂(3) element.
+    /// Propagate ONLY the SE₂(3) mean (no covariance) — the same strapdown
+    /// integration as the body-frame filter (identical physics). Exposed so a
+    /// backend that carries a joint covariance can advance the mean without
+    /// touching a nav-only covariance. Ignores non-positive dt.
+    void propagate_mean(State& s, const Vec3& gyro, const Vec3& accel, T dt) const {
+        if (!(dt > T{0}))
+            return;
+        const Vec3 w = gyro - s.bg;
+        const Vec3 a = accel - s.ba;
+        const SO3& R = s.X.rotation();
         const Vec3 v = s.X.velocity();
         const Vec3 p = s.X.position();
         const Vec3 a_world = R * a + gravity_;
