@@ -78,3 +78,12 @@ TEST_CASE("R-IEKF Phase A: the right-invariant parameterization makes the yaw le
     // The invariant formulation is the cure: orders of magnitude flatter.
     REQUIRE(p.inv_sweep.back().second < 1e-6 * p.std_sweep.back().second);
 }
+
+TEST_CASE("R-IEKF Phase A: the invariant propagation Φ is state-independent", "[sdk][observability][riekf]") {
+    const auto p = ev::invariant_propagation_probe<T>();
+    // The body-frame Φ moves substantially when the linearization state changes
+    // (its −R[a]× / −[ω]× blocks) — the propagation source of the yaw leak…
+    REQUIRE(p.std_phi_state_drift > 1e-2);
+    // …while the right-invariant Φ does not move at all: it depends only on (g, dt).
+    REQUIRE(p.inv_phi_state_drift < 1e-12);
+}
