@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -25,6 +26,7 @@ using Vec2 = det::Vec<T, 2>;
 using SO3 = branes::math::lie::SO3<T>;
 using SE23 = branes::math::lie::SE23<T>;
 using Backend = ms::MsckfInvariantBackend<T>;
+using DynMat = ms::DynMat<T>;
 
 struct Pose {
     SO3 R;
@@ -122,6 +124,30 @@ TEST_CASE("invariant backend: propagate + augment + update runs and stays PSD", 
     REQUIRE(applied);
     REQUIRE(b.num_clones() == 2);
     REQUIRE(ms::is_positive_semidefinite(b.covariance()));
+}
+
+TEST_CASE("invariant backend: a degenerate (zero-baseline) track is rejected without side effects",
+          "[sdk][riekf][backend]") {
+    Backend b;
+    // Two clones at the SAME pose ⇒ zero baseline ⇒ degenerate triangulation.
+    const Pose pose = true_poses()[0];
+    b.set_nav(SE23(pose.R, Vec3{}, pose.p), Vec3{}, Vec3{});
+    b.augment_clone();
+    b.set_nav(SE23(pose.R, Vec3{}, pose.p), Vec3{}, Vec3{});
+    b.augment_clone();
+    const DynMat cov_before = b.covariance();
+
+    const Vec2 obs = project(pose, features()[6]);
+    const bool applied = b.update(ms::InvariantTrack<T>{{0, obs}, {1, obs}});
+    REQUIRE_FALSE(applied);  // low-parallax track rejected
+    REQUIRE(b.num_clones() == 2);
+    // Covariance untouched.
+    const DynMat cov_after = b.covariance();
+    T diff = T{0};
+    for (std::size_t i = 0; i < cov_before.rows; ++i)
+        for (std::size_t j = 0; j < cov_before.cols; ++j)
+            diff += std::abs(cov_after(i, j) - cov_before(i, j));
+    REQUIRE(diff < 1e-15);
 }
 
 TEST_CASE("invariant backend: the marginalized joint update annihilates the 4-DoF gauge",

@@ -86,8 +86,14 @@ template <math::Scalar T>
     }
     const T dt = A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                  A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
-    const T eps = T{1} / T{1000000000000};  // 1e-12
-    if (!(dt * dt > eps * eps))             // |det| > 1e-12 ⇒ non-degenerate (type-generic)
+    // Scale-aware degeneracy gate. A is a sum of NORMALISED ray projectors
+    // (I − d̂d̂ᵀ), so it is independent of feature distance; its conditioning is the
+    // parallax. Require det(A) > εᵣ·(tr(A)/3)³ — a dimensionless ratio (det vs the
+    // cube of the mean eigenvalue) that rejects low-parallax/ill-conditioned tracks
+    // regardless of how many observations are stacked, not just exact singularity.
+    const T mean_eig = (A(0, 0) + A(1, 1) + A(2, 2)) / T{3};
+    const T eps_rel = T{1} / T{10000};  // 1e-4 conditioning floor
+    if (!(dt > eps_rel * mean_eig * mean_eig * mean_eig))
         return {};
     auto cof = [&](std::size_t i, std::size_t j) {
         const std::size_t a1 = (j + 1) % 3, a2 = (j + 2) % 3, b1 = (i + 1) % 3, b2 = (i + 2) % 3;

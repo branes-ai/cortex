@@ -52,6 +52,10 @@ public:
         std::size_t max_clones = 11;         ///< sliding-window size
         T initial_sigma = T{1} / T{10};      ///< nav prior σ
         T normalized_sigma = T{1} / T{100};  ///< per-pixel (normalized) measurement σ
+        /// χ² innovation gate: reject a track when γ = rᵀS⁻¹r exceeds
+        /// `chi2_per_dof · (#projected rows)`. Loose default, matches the body path.
+        T chi2_per_dof = T{5};
+        bool enable_gating = true;
     };
 
     explicit MsckfInvariantBackend(const Config& cfg = {})
@@ -164,6 +168,14 @@ public:
             for (std::size_t j = 0; j < d; ++j)
                 H(i, j) = proj.H_x[i * d + j];
         const T r2 = cfg_.normalized_sigma * cfg_.normalized_sigma;
+        // χ² innovation gate: a single bad/low-parallax track can otherwise drive a
+        // large wrong correction. γ = rᵀS⁻¹r; reject if ill-conditioned or too large.
+        if (cfg_.enable_gating) {
+            T gamma = T{0};
+            const bool ok = cov_.mahalanobis(H, std::span<const T>{proj.r}, r2, gamma);
+            if (!ok || gamma > cfg_.chi2_per_dof * static_cast<T>(proj.rows))
+                return false;
+        }
         const std::vector<T> R_diag(proj.rows, r2);
         const std::vector<T> dx = cov_.update(H, std::span<const T>{proj.r}, std::span<const T>{R_diag});
 
