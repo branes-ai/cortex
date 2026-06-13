@@ -240,6 +240,15 @@ build_N_invariant(const std::vector<Pose<T>>& cl, const std::vector<Vec3<T>>& ff
     }
     return N;
 }
+
+// Portable uniform draw in [−1, 1) from a 64-bit engine — reproducible across
+// standard-library implementations (unlike std::uniform/normal_distribution), so
+// the probes gate deterministically everywhere. Sign and growth-with-σ are all the
+// leak metric needs (it is not a statistical estimate).
+template <math::Scalar T, class Rng>
+[[nodiscard]] T urand(Rng& rng) {
+    return T(static_cast<double>(rng() >> 11) * (2.0 / 9007199254740992.0) - 1.0);
+}
 }  // namespace obs_detail
 
 template <math::Scalar T>
@@ -271,22 +280,15 @@ observability_probe(std::size_t m = 5, std::size_t k = 6, T sigma = T{2} / T{100
     }
 
     std::mt19937_64 rng(seed);
-    // Portable uniform draw in [−1, 1): mt19937_64's output IS reproducible across
-    // standard-library implementations, whereas std::normal/uniform_distribution
-    // is NOT — so the probe gates deterministically everywhere. Sign and growth
-    // with σ are all the leak metric needs (it is not a statistical estimate).
-    auto urand = [&]() -> T {
-        const std::uint64_t bits = rng() >> 11;  // 53 high bits
-        return T(static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0);
-    };
+    auto rv = [&] { return obs_detail::urand<T>(rng); };  // portable reproducible draw
     auto perturbed = [&](T s) {
         Scene<T> e = truth;
         for (auto& c : e.clones) {
-            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * urand(), s * urand(), s * urand()}});
-            c.p = Vec3<T>{{c.p[0] + s * urand(), c.p[1] + s * urand(), c.p[2] + s * urand()}};
+            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * rv(), s * rv(), s * rv()}});
+            c.p = Vec3<T>{{c.p[0] + s * rv(), c.p[1] + s * rv(), c.p[2] + s * rv()}};
         }
         for (auto& f : e.feats)
-            f = Vec3<T>{{f[0] + s * urand(), f[1] + s * urand(), f[2] + s * urand()}};
+            f = Vec3<T>{{f[0] + s * rv(), f[1] + s * rv(), f[2] + s * rv()}};
         return e;
     };
 
@@ -336,17 +338,14 @@ invariant_observability_probe(std::size_t m = 5, std::size_t k = 6, std::uint64_
     out.inv_yaw_consistent = leak<T>(build_H_invariant<T>(truth.clones, truth.feats), N_inv).second;
 
     std::mt19937_64 rng(seed);
-    auto urand = [&]() -> T {
-        const std::uint64_t bits = rng() >> 11;
-        return T(static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0);
-    };
+    auto rv = [&] { return obs_detail::urand<T>(rng); };  // portable reproducible draw
     // Perturb the CLONES only (features at truth) — the per-clone linearization
     // drift that breaks the body-frame null space across the window.
     auto perturb_clones = [&](T s) {
         Scene<T> e = truth;
         for (auto& c : e.clones) {
-            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * urand(), s * urand(), s * urand()}});
-            c.p = Vec3<T>{{c.p[0] + s * urand(), c.p[1] + s * urand(), c.p[2] + s * urand()}};
+            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * rv(), s * rv(), s * rv()}});
+            c.p = Vec3<T>{{c.p[0] + s * rv(), c.p[1] + s * rv(), c.p[2] + s * rv()}};
         }
         return e;
     };
