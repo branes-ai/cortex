@@ -52,8 +52,7 @@ void retract_invariant(InvariantClone<T>& c,
                        const math::lie::detail::Vec<T, 3>& rho) {
     const math::lie::SO3<T> dR = math::lie::SO3<T>::exp(phi);
     c.R = dR * c.R;
-    const auto p = dR * c.p;
-    c.p = math::lie::detail::Vec<T, 3>{{p[0] + rho[0], p[1] + rho[1], p[2] + rho[2]}};
+    c.p = dR * c.p + rho;
 }
 
 /// The stacked invariant measurement of one feature track over the clone window,
@@ -85,9 +84,11 @@ template <math::Scalar T>
     M.r.assign(rows2, T{0});
 
     for (std::size_t i = 0; i < m; ++i) {
+        if (obs[i].clone_index >= clones.size())
+            return M;  // out-of-range clone reference; ok stays false
         const auto& c = clones[obs[i].clone_index];
         const Mat3 Rct = c.R.inverse().matrix();  // R_cᵀ (identity extrinsic)
-        const Vec3 y = Rct * Vec3{{p_f[0] - c.p[0], p_f[1] - c.p[1], p_f[2] - c.p[2]}};
+        const Vec3 y = Rct * (p_f - c.p);
         if (!(y[2] > T{0}))
             return M;  // ok stays false
         const T inv = T{1} / y[2];

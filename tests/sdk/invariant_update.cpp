@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -78,6 +79,7 @@ Vec3 triangulate(const Scene& s, const std::vector<ms::InvariantObs<T>>& obs) {
     }
     const T dt = A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                  A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
+    assert(std::abs(dt) > T{1e-12} && "triangulate: singular geometry (coplanar rays?)");
     auto cof = [&](int i, int j) {
         const int a1 = (j + 1) % 3, a2 = (j + 2) % 3, b1 = (i + 1) % 3, b2 = (i + 2) % 3;
         return (A(b1, a1) * A(b2, a2) - A(b1, a2) * A(b2, a1)) / dt;
