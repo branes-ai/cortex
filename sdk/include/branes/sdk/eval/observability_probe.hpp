@@ -402,10 +402,13 @@ template <math::Scalar T>
     return F;
 }
 
-// Right-invariant nav error-transition. STATE-INDEPENDENT: the only coupling is
-// the constant gravity cross [g]×; no [ω]× self-term, no R̂.
+// Right-invariant nav error-transition. The state args MIRROR nav_phi_standard's
+// signature but are DELIBERATELY IGNORED — that the rotation/rates do not enter
+// is the state-independence the probe asserts. The only coupling is the constant
+// gravity cross [g]×; no [ω]× self-term, no R̂.
 template <math::Scalar T>
-[[nodiscard]] msckf::DynMat<T> nav_phi_invariant(const Vec3<T>& g, T dt) {
+[[nodiscard]] msckf::DynMat<T>
+nav_phi_invariant(const SO3<T>& /*R*/, const Vec3<T>& /*omega*/, const Vec3<T>& /*accel*/, const Vec3<T>& g, T dt) {
     msckf::DynMat<T> F = msckf::DynMat<T>::identity(9);
     set_block<T>(F, 3, 0, math::lie::detail::hat(g) * dt);  // δv̇ = [g]× δθ  (constant)
     for (std::size_t i = 0; i < 3; ++i)
@@ -436,9 +439,13 @@ template <math::Scalar T>
     const Vec3<T> accel1{{T{-1} / T{10}, T{1} / T{20}, T{96} / T{10}}};
 
     InvariantPropagationProbe<T> out;
+    // Build each Φ at the SAME two distinct linearization states and measure how
+    // far it moves. The standard Φ moves (R̂/ω/a-dependent); the invariant Φ is
+    // handed the same two states and does not move at all (it ignores them).
     out.std_phi_state_drift =
         fro_diff<T>(nav_phi_standard<T>(R0, omega0, accel0, dt), nav_phi_standard<T>(R1, omega1, accel1, dt));
-    out.inv_phi_state_drift = fro_diff<T>(nav_phi_invariant<T>(g, dt), nav_phi_invariant<T>(g, dt));
+    out.inv_phi_state_drift =
+        fro_diff<T>(nav_phi_invariant<T>(R0, omega0, accel0, g, dt), nav_phi_invariant<T>(R1, omega1, accel1, g, dt));
     return out;
 }
 
