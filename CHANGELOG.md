@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.48.0](https://github.com/branes-ai/cortex/compare/v0.47.1...v0.48.0) (2026-06-13)
+
+
+### Features
+
+* **sdk:** R-IEKF Phase-A gate — invariant parameterization flattens the yaw leak ([#348](https://github.com/branes-ai/cortex/issues/348)) ([#349](https://github.com/branes-ai/cortex/issues/349)) ([427134e](https://github.com/branes-ai/cortex/commit/427134ea0516f31292b101428759cadcc7d2fdd3))
+
 ## [0.47.1](https://github.com/branes-ai/cortex/compare/v0.47.0...v0.47.1) (2026-06-13)
 
 
