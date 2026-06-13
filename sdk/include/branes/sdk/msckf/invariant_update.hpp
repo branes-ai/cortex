@@ -89,7 +89,11 @@ template <math::Scalar T>
         const auto& c = clones[obs[i].clone_index];
         const Mat3 Rct = c.R.inverse().matrix();  // R_cᵀ (identity extrinsic)
         const Vec3 y = Rct * (p_f - c.p);
-        if (!(y[2] > T{0}))
+        // Cheirality + a numerical-stability floor: a near-zero depth would make
+        // 1/y[2] explode and dominate the EKF correction. This is a blow-up guard,
+        // not a quality gate (track quality is screened upstream at triangulation).
+        constexpr T kMinDepth = T{1} / T{1000};  // 1 mm
+        if (!(y[2] > kMinDepth))
             return M;  // ok stays false
         const T inv = T{1} / y[2];
         math::lie::detail::Mat<T, 2, 3> dh{};
