@@ -478,7 +478,9 @@ TEST_CASE("SE23 exp/log and adjoint stay correct near a half-turn", "[math][lie]
     for (double ang : {3.0, 3.14159265358979}) {
         const Tan xi{{0.0, 0.0, ang, 0.4, -0.2, 0.3, -0.5, 0.6, 0.1}};  // |phi| ~ pi about +z
         const auto X = lie::SE23<double>::exp(xi);
-        require_vec_close(X.log(), xi, 1e-9);
+        // At the half-turn branch cut log is not unique, so check the
+        // group-invariant round-trip exp(log(X)) ≈ X instead of log(X) == xi.
+        require_se23_close(lie::SE23<double>::exp(X.log()), X, 1e-9);
         const Tan dxi{{0.01, -0.02, 0.0, 0.03, -0.01, 0.02, -0.04, 0.02, 0.03}};
         const auto Ad = X.adjoint();
         Tan adxi{};
