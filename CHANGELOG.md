@@ -30,6 +30,15 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.50.0](https://github.com/branes-ai/cortex/compare/v0.49.0...v0.50.0) (2026-06-13)
+
+
+### Features
+
+* **sdk:** add the R-IEKF invariant camera measurement update ([#347](https://github.com/branes-ai/cortex/issues/347)) ([#356](https://github.com/branes-ai/cortex/issues/356)) ([03d34ae](https://github.com/branes-ai/cortex/commit/03d34ae0a7fa1012bb91ca879de1c5da4bfa2134))
+* **sdk:** add the R-IEKF invariant IMU propagation on SE2(3) ([#347](https://github.com/branes-ai/cortex/issues/347)) ([#354](https://github.com/branes-ai/cortex/issues/354)) ([4b41726](https://github.com/branes-ai/cortex/commit/4b417268efba64020fda3e3165af257ceb8d6933))
+* **sdk:** wire the MsckfInvariantBackend (R-IEKF filter) ([#347](https://github.com/branes-ai/cortex/issues/347)) ([#357](https://github.com/branes-ai/cortex/issues/357)) ([30cd651](https://github.com/branes-ai/cortex/commit/30cd65130705558817c1ea2df03f4593f747786b))
+
 ## [0.49.0](https://github.com/branes-ai/cortex/compare/v0.48.0...v0.49.0) (2026-06-13)
 
 
