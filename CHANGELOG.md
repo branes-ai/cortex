@@ -30,6 +30,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.49.0](https://github.com/branes-ai/cortex/compare/v0.48.0...v0.49.0) (2026-06-13)
+
+
+### Features
+
+* **math:** add SE2(3) extended-pose Lie group — the R-IEKF state manifold ([#347](https://github.com/branes-ai/cortex/issues/347)) ([#353](https://github.com/branes-ai/cortex/issues/353)) ([1a7da91](https://github.com/branes-ai/cortex/commit/1a7da91b593e7065d0fdb09aae90562eccbf2870))
+* **sdk:** prove the right-invariant propagation Φ is state-independent (R-IEKF Phase A, [#348](https://github.com/branes-ai/cortex/issues/348)) ([#351](https://github.com/branes-ai/cortex/issues/351)) ([a0c35aa](https://github.com/branes-ai/cortex/commit/a0c35aafb60be143978b39c88675fa009dc1d116))
+
 ## [0.48.0](https://github.com/branes-ai/cortex/compare/v0.47.1...v0.48.0) (2026-06-13)
 
 
