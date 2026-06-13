@@ -38,7 +38,9 @@
 #define BRANES_SDK_EVAL_OBSERVABILITY_PROBE_HPP
 
 #include <branes/math/lie/so3.hpp>
+#include <branes/sdk/msckf/camera_updater.hpp>
 #include <branes/sdk/msckf/dense.hpp>
+#include <branes/sdk/msckf/state.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -91,32 +93,36 @@ template <math::Scalar T>
     return s;
 }
 
-// Stacked camera measurement Jacobian (identity extrinsic; the gauge argument is
-// independent of T_CI). Columns: [ per clone δθ(3) δp(3) | per feature δp(3) ].
-// Rows: 2 per (clone, feature) observation. This is exactly what the MSCKF update
-// builds (camera_updater.hpp): δθ block = dh·[y]×, δp block = −Hf, feature = Hf.
+// Stacked camera measurement Jacobian — a LIVE driver of the PRODUCTION
+// CameraUpdater (issue #337). Rather than mirror the Jacobian math, it builds an
+// msckf::State<T> whose clones sit at the linearization poses `cl` and reads the
+// SHIPPED `projection_jacobians` (the exact per-observation Jacobians update()
+// stacks into H). So this probe verifies the gauge property of the REAL filter
+// code — a regression in the production Jacobian now fails the observability test,
+// not just a copy of it. Identity extrinsic (the gauge argument is independent of
+// T_CI). Columns: [ per clone δθ(3) δp(3) | per feature δp(3) ]; rows: 2 per
+// (clone, feature). δθ block = Hθ, δp block = −Hf, feature = Hf.
 template <math::Scalar T>
 [[nodiscard]] msckf::DynMat<T> build_H(const std::vector<Pose<T>>& cl, const std::vector<Vec3<T>>& ff) {
     const std::size_t m = cl.size(), K = ff.size();
+    msckf::State<T> s(T{1});
+    s.clones.reserve(m);
+    for (std::size_t c = 0; c < m; ++c)
+        s.clones.push_back({cl[c].R, cl[c].p, static_cast<double>(c)});
+    const msckf::CameraUpdater<T> updater(std::vector<msckf::CameraExtrinsics<T>>{msckf::CameraExtrinsics<T>{}});
     msckf::DynMat<T> H(2 * m * K, 6 * m + 3 * K);
     std::size_t row = 0;
     for (std::size_t c = 0; c < m; ++c) {
-        const Mat3<T> Rct = cl[c].R.inverse().matrix();  // identity extrinsic ⇒ R_cam^T = R_clone^T
+        msckf::CameraObservation<T> o;
+        o.clone_index = c;
+        o.camera_index = 0;
         for (std::size_t f = 0; f < K; ++f, row += 2) {
-            const Vec3<T> y = Rct * (ff[f] - cl[c].p);  // feature in the camera frame
-            const T inv = T{1} / y[2];
-            math::lie::detail::Mat<T, 2, 3> dh{};
-            dh(0, 0) = inv;
-            dh(0, 2) = -y[0] * inv * inv;
-            dh(1, 1) = inv;
-            dh(1, 2) = -y[1] * inv * inv;
-            const math::lie::detail::Mat<T, 2, 3> Hf = dh * Rct;                         // ∂h/∂p_f
-            const math::lie::detail::Mat<T, 2, 3> Hth = dh * math::lie::detail::hat(y);  // ∂h/∂δθ_c
+            const auto J = updater.projection_jacobians(s, o, ff[f]);
             for (std::size_t a = 0; a < 2; ++a)
                 for (std::size_t b = 0; b < 3; ++b) {
-                    H(row + a, 6 * c + b) = Hth(a, b);         // δθ_c
-                    H(row + a, 6 * c + 3 + b) = -Hf(a, b);     // δp_c = −Hf
-                    H(row + a, 6 * m + 3 * f + b) = Hf(a, b);  // δp_f
+                    H(row + a, 6 * c + b) = J.Htheta(a, b);      // δθ_c
+                    H(row + a, 6 * c + 3 + b) = -J.Hf(a, b);     // δp_c = −Hf
+                    H(row + a, 6 * m + 3 * f + b) = J.Hf(a, b);  // δp_f
                 }
         }
     }
