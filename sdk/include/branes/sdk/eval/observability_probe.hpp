@@ -357,6 +357,98 @@ invariant_observability_probe(std::size_t m = 5, std::size_t k = 6, std::uint64_
     return out;
 }
 
+// ── R-IEKF Phase-A, propagation half (issue #348): Φ is state-independent ──────
+//
+// The other source of the yaw leak is the propagation Jacobian. The shipped
+// body-frame `Φ` (propagator.hpp) couples velocity to attitude through
+// `−R̂[a]×·dt` — DEPENDENT on the rotation estimate `R̂` and the specific force
+// `a` — exactly the term the FEJ attempts tried (and failed) to freeze. In the
+// right-invariant error the specific force cancels and only **gravity** survives,
+// so that block becomes the CONSTANT `[g]×·dt`, and the gyro self-coupling
+// `−[ω]×·dt` drops out entirely (the world-frame rotation error is unaffected by
+// the common angular rate). The whole nav `Φ` then depends only on `(g, dt)` —
+// the by-construction propagation analogue of the flat yaw leak above. (Biases
+// re-introduce an `R̂` term — the standard "imperfect IEKF" correction, out of
+// scope for this spike; the nav block is what carries the observability.)
+
+namespace obs_detail {
+template <math::Scalar T>
+inline void set_block(msckf::DynMat<T>& M, std::size_t r0, std::size_t c0, const Mat3<T>& B) {
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            M(r0 + i, c0 + j) = B(i, j);
+}
+template <math::Scalar T>
+[[nodiscard]] T fro_diff(const msckf::DynMat<T>& A, const msckf::DynMat<T>& B) {
+    using std::sqrt;
+    T s = T{0};
+    for (std::size_t i = 0; i < A.rows; ++i)
+        for (std::size_t j = 0; j < A.cols; ++j) {
+            const T d = A(i, j) - B(i, j);
+            s += d * d;
+        }
+    return sqrt(s);
+}
+
+// Standard body-frame nav (θ,v,p) error-transition Φ = I + A·dt, matching the
+// shipped propagator. STATE-DEPENDENT: Φ[θ,θ] via ω, Φ[v,θ] via R̂ and a.
+template <math::Scalar T>
+[[nodiscard]] msckf::DynMat<T> nav_phi_standard(const SO3<T>& R, const Vec3<T>& omega, const Vec3<T>& accel, T dt) {
+    msckf::DynMat<T> F = msckf::DynMat<T>::identity(9);
+    set_block<T>(F, 0, 0, math::lie::detail::hat(omega) * (-dt));                 // δθ̇ += −[ω]× δθ
+    set_block<T>(F, 3, 0, (R.matrix() * math::lie::detail::hat(accel)) * (-dt));  // δv̇ = −R[a]× δθ
+    for (std::size_t i = 0; i < 3; ++i)
+        F(6 + i, 3 + i) += dt;  // δṗ = δv
+    return F;
+}
+
+// Right-invariant nav error-transition. The state args MIRROR nav_phi_standard's
+// signature but are DELIBERATELY IGNORED — that the rotation/rates do not enter
+// is the state-independence the probe asserts. The only coupling is the constant
+// gravity cross [g]×; no [ω]× self-term, no R̂.
+template <math::Scalar T>
+[[nodiscard]] msckf::DynMat<T>
+nav_phi_invariant(const SO3<T>& /*R*/, const Vec3<T>& /*omega*/, const Vec3<T>& /*accel*/, const Vec3<T>& g, T dt) {
+    msckf::DynMat<T> F = msckf::DynMat<T>::identity(9);
+    set_block<T>(F, 3, 0, math::lie::detail::hat(g) * dt);  // δv̇ = [g]× δθ  (constant)
+    for (std::size_t i = 0; i < 3; ++i)
+        F(6 + i, 3 + i) += dt;  // δṗ = δv
+    return F;
+}
+}  // namespace obs_detail
+
+template <math::Scalar T>
+struct InvariantPropagationProbe {
+    T std_phi_state_drift = T{0};  ///< ‖Φ_std(state) − Φ_std(perturbed)‖ — large (state-dependent)
+    T inv_phi_state_drift = T{0};  ///< ‖Φ_inv(state) − Φ_inv(perturbed)‖ ≈ 0 (state-independent)
+};
+
+/// Perturb the linearization state and measure how much each nav `Φ` moves: the
+/// standard body-frame `Φ` changes (R̂/ω-dependent), the right-invariant `Φ` does
+/// not (it depends only on g, dt). The propagation half of the R-IEKF Phase-A gate.
+template <math::Scalar T>
+[[nodiscard]] InvariantPropagationProbe<T> invariant_propagation_probe(T dt = T{1} / T{200}) {
+    using namespace obs_detail;
+    const Vec3<T> g{{T{0}, T{0}, T{-981} / T{100}}};  // world gravity (−z)
+    const SO3<T> R0 = SO3<T>::exp(Vec3<T>{{T{1} / T{10}, T{-1} / T{20}, T{1} / T{5}}});
+    const Vec3<T> omega0{{T{1} / T{50}, T{-1} / T{100}, T{3} / T{100}}};
+    const Vec3<T> accel0{{T{1} / T{10}, T{-1} / T{20}, T{981} / T{100}}};
+    // A different linearization state (attitude drift + different rates).
+    const SO3<T> R1 = R0 * SO3<T>::exp(Vec3<T>{{T{2} / T{10}, T{1} / T{10}, T{-3} / T{10}}});
+    const Vec3<T> omega1{{T{4} / T{100}, T{2} / T{100}, T{-1} / T{50}}};
+    const Vec3<T> accel1{{T{-1} / T{10}, T{1} / T{20}, T{96} / T{10}}};
+
+    InvariantPropagationProbe<T> out;
+    // Build each Φ at the SAME two distinct linearization states and measure how
+    // far it moves. The standard Φ moves (R̂/ω/a-dependent); the invariant Φ is
+    // handed the same two states and does not move at all (it ignores them).
+    out.std_phi_state_drift =
+        fro_diff<T>(nav_phi_standard<T>(R0, omega0, accel0, dt), nav_phi_standard<T>(R1, omega1, accel1, dt));
+    out.inv_phi_state_drift =
+        fro_diff<T>(nav_phi_invariant<T>(R0, omega0, accel0, g, dt), nav_phi_invariant<T>(R1, omega1, accel1, g, dt));
+    return out;
+}
+
 }  // namespace branes::sdk::eval
 
 #endif  // BRANES_SDK_EVAL_OBSERVABILITY_PROBE_HPP
