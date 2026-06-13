@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.47.1](https://github.com/branes-ai/cortex/compare/v0.47.0...v0.47.1) (2026-06-13)
+
+
+### Documentation
+
+* record the [#212](https://github.com/branes-ai/cortex/issues/212) observability investigation — yaw leak localized, FEJ refuted, R-IEKF next ([#345](https://github.com/branes-ai/cortex/issues/345)) ([7dff9f5](https://github.com/branes-ai/cortex/commit/7dff9f503cc856366a48747e6a6f7f767d6c6d09))
+
 ## [0.47.0](https://github.com/branes-ai/cortex/compare/v0.46.0...v0.47.0) (2026-06-13)
 
 
