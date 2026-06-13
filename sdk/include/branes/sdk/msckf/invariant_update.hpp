@@ -55,6 +55,51 @@ void retract_invariant(InvariantClone<T>& c,
     c.p = dR * c.p + rho;
 }
 
+/// Linear (DLT-style) triangulation of a feature from the clone window: solve the
+/// least-squares intersection Σ (I − d̂d̂ᵀ)(p_f − p_c) = 0, where d = R_c·[xy;1] is
+/// the world-frame bearing. `ok` is false on degenerate (near-coplanar) geometry.
+template <math::Scalar T>
+struct InvariantTriangulation {
+    math::lie::detail::Vec<T, 3> p_f{};
+    bool ok = false;
+};
+
+template <math::Scalar T>
+[[nodiscard]] InvariantTriangulation<T> triangulate_invariant(const std::vector<InvariantClone<T>>& clones,
+                                                              const std::vector<InvariantObs<T>>& obs) {
+    using Vec3 = math::lie::detail::Vec<T, 3>;
+    using Mat3 = math::lie::detail::Mat<T, 3, 3>;
+    Mat3 A{};
+    Vec3 b{};
+    for (const auto& o : obs) {
+        if (o.clone_index >= clones.size())
+            return {};
+        const Vec3 d = clones[o.clone_index].R.matrix() * Vec3{{o.xy[0], o.xy[1], T{1}}};
+        const T n2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        const Vec3& pc = clones[o.clone_index].p;
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j) {
+                const T P = (i == j ? T{1} : T{0}) - d[i] * d[j] / n2;
+                A(i, j) += P;
+                b[i] += P * pc[j];
+            }
+    }
+    const T dt = A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
+                 A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
+    const T eps = T{1} / T{1000000000000};  // 1e-12
+    if (!(dt * dt > eps * eps))             // |det| > 1e-12 ⇒ non-degenerate (type-generic)
+        return {};
+    auto cof = [&](std::size_t i, std::size_t j) {
+        const std::size_t a1 = (j + 1) % 3, a2 = (j + 2) % 3, b1 = (i + 1) % 3, b2 = (i + 2) % 3;
+        return (A(b1, a1) * A(b2, a2) - A(b1, a2) * A(b2, a1)) / dt;
+    };
+    Vec3 x{};
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            x[i] += cof(i, j) * b[j];
+    return {x, true};
+}
+
 /// The stacked invariant measurement of one feature track over the clone window,
 /// before feature marginalization: H_x (2m×6·#clones, world-frame clone twists),
 /// H_f (2m×3, feature), and the residual r (2m). `ok` is false on a cheirality
