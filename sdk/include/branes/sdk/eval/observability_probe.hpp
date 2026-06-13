@@ -169,6 +169,77 @@ template <math::Scalar T>
     }
     return {sqrt(tr), sqrt(yaw)};
 }
+
+// ── Right-invariant (R-IEKF) parameterization, issue #348 ──────────────────
+//
+// The body-frame error above leaks yaw because its gauge direction is R_c^T·ĝ —
+// it DEPENDS on each clone's estimate, so across a drifted window the per-clone
+// directions disagree and the stacked H stops annihilating them. The RIGHT-
+// INVARIANT (world-frame) error replaces the clone perturbation with a twist
+// ξ_c = (φ, ρ): R̂_c = Exp(φ)·R_c, p̂_c = Exp(φ)·p_c + ρ. Then the gauge directions
+// become STATE-INDEPENDENT constants — global yaw is φ = ĝ for EVERY clone, global
+// translation is ρ = e_k — and H annihilates them regardless of the linearization
+// point. That is R-IEKF's "observable by construction".
+//
+// Invariant measurement Jacobian (identity extrinsic). Per (clone,feature), with
+// y = R_c^T(p_f − p_c) and dh = ∂(π)/∂p_c: derived from
+//   ŷ ≈ y + R_c^T[p_f]×·φ − R_c^T·ρ  (clone twist),  ∂h/∂p_f = dh·R_c^T:
+//   ∂h/∂φ_c = dh·R_c^T·[p_f]×   ∂h/∂ρ_c = −dh·R_c^T   ∂h/∂δp_f = dh·R_c^T.
+// Columns: [ per clone φ(3) ρ(3) | per feature δp(3) ].
+template <math::Scalar T>
+[[nodiscard]] msckf::DynMat<T> build_H_invariant(const std::vector<Pose<T>>& cl, const std::vector<Vec3<T>>& ff) {
+    const std::size_t m = cl.size(), K = ff.size();
+    msckf::DynMat<T> H(2 * m * K, 6 * m + 3 * K);
+    std::size_t row = 0;
+    for (std::size_t c = 0; c < m; ++c) {
+        const Mat3<T> Rct = cl[c].R.inverse().matrix();
+        for (std::size_t f = 0; f < K; ++f, row += 2) {
+            const Vec3<T> y = Rct * (ff[f] - cl[c].p);
+            const T inv = T{1} / y[2];
+            math::lie::detail::Mat<T, 2, 3> dh{};
+            dh(0, 0) = inv;
+            dh(0, 2) = -y[0] * inv * inv;
+            dh(1, 1) = inv;
+            dh(1, 2) = -y[1] * inv * inv;
+            const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;  // ∂h/∂p_f = dh·R_c^T
+            const math::lie::detail::Mat<T, 2, 3> Hphi = dhRct * math::lie::detail::hat(ff[f]);  // dh·R_c^T·[p_f]×
+            for (std::size_t a = 0; a < 2; ++a)
+                for (std::size_t b = 0; b < 3; ++b) {
+                    H(row + a, 6 * c + b) = Hphi(a, b);           // φ_c
+                    H(row + a, 6 * c + 3 + b) = -dhRct(a, b);     // ρ_c = −dh·R_c^T
+                    H(row + a, 6 * m + 3 * f + b) = dhRct(a, b);  // δp_f
+                }
+        }
+    }
+    return H;
+}
+
+// The invariant 4-DoF gauge. Crucially the CLONE directions are constants (no
+// estimate): translation ρ = e_k; yaw φ = ĝ. Only the feature term carries the
+// feature position (δp_f = [g]× p_f) — and the feature is the marginalized
+// quantity, not a persistent state that drifts.
+template <math::Scalar T>
+[[nodiscard]] msckf::DynMat<T>
+build_N_invariant(const std::vector<Pose<T>>& cl, const std::vector<Vec3<T>>& ff, const Vec3<T>& g) {
+    const std::size_t m = cl.size(), K = ff.size();
+    msckf::DynMat<T> N(6 * m + 3 * K, 4);
+    for (std::size_t c = 0; c < m; ++c)
+        for (std::size_t k = 0; k < 3; ++k)
+            N(6 * c + 3 + k, k) = T{1};  // translation: clone ρ = e_k (constant)
+    for (std::size_t f = 0; f < K; ++f)
+        for (std::size_t k = 0; k < 3; ++k)
+            N(6 * m + 3 * f + k, k) = T{1};  // translation: feature δp
+    const Mat3<T> gx = math::lie::detail::hat(g);
+    for (std::size_t c = 0; c < m; ++c)
+        for (std::size_t k = 0; k < 3; ++k)
+            N(6 * c + k, 3) = g[k];  // yaw: clone φ = ĝ (constant, estimate-independent)
+    for (std::size_t f = 0; f < K; ++f) {
+        const Vec3<T> dp = gx * ff[f];  // [g]× p_f
+        for (std::size_t k = 0; k < 3; ++k)
+            N(6 * m + 3 * f + k, 3) = dp[k];
+    }
+    return N;
+}
 }  // namespace obs_detail
 
 template <math::Scalar T>
@@ -231,6 +302,58 @@ observability_probe(std::size_t m = 5, std::size_t k = 6, T sigma = T{2} / T{100
         const Scene<T> e = perturbed(s);
         const auto [tr, yaw] = leak<T>(build_H<T>(e.clones, e.feats), Ntrue);
         out.sweep.push_back({s, yaw});
+    }
+    return out;
+}
+
+// ── R-IEKF Phase-A gate (issue #348): the invariant yaw leak goes flat ─────────
+//
+// The decisive go/no-go for the R-IEKF epic (#347). Perturb the CLONE estimates
+// (the drift that diverged the standard filter) while keeping features at truth,
+// and compare the yaw leak ‖H·N‖_yaw of the body-frame EKF vs the right-invariant
+// parameterization. The standard curve RISES with σ (the measured leak); the
+// invariant curve must stay at ~machine-ε for EVERY σ — yaw observable by
+// construction, because its gauge direction (φ = ĝ) is estimate-independent.
+template <math::Scalar T>
+struct InvariantObservabilityProbe {
+    T std_yaw_consistent = T{0};             ///< standard yaw leak at the true poses (≈ 0)
+    T inv_yaw_consistent = T{0};             ///< invariant yaw leak at the true poses (≈ 0)
+    std::vector<std::pair<T, T>> std_sweep;  ///< (σ, standard yaw leak) — rises
+    std::vector<std::pair<T, T>> inv_sweep;  ///< (σ, invariant yaw leak) — flat at ~ε
+};
+
+template <math::Scalar T>
+[[nodiscard]] InvariantObservabilityProbe<T>
+invariant_observability_probe(std::size_t m = 5, std::size_t k = 6, std::uint64_t seed = 0x0B5E11ull) {
+    using namespace obs_detail;
+    const Vec3<T> g{{T{0}, T{0}, T{1}}};
+    const Scene<T> truth = make_scene<T>(m, k);
+    const msckf::DynMat<T> N_std = build_N<T>(truth.clones, truth.feats, g);
+    const msckf::DynMat<T> N_inv = build_N_invariant<T>(truth.clones, truth.feats, g);
+
+    InvariantObservabilityProbe<T> out;
+    out.std_yaw_consistent = leak<T>(build_H<T>(truth.clones, truth.feats), N_std).second;
+    out.inv_yaw_consistent = leak<T>(build_H_invariant<T>(truth.clones, truth.feats), N_inv).second;
+
+    std::mt19937_64 rng(seed);
+    auto urand = [&]() -> T {
+        const std::uint64_t bits = rng() >> 11;
+        return T(static_cast<double>(bits) * (2.0 / 9007199254740992.0) - 1.0);
+    };
+    // Perturb the CLONES only (features at truth) — the per-clone linearization
+    // drift that breaks the body-frame null space across the window.
+    auto perturb_clones = [&](T s) {
+        Scene<T> e = truth;
+        for (auto& c : e.clones) {
+            c.R = c.R * SO3<T>::exp(Vec3<T>{{s * urand(), s * urand(), s * urand()}});
+            c.p = Vec3<T>{{c.p[0] + s * urand(), c.p[1] + s * urand(), c.p[2] + s * urand()}};
+        }
+        return e;
+    };
+    for (const T s : {T{0}, T{5} / T{1000}, T{1} / T{100}, T{2} / T{100}, T{4} / T{100}}) {
+        const Scene<T> e = perturb_clones(s);
+        out.std_sweep.push_back({s, leak<T>(build_H<T>(e.clones, e.feats), N_std).second});
+        out.inv_sweep.push_back({s, leak<T>(build_H_invariant<T>(e.clones, e.feats), N_inv).second});
     }
     return out;
 }
