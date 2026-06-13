@@ -431,7 +431,7 @@ TEST_CASE("SE23 compose and inverse", "[math][lie][se23]") {
     require_vec_close(Z.position(), X.rotation() * Y.position() + X.position(), 1e-12);
 }
 
-TEST_CASE("SE23 adjoint satisfies X·exp(xi)·X^-1 = exp(Ad_X·xi)", "[math][lie][se23]") {
+TEST_CASE("SE23 adjoint satisfies X exp(xi) Xinv = exp(Ad_X xi)", "[math][lie][se23]") {
     using Tan = det::Vec<double, 9>;
     const auto X = lie::SE23<double>::exp(Tan{{0.3, -0.2, 0.1, 0.6, 0.2, -0.4, -0.7, 0.3, 0.5}});
     const Tan xi{{0.02, -0.03, 0.05, 0.07, -0.04, 0.02, -0.06, 0.03, 0.04}};
@@ -447,4 +447,47 @@ TEST_CASE("SE23 adjoint satisfies X·exp(xi)·X^-1 = exp(Ad_X·xi)", "[math][lie
     }
     const auto rhs = lie::SE23<double>::exp(adxi);
     require_se23_close(lhs, rhs, 1e-10);
+}
+
+TEST_CASE("SE23 round-trip across arithmetic types", "[math][lie][se23]") {
+    using posit32 = sw::universal::posit<32, 2>;
+    {
+        const det::Vec<float, 9> xi{{0.2f, -0.1f, 0.3f, 0.4f, -0.2f, 0.1f, -0.3f, 0.5f, 0.2f}};
+        const auto X = lie::SE23<float>::exp(xi);
+        require_vec_close(X.log(), xi, 1e-4);
+    }
+    {
+        const det::Vec<posit32, 9> xi{{posit32{0.2},
+                                       posit32{-0.1},
+                                       posit32{0.3},
+                                       posit32{0.4},
+                                       posit32{-0.2},
+                                       posit32{0.1},
+                                       posit32{-0.3},
+                                       posit32{0.5},
+                                       posit32{0.2}}};
+        const auto X = lie::SE23<posit32>::exp(xi);
+        require_vec_close(X.log(), xi, 1e-5);
+    }
+}
+
+TEST_CASE("SE23 exp/log and adjoint stay correct near a half-turn", "[math][lie][se23]") {
+    // The left-Jacobian inverse used in log() has a removable singularity at
+    // theta = pi; confirm SE23 round-trips and the adjoint identity hold there.
+    using Tan = det::Vec<double, 9>;
+    for (double ang : {3.0, 3.14159265358979}) {
+        const Tan xi{{0.0, 0.0, ang, 0.4, -0.2, 0.3, -0.5, 0.6, 0.1}};  // |phi| ~ pi about +z
+        const auto X = lie::SE23<double>::exp(xi);
+        require_vec_close(X.log(), xi, 1e-9);
+        const Tan dxi{{0.01, -0.02, 0.0, 0.03, -0.01, 0.02, -0.04, 0.02, 0.03}};
+        const auto Ad = X.adjoint();
+        Tan adxi{};
+        for (std::size_t i = 0; i < 9; ++i) {
+            double s = 0.0;
+            for (std::size_t j = 0; j < 9; ++j)
+                s += Ad(i, j) * dxi[j];
+            adxi[i] = s;
+        }
+        require_se23_close(X * lie::SE23<double>::exp(dxi) * X.inverse(), lie::SE23<double>::exp(adxi), 1e-9);
+    }
 }
