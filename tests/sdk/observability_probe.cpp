@@ -52,3 +52,29 @@ TEST_CASE("observability: the yaw leak grows with the linearization error (FEJ a
     for (std::size_t i = 1; i < p.sweep.size(); ++i)
         REQUIRE(p.sweep[i].second > p.sweep[i - 1].second);
 }
+
+// ── R-IEKF Phase-A go/no-go (issue #348): the invariant yaw leak goes flat ─────
+TEST_CASE("R-IEKF Phase A: the right-invariant parameterization makes the yaw leak vanish by construction",
+          "[sdk][observability][riekf]") {
+    const auto p = ev::invariant_observability_probe<T>();
+
+    // Both are gauge-correct at a consistent (true) linearization.
+    REQUIRE(p.std_yaw_consistent < 1e-10);
+    REQUIRE(p.inv_yaw_consistent < 1e-10);
+
+    REQUIRE(p.std_sweep.size() == p.inv_sweep.size());
+    REQUIRE(p.std_sweep.size() >= 4);
+
+    // Under per-clone drift: the body-frame (standard EKF) yaw leak RISES — the
+    // measured #212 mechanism — while the right-invariant leak stays at machine-ε
+    // for EVERY σ: yaw observable by construction, no FEJ.
+    for (std::size_t i = 0; i < p.inv_sweep.size(); ++i)
+        REQUIRE(p.inv_sweep[i].second < 1e-10);  // flat at ~ε, all σ
+
+    // The standard curve is non-trivially leaking at the largest σ…
+    REQUIRE(p.std_sweep.back().second > 1e-3);
+    // …and rises (the leak the invariant filter removes).
+    REQUIRE(p.std_sweep.back().second > p.std_sweep.front().second);
+    // The invariant formulation is the cure: orders of magnitude flatter.
+    REQUIRE(p.inv_sweep.back().second < 1e-6 * p.std_sweep.back().second);
+}
