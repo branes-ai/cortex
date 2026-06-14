@@ -120,9 +120,9 @@ The key point is that $\mathbf{R}_i, \mathbf{p}_i$ are **not** iterations of $\m
 | $\mathbf{R}, \mathbf{p}$ | the **live** nav state — current IMU pose, "now" ($\mathbf{R}$ = world←imu, $\mathbf{p}$ = world position). Moves every IMU sample and every update. | no | `State::R`, `State::p` | `state.hpp` (`SO3 R; Vec3 p;`) |
 | $\mathbf{R}_i, \mathbf{p}_i$ | **clone $i$** — the body pose *frozen at the image time of clone $i$*. `augment_clone` copies the live $(\mathbf{R}, \mathbf{p})$ into the sliding window; $i$ indexes which past frame. A feature is seen from several clones $i = 0\ldots m-1$. | yes, after the snapshot | `s.clones[i].R`, `.p` | `state.hpp` `struct Clone`; set in `state_helper.hpp` `augment_clone` (`clones.push_back({s.R, s.p, …})`) |
 | $\mathbf{R}_{ic}, \mathbf{p}_{ic}$ | the **extrinsic** — the fixed rigid camera↔IMU mount, *not* a body pose. `ic` reads "imu ← cam": $\mathbf{R}_{ic}$ rotates camera axes into the IMU frame, $\mathbf{p}_{ic}$ is the camera origin in the IMU frame. Same for every clone of that camera (the ~90° EuRoC mount). | yes — unless S10 online calibration estimates it (then it lives in `State::calib[j]`) | `CameraExtrinsics::R_imu_cam`, `p_imu_cam` (via `extrinsic_of`) | `camera_updater.hpp` `struct CameraExtrinsics` |
-| $\mathbf{p}_f$ | the triangulated **feature**, in the **world** frame | — (marginalized) | `p_f` in `update()` | `camera_updater.hpp::triangulate` |
-| $\mathbf{y}$ | the feature expressed in the clone's **IMU** frame | — | `y` in `to_camera` | `camera_updater.hpp::to_camera` |
-| $\mathbf{p}_c$ | the feature expressed in the **camera** frame | — | `p_c` in `to_camera` | `camera_updater.hpp::to_camera` |
+| $\mathbf{p}_f$ | a **fixed 3D point in the world** — the landmark this observation is *of* (e.g. a corner on a wall), say $\mathbf{p}_f = (1.0,\,0.0,\,4.0)\ \text{m}$. "Triangulated" only means the filter *computes* this point by intersecting the viewing rays from several clones — it is not handed to us. ("Marginalized" — eliminated — is explained in Stage 5.) | yes (a world point) | `p_f` in `update()` | `camera_updater.hpp::triangulate` |
+| $\mathbf{y}$ | the same point, re-expressed in the clone's **IMU** frame (what the IMU "sees" relative to itself) | — | `y` in `to_camera` | `camera_updater.hpp::to_camera` |
+| $\mathbf{p}_c$ | the same point, re-expressed in the **camera** frame (axis $z$ = optical axis); dividing by $z$ gives the image coordinate | — | `p_c` in `to_camera` | `camera_updater.hpp::to_camera` |
 
 So the two transforms compose to carry a world feature into one camera:
 
@@ -133,6 +133,44 @@ $$
 \;\xrightarrow[\;(\mathbf{R}_{ic},\,\mathbf{p}_{ic})\;]{\text{inverse of extrinsic}}\;
 \mathbf{p}_c\ (\text{camera})
 $$
+
+### A concrete example you can picture
+
+Put a feature on a wall **4 m ahead and 1 m to the right** of where the robot started, and watch it through **two** camera frames as the robot slides 20 cm to the right. Use world axes **X = right, Y = down, Z = forward (into the scene)**, and — to keep the arithmetic clean — assume no rotation and a camera bolted 5 cm to the right of the IMU. Because everything sits at the same height ($Y = 0$), the whole picture lives in the X–Z plane, so a top-down view shows all of it:
+
+```text
+   Z (forward) ↑
+              4 ┤              ☆  p_f = (1.0, 0.0, 4.0)   ← the wall corner
+                │             ╱ ╲
+                │            ╱   ╲       the two rays point at the SAME world point;
+                │           ╱     ╲      where they cross IS the triangulated p_f.
+                │          ╱       ╲
+                │         ╱         ╲
+                │        ╱           ╲
+                │       ╱             ╲
+                │      ╱               ╲
+              0 ┤   ▢ ◉                 ◉ ▢
+                └───┬──────────────────┬───→ X (right)
+                  clone 0            clone 1
+                  p_0 = (0,0,0)      p_1 = (0.20, 0, 0)
+                    └── 0.20 m camera baseline ──┘
+
+   top-down view, looking straight down (Y = height is into the page, 0 here).
+   ▢ = IMU body        ◉ = camera = IMU shifted by the extrinsic p_ic (+5 cm in X)
+```
+
+Plug the example into the two frame hops (all values in metres; rotations are identity so the transposes vanish):
+
+| quantity | clone 0 | clone 1 | what it is |
+|---|---|---|---|
+| $\mathbf{p}_f$ | $(1.0,\,0,\,4.0)$ | $(1.0,\,0,\,4.0)$ | the **same** world point |
+| $\mathbf{R}_i,\ \mathbf{p}_i$ | $\mathbf{I},\ (0,0,0)$ | $\mathbf{I},\ (0.20,0,0)$ | the clone (frozen body pose) |
+| $\mathbf{R}_{ic},\ \mathbf{p}_{ic}$ | $\mathbf{I},\ (0.05,0,0)$ | $\mathbf{I},\ (0.05,0,0)$ | the **same** camera mount |
+| $\mathbf{y} = \mathbf{R}_i^\top(\mathbf{p}_f-\mathbf{p}_i)$ | $(1.00,\,0,\,4.0)$ | $(0.80,\,0,\,4.0)$ | feature in the IMU frame |
+| $\mathbf{p}_c = \mathbf{R}_{ic}^\top(\mathbf{y}-\mathbf{p}_{ic})$ | $(0.95,\,0,\,4.0)$ | $(0.75,\,0,\,4.0)$ | feature in the camera frame |
+| image $(x/z,\ y/z)$ | $(0.2375,\,0)$ | $(0.1875,\,0)$ | the normalized observation |
+
+The robot moved +20 cm and the feature slid from $x = 0.2375$ to $0.1875$ in the image — it drifted **left**. That shift is **parallax**, and its size (0.05 over a 0.20 m baseline) is exactly what encodes the **4 m depth**. Running it backwards — *"what single world point projects to both of these?"* — is **triangulation**, and the answer is $\mathbf{p}_f = (1.0,\,0,\,4.0)$. The filter never measured $\mathbf{p}_f$ directly; it inferred it from the two views.
 
 ### The measurement model
 
@@ -208,13 +246,13 @@ Hx[..., off + 3 + b]   = -J.Hf;                   // clone d-p columns = -Hf
 
 ### Stage 5 — marginalize the feature, then EKF-update (lines 204–236)
 
-The feature $\mathbf{p}_f$ was triangulated from these same clones, so it is not an independent state — it has to be eliminated:
+The feature $\mathbf{p}_f$ was *computed from* these same clones (we triangulated it from them), so treating it as an independent measurement would be circular — it would feed the clones' own information back into them and make the filter over-confident. **Marginalizing** means algebraically **eliminating** $\mathbf{p}_f$ — like solving a system of equations by substitution so the variable you do not want to carry drops out. In MSCKF that elimination is a projection:
 
 ```cpp
 proj = msckf_left_nullspace_project(Hf, Hx, r, ...);   // project onto left-null(Hf)
 ```
 
-This left-multiplies $[\,\mathbf{H}_f \mid \mathbf{H}_x \mid \mathbf{r}\,]$ by an orthonormal basis of $\mathbf{H}_f$'s left null space, killing the $\mathbf{H}_f$ columns and dropping 3 rows. What survives is a measurement that constrains **only the clones/extrinsics**, with the noise still $\sigma^2 \mathbf{I}$ (orthonormal reflectors preserve it). Then:
+`Hf` is the $2m\times 3$ block of how the stacked residual depends on the (3-DoF) feature. Multiplying the whole system $[\,\mathbf{H}_f \mid \mathbf{H}_x \mid \mathbf{r}\,]$ by an orthonormal basis of $\mathbf{H}_f$'s **left null space** zeroes the `Hf` columns — i.e. removes every direction that the feature could have explained — and drops 3 rows. What survives constrains **only the clones/extrinsics**, with the noise still $\sigma^2 \mathbf{I}$ (orthonormal reflectors preserve it). Then:
 
 ```cpp
 r2     = normalized_sigma^2 + calib_rot_sigma^2;        // R (+ S10 noise term)
