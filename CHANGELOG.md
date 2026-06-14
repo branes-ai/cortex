@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.50.2](https://github.com/branes-ai/cortex/compare/v0.50.1...v0.50.2) (2026-06-14)
+
+
+### Maintenance
+
+* **tools:** add the R-IEKF system-level NEES diagnostic ([#212](https://github.com/branes-ai/cortex/issues/212)) ([#360](https://github.com/branes-ai/cortex/issues/360)) ([76b677f](https://github.com/branes-ai/cortex/commit/76b677fac2ac9906e004a59796ac8e3c9af83426))
+
 ## [0.50.1](https://github.com/branes-ai/cortex/compare/v0.50.0...v0.50.1) (2026-06-13)
 
 
