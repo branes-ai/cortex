@@ -30,6 +30,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.50.3](https://github.com/branes-ai/cortex/compare/v0.50.2...v0.50.3) (2026-06-14)
+
+
+### Documentation
+
+* render LaTeX math on the site (KaTeX) + camera-calibration walkthrough ([#362](https://github.com/branes-ai/cortex/issues/362)) ([5b0e426](https://github.com/branes-ai/cortex/commit/5b0e426d28f131cc4d1353a1d3e389416fca6ea0))
+* **site:** widen the triangulation baseline so the 3D view reads ([#364](https://github.com/branes-ai/cortex/issues/364)) ([31d584f](https://github.com/branes-ai/cortex/commit/31d584f467fe0052182441c3a2623450b4680ff0))
+
 ## [0.50.2](https://github.com/branes-ai/cortex/compare/v0.50.1...v0.50.2) (2026-06-14)
 
 
