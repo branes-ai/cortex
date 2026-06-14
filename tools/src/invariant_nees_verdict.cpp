@@ -83,9 +83,18 @@ bool observe(const SO3& R, const Vec3& p, const Vec3& L, Vec2& xy) {
 }
 }  // namespace
 
+// The window is managed manually (MSCKF update-on-leave), so the backend's own cap
+// is set effectively unbounded; this constant guards the manual `--window` value.
+constexpr std::size_t kMaxClones = 100000;
+
 int main(int argc, char** argv) {
     const int trials = arg_int(argc, argv, "--trials", 30);
-    const std::size_t window = static_cast<std::size_t>(arg_int(argc, argv, "--window", 11));
+    const int window_arg = arg_int(argc, argv, "--window", 11);
+    if (window_arg < 2 || static_cast<std::size_t>(window_arg) >= kMaxClones) {
+        std::cerr << "--window must be in [2, " << (kMaxClones - 1) << "] (got " << window_arg << ")\n";
+        return 2;
+    }
+    const std::size_t window = static_cast<std::size_t>(window_arg);
     const double warmup_s = static_cast<double>(arg_int(argc, argv, "--warmup", 5));
 
     // IMU + camera noise. The injected white noise is consistent with the filter's
@@ -96,7 +105,7 @@ int main(int argc, char** argv) {
     const T pix_sigma = T{1} / T{200};      // normalized image σ (≈ 1 px @ f≈460)
 
     Backend::Config cfg;
-    cfg.max_clones = 100000;  // we manage the window manually (MSCKF update-on-leave)
+    cfg.max_clones = kMaxClones;  // we manage the window manually (MSCKF update-on-leave)
     cfg.initial_sigma = T{1} / T{20};
     cfg.normalized_sigma = pix_sigma;
     cfg.noise = ms::ImuNoise<T>{gyro_density, accel_density, T{1} / T{50000}, T{1} / T{3000}};
@@ -295,10 +304,21 @@ int main(int argc, char** argv) {
               << "   roll/pitch(2 DoF)=" << nees_rollpitch.report().normalized
               << "   <- roll/pitch is gravity-observable; if it is also >>1 the cause is\n"
               << "      broad over-fusion in the driver, not the gravity-yaw gauge leak.\n";
-    std::cout << "diagnostics: RMS pos err=" << std::sqrt(sum_pos_err2 / n_diag)
-              << " m,  RMS att err=" << std::sqrt(sum_att_err2 / n_diag)
-              << " rad,  mean att sigma=" << std::sqrt(sum_att_sig2 / n_diag / 3)
-              << " rad,  mean feats/update=" << (sum_feat / n_upd) << "\n";
+    // Guard the per-sample averages: n_diag is 0 with no steady-state frames, and
+    // n_upd is 0 under VERDICT_NO_UPDATE — emit N/A rather than dividing by zero.
+    std::cout << "diagnostics: ";
+    if (n_diag > 0)
+        std::cout << "RMS pos err=" << std::sqrt(sum_pos_err2 / n_diag)
+                  << " m,  RMS att err=" << std::sqrt(sum_att_err2 / n_diag)
+                  << " rad,  mean att sigma=" << std::sqrt(sum_att_sig2 / n_diag / 3) << " rad";
+    else
+        std::cout << "no steady-state samples (warmup skipped all frames)";
+    std::cout << ",  mean feats/update=";
+    if (n_upd > 0)
+        std::cout << (sum_feat / n_upd);
+    else
+        std::cout << "N/A";
+    std::cout << "\n";
     std::cout << "\nInterpretation: NEES >> 1 across ALL blocks (and roll/pitch >> yaw) is a\n"
               << "broad driver over-fusion signature, NOT the unit-proven gravity-yaw fix\n"
               << "failing. This harness localises the remaining gap; it is not a pass.\n";
