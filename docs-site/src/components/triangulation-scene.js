@@ -14,8 +14,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // ── The worked example (metres), identical to the page's numbers table ────────
 const PF = [1.0, 0.0, 4.0];          // world feature
 const CAM = [                        // camera centres = IMU + extrinsic p_ic (+5 cm x)
+  // A deliberately WIDE 2 m baseline so the frusta/labels separate and the feature
+  // crosses the optical axis between views (obvious parallax). Numbers match the doc.
   { name: 'clone 0', c: [0.05, 0.0, 0.0], imu: [0.0, 0.0, 0.0], n: [0.2375, 0.0] },
-  { name: 'clone 1', c: [0.25, 0.0, 0.0], imu: [0.2, 0.0, 0.0], n: [0.1875, 0.0] },
+  { name: 'clone 1', c: [2.05, 0.0, 0.0], imu: [2.0, 0.0, 0.0], n: [-0.2625, 0.0] },
 ];
 const COL = { feature: 0xff9f0a, ray: 0x35c759, cam: 0x4fd1ff, imu: 0x8aa6bf, plane: 0xffd60a };
 
@@ -71,15 +73,15 @@ export function mountTriangulation({ canvas, hud }) {
   scene.add(key);
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
-  const target = new THREE.Vector3(0.5, 0.0, 1.9);
-  const home = new THREE.Vector3(3.6, 2.4, -2.2);
+  const target = new THREE.Vector3(1.0, 0.0, 2.0);
+  const home = new THREE.Vector3(5.4, 3.4, -2.4);
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.target.copy(target);
 
   // Ground plane (y = 0) + world axes with labels.
-  const grid = new THREE.GridHelper(8, 16, 0x335577, 0x223344);
-  grid.position.set(0.5, 0, 1.8);
+  const grid = new THREE.GridHelper(12, 24, 0x335577, 0x223344);
+  grid.position.set(1.0, 0, 1.9);
   scene.add(grid);
   scene.add(new THREE.AxesHelper(0.6));
   scene.add(label('X', [0.72, 0, 0], { size: 0.22, color: '#ff6b6b' }));
