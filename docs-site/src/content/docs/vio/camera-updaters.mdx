@@ -24,14 +24,15 @@ poses**. Drag to orbit, scroll to zoom, ⤢ to reset.
 <TriangulationScene height={460} />
 
 A feature sits on a wall **4 m ahead and 1 m to the right** of where the robot
-started. The robot slides 20 cm to the right and takes **two** frames (the two
-clones). Each camera shoots a ray at the feature; the rays meet at the feature —
+started. The robot moves to a **second viewpoint 2 m further along** (a deliberately
+wide baseline so the effect is easy to see) and takes a second frame — the two
+**clones**. Each camera shoots a ray at the feature; the rays meet at the feature —
 running that intersection backwards is **triangulation**. On each camera's image
-plane (the yellow square at unit depth) the feature lands at a slightly different
-spot: $x = 0.2375$ for clone 0, $x = 0.1875$ for clone 1. That difference is
-**parallax**, and its size over the 20 cm baseline is exactly what pins the 4 m
-depth. Everything sits at the same height ($y = 0$), so the scene lays out on the
-ground plane.
+plane (the yellow square at unit depth) the feature lands at a different spot:
+$x = 0.2375$ for clone 0 and $x = -0.2625$ for clone 1 — it has crossed to the other
+side of the optical axis. That difference — a **parallax** of $0.5$ — over the 2 m
+baseline is exactly what pins the 4 m depth. Everything sits at the same height
+($y = 0$), so the scene lays out on the ground plane.
 
 ### The symbols
 
@@ -53,11 +54,11 @@ All metres; rotations are identity in this example, so the transposes vanish:
 | quantity | clone 0 | clone 1 | what it is |
 |---|---|---|---|
 | $\mathbf{p}_f$ | $(1.0,\,0,\,4.0)$ | $(1.0,\,0,\,4.0)$ | the **same** world point |
-| $\mathbf{R}_i,\ \mathbf{p}_i$ | $\mathbf{I},\ (0,0,0)$ | $\mathbf{I},\ (0.20,0,0)$ | the clone (frozen body pose) |
+| $\mathbf{R}_i,\ \mathbf{p}_i$ | $\mathbf{I},\ (0,0,0)$ | $\mathbf{I},\ (2.0,0,0)$ | the clone (frozen body pose) |
 | $\mathbf{R}_{ic},\ \mathbf{p}_{ic}$ | $\mathbf{I},\ (0.05,0,0)$ | $\mathbf{I},\ (0.05,0,0)$ | the **same** camera mount |
-| $\mathbf{y} = \mathbf{R}_i^\top(\mathbf{p}_f-\mathbf{p}_i)$ | $(1.00,\,0,\,4.0)$ | $(0.80,\,0,\,4.0)$ | feature in the IMU frame |
-| $\mathbf{p}_c = \mathbf{R}_{ic}^\top(\mathbf{y}-\mathbf{p}_{ic})$ | $(0.95,\,0,\,4.0)$ | $(0.75,\,0,\,4.0)$ | feature in the camera frame |
-| image $(x/z,\ y/z)$ | $(0.2375,\,0)$ | $(0.1875,\,0)$ | the normalized observation |
+| $\mathbf{y} = \mathbf{R}_i^\top(\mathbf{p}_f-\mathbf{p}_i)$ | $(1.00,\,0,\,4.0)$ | $(-1.00,\,0,\,4.0)$ | feature in the IMU frame |
+| $\mathbf{p}_c = \mathbf{R}_{ic}^\top(\mathbf{y}-\mathbf{p}_{ic})$ | $(0.95,\,0,\,4.0)$ | $(-1.05,\,0,\,4.0)$ | feature in the camera frame |
+| image $(x/z,\ y/z)$ | $(0.2375,\,0)$ | $(-0.2625,\,0)$ | the normalized observation |
 
 ## The projection-Jacobian chain
 
