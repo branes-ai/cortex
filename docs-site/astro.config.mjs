@@ -2,6 +2,8 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import rehypeRewrite from 'rehype-rewrite';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 // Deployment configuration.
 //   For GitHub Pages: DEPLOY_TARGET=github-pages (sets the project base path).
@@ -50,8 +52,12 @@ export default defineConfig({
   site,
   base,
   trailingSlash: 'always',
+  // LaTeX math: remark-math parses `$…$` / `$$…$$`, rehype-katex renders it to
+  // HTML at build time (KaTeX CSS is loaded via Starlight `customCss` below).
+  // rehype-katex runs after the base-link rewrite — they touch disjoint nodes.
   markdown: {
-    rehypePlugins: rehypeBaseLinks,
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [...rehypeBaseLinks, rehypeKatex],
   },
   integrations: [
     starlight({
@@ -162,7 +168,7 @@ export default defineConfig({
           ],
         },
       ],
-      customCss: ['./src/styles/custom.css'],
+      customCss: ['katex/dist/katex.min.css', './src/styles/custom.css'],
     }),
   ],
 });
