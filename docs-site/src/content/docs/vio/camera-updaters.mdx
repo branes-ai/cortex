@@ -1,0 +1,131 @@
+---
+title: Camera Updaters
+description: Feature triangulation, the projection-Jacobian chain, null-space marginalization, Mahalanobis gating, and the EKF measurement update — with an interactive 3D view of the geometry.
+---
+
+import TriangulationScene from '../../../components/TriangulationScene.astro';
+
+`CameraUpdater<T>` (`sdk/include/branes/sdk/msckf/camera_updater.hpp`, #44) is the
+MSCKF camera measurement update: it turns a feature tracked across a window of cloned
+poses into a state correction. Clean-room from the MSCKF measurement model (Mourikis
+& Roumeliotis, 2007).
+
+It works entirely in **normalized image coordinates** — camera intrinsics and
+distortion are removed by the front end — which keeps it intrinsics-agnostic. Mono
+and stereo are handled uniformly: an observation names the clone it was taken in and
+the camera (extrinsic) it came through, so a stereo feature simply contributes
+observations through two extrinsics that share the clone poses.
+
+## The geometry, in 3D
+
+The whole update hangs on one picture: **one world feature, seen from several camera
+poses**. Drag to orbit, scroll to zoom, ⤢ to reset.
+
+<TriangulationScene height={460} />
+
+A feature sits on a wall **4 m ahead and 1 m to the right** of where the robot
+started. The robot slides 20 cm to the right and takes **two** frames (the two
+clones). Each camera shoots a ray at the feature; the rays meet at the feature —
+running that intersection backwards is **triangulation**. On each camera's image
+plane (the yellow square at unit depth) the feature lands at a slightly different
+spot: $x = 0.2375$ for clone 0, $x = 0.1875$ for clone 1. That difference is
+**parallax**, and its size over the 20 cm baseline is exactly what pins the 4 m
+depth. Everything sits at the same height ($y = 0$), so the scene lays out on the
+ground plane.
+
+### The symbols
+
+| symbol | meaning | constant? | code |
+|---|---|---|---|
+| $\mathbf{R}, \mathbf{p}$ | the **live** nav state — current IMU pose, "now" ($\mathbf{R}$ = world←imu, $\mathbf{p}$ = world position). Moves every IMU sample and every update. | no | `State::R`, `State::p` |
+| $\mathbf{R}_i, \mathbf{p}_i$ | **clone $i$** — the body pose *frozen at the image time of clone $i$*. `augment_clone` snapshots the live $(\mathbf{R}, \mathbf{p})$ into the sliding window; $i$ indexes which past frame. A feature is seen from several clones. | yes, after the snapshot | `s.clones[i].R/.p` |
+| $\mathbf{R}_{ic}, \mathbf{p}_{ic}$ | the **extrinsic** — the fixed rigid camera↔IMU mount (not a body pose). `ic` = "imu ← cam": $\mathbf{R}_{ic}$ rotates camera axes into the IMU frame, $\mathbf{p}_{ic}$ is the camera origin in the IMU frame. The ~90° EuRoC mount. | yes — unless [S10 online calibration](/pipeline/stages/s10-online-calibration/) estimates it | `CameraExtrinsics::R_imu_cam/p_imu_cam` |
+| $\mathbf{p}_f$ | a **fixed 3D point in the world** — the landmark this observation is *of*. "Triangulated" only means the filter *computes* it from the rays; it is never measured directly. | yes (a world point) | `p_f` in `update()` |
+| $\mathbf{y}$ | the same point, re-expressed in the clone's **IMU** frame | — | `y` in `to_camera` |
+| $\mathbf{p}_c$ | the same point, re-expressed in the **camera** frame ($z$ = optical axis); dividing by $z$ gives the image coordinate | — | `p_c` in `to_camera` |
+
+The key point: $\mathbf{R}_i, \mathbf{p}_i$ are **not** iterations of $\mathbf{R}, \mathbf{p}$ — they are frozen *snapshots* of it. One moving body pose, a window of snapshots, and a fixed mount.
+
+### The numbers in the scene
+
+All metres; rotations are identity in this example, so the transposes vanish:
+
+| quantity | clone 0 | clone 1 | what it is |
+|---|---|---|---|
+| $\mathbf{p}_f$ | $(1.0,\,0,\,4.0)$ | $(1.0,\,0,\,4.0)$ | the **same** world point |
+| $\mathbf{R}_i,\ \mathbf{p}_i$ | $\mathbf{I},\ (0,0,0)$ | $\mathbf{I},\ (0.20,0,0)$ | the clone (frozen body pose) |
+| $\mathbf{R}_{ic},\ \mathbf{p}_{ic}$ | $\mathbf{I},\ (0.05,0,0)$ | $\mathbf{I},\ (0.05,0,0)$ | the **same** camera mount |
+| $\mathbf{y} = \mathbf{R}_i^\top(\mathbf{p}_f-\mathbf{p}_i)$ | $(1.00,\,0,\,4.0)$ | $(0.80,\,0,\,4.0)$ | feature in the IMU frame |
+| $\mathbf{p}_c = \mathbf{R}_{ic}^\top(\mathbf{y}-\mathbf{p}_{ic})$ | $(0.95,\,0,\,4.0)$ | $(0.75,\,0,\,4.0)$ | feature in the camera frame |
+| image $(x/z,\ y/z)$ | $(0.2375,\,0)$ | $(0.1875,\,0)$ | the normalized observation |
+
+## The projection-Jacobian chain
+
+The update linearizes the measurement $h(\mathbf{x}) = \pi(\mathbf{p}_c)$, with $\pi$ the normalized projection
+$\pi(\mathbf{p}_c) = \left(\tfrac{p_{c,x}}{p_{c,z}},\ \tfrac{p_{c,y}}{p_{c,z}}\right)$. Distortion and focal length are **not** here — the front end removed them — so this is the *geometric* model only.
+
+**Stage 1 — the two frame hops** (`to_camera`). The world feature is carried into the camera through the clone pose, then the extrinsic:
+
+```cpp
+y   = Ri.transpose()  * (p_f - p_i);   // world -> IMU frame
+p_c = Ric.transpose() * (y - p_ic);    // IMU  -> camera frame
+return p_c[2] > 0;                      // cheirality: must be in front
+```
+
+**Stage 2 — the projection derivative** $\mathrm{dh} = \partial\pi/\partial\mathbf{p}_c$ ($2\times 3$, evaluated at $\mathbf{p}_c$):
+
+$$
+\mathrm{dh} = \frac{1}{z}\begin{bmatrix} 1 & 0 & -x/z \\ 0 & 1 & -y/z \end{bmatrix},
+\qquad z = p_{c,z},\ x = p_{c,x},\ y = p_{c,y}
+$$
+
+**Stage 3 — chain-rule each state block** (with $\mathbf{R}_{ct} = \mathbf{R}_{ic}^\top$, $\mathbf{R}_{it} = \mathbf{R}_i^\top$, $\mathbf{M} = \mathbf{R}_{ct}\mathbf{R}_{it}$):
+
+| state | $\partial\mathbf{p}_c / \partial\,(\cdot)$ | Jacobian $\big(\mathrm{dh}\cdot(\cdot)\big)$ | code |
+|---|---|---|---|
+| feature $\delta\mathbf{p}_f$ | $\mathbf{M}$ | $\mathbf{H}_f = \mathrm{dh}\,\mathbf{M}$ | `J.Hf = dh * M` |
+| clone rotation $\delta\boldsymbol\theta$ | $\mathbf{R}_{ic}^\top [\mathbf{y}]_\times$ | $\mathbf{H}_\theta = \mathrm{dh}\,\mathbf{R}_{ic}^\top [\mathbf{y}]_\times$ | `J.Htheta = dh * dpc_dtheta` |
+| clone position $\delta\mathbf{p}$ | $-\mathbf{M}$ | $-\mathbf{H}_f$ | assembled as `-J.Hf` |
+| extrinsic rotation $\delta\boldsymbol\theta_{ic}$ | $[\mathbf{p}_c]_\times$ | $\mathbf{H}_{\theta,ic} = \mathrm{dh}\,[\mathbf{p}_c]_\times$ | `J.Hext_theta` |
+| extrinsic translation $\delta\mathbf{p}_{ic}$ | $-\mathbf{R}_{ic}^\top$ | $-\mathrm{dh}\,\mathbf{R}_{ic}^\top$ | `J.Hext_p` |
+
+The two non-obvious signs come from the **right-perturbation** convention $\mathbf{R} \leftarrow \mathbf{R}\,\mathrm{Exp}(\delta\boldsymbol\theta)$ of the [state](/vio/msckf-state/): the clone-rotation term picks up $[\mathbf{y}]_\times$, and the clone-position block is additive, so $\partial\mathbf{p}_c/\partial\delta\mathbf{p} = -\mathbf{M}$ — *literally $-\mathbf{H}_f$, the feature block negated.* (Hold that thought.)
+
+**Stage 4 — stack into the big matrices** (`update`). Each of the $m$ observations fills one 2-row strip of the feature Jacobian $\mathbf{H}_f$ ($2m\times 3$) and the state Jacobian $\mathbf{H}_x$ ($2m\times n$, zero except this clone's 6 columns — `δθ = Hθ`, `δp = −Hf`). If S10 calibration is on, the strip *also* writes the extrinsic columns; because every observation through that camera writes the **same** extrinsic block, the coupling across the window is what makes $T_{CI}$ observable.
+
+**Stage 5 — marginalize the feature, then update.** The feature $\mathbf{p}_f$ was *computed from* these clones, so treating it as an independent measurement would be circular and make the filter over-confident. **Marginalizing** means **eliminating** $\mathbf{p}_f$ — like solving a system by substitution so the unwanted variable drops out:
+
+```cpp
+proj = msckf_left_nullspace_project(Hf, Hx, r, ...);   // project onto left-null(Hf)
+```
+
+Multiplying $[\,\mathbf{H}_f \mid \mathbf{H}_x \mid \mathbf{r}\,]$ by an orthonormal basis of $\mathbf{H}_f$'s **left null space** ($\mathbf{N}^\top \mathbf{H}_f = 0$, via a Householder QR of $\mathbf{H}_f$) zeroes the feature columns and drops 3 rows; the noise stays $\sigma^2\mathbf{I}$. The surviving system constrains **only the clones/extrinsics**. It is then **gated** by a Mahalanobis test $\gamma = \mathbf{r}^\top(\mathbf{H}_x \mathbf{P}\mathbf{H}_x^\top + \mathbf{R})^{-1}\mathbf{r}$ (a $\chi^2$ quantile) and applied via `StateHelper::ekf_update`.
+
+### Why the $\delta\mathbf{p} = -\mathbf{H}_f$ detail matters (the #212 thread)
+
+A global translation shifts **every clone *and* the feature by the same vector** $\mathbf{t}$. In one strip the feature contributes $+\mathbf{H}_f\mathbf{t}$ and the clone-position block contributes $-\mathbf{H}_f\mathbf{t}$ — they **cancel exactly**, for any $\mathbf{H}_f$. So translation is unobservable *by construction*. The **yaw** gauge has no such clean cancellation: its clone-rotation direction is $\mathbf{R}_i^\top \hat{\mathbf{g}}$, which *depends on each clone's estimate*. Linearize different clones at differently-drifted $\mathbf{R}_i$ and the $[\mathbf{y}]_\times / \mathbf{R}_i^\top$ terms stop annihilating the yaw null vector — the over-confidence tracked in [issue #212](https://github.com/branes-ai/cortex/issues/212), and exactly the term the right-invariant reparameterization replaces with a state-independent constant.
+
+## Configuration & safety
+
+`CameraUpdaterOptions` carries `normalized_sigma` (the measurement σ in normalized
+coordinates — *not* pixels, deliberately named so daemon config can't pass pixel-space
+values) and the gating threshold. The constructor validates **those options** — it
+requires a positive `normalized_sigma`, a positive gate when gating is on, and a
+non-negative `calib_rot_sigma`. The cameras list itself isn't constrained at
+construction; instead an observation whose `camera_index` (or `clone_index`) is
+out of range is **not** aliased to camera 0 — the whole track is dropped at update
+time via a graceful early return.
+
+## Validated
+
+The end-to-end test builds a window of clones at known poses, places synthetic
+features, and checks that:
+
+- a camera update **reduces the covariance and keeps it PSD**;
+- a single-observation track and a behind-the-camera track are **rejected**;
+- the filter **stays stable with a well-conditioned innovation over 1000 consecutive
+  updates** — the covariance trace is monotonically non-increasing per step (an
+  update only removes uncertainty, never adds it), and every innovation factorizes
+  (stays PD).
+
+This 1000-step stability result is the acceptance bar from issue #44.

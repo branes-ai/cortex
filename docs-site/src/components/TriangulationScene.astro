@@ -1,0 +1,111 @@
+---
+// TriangulationScene.astro — embeds the static two-view triangulation illustration
+// (triangulation-scene.js) as a vanilla Astro island. No props: it draws the fixed
+// worked example from the Camera Updaters page. Orbit to rotate, scroll to zoom.
+//
+//   <TriangulationScene height={460} />
+interface Props {
+  height?: number;
+}
+const { height = 460 } = Astro.props;
+---
+
+<div class="tri3d" style={`height:${height}px`}>
+  <canvas></canvas>
+  <div class="tri3d-hud"></div>
+  <button type="button" class="tri3d-fit" aria-label="reset view">⤢</button>
+  <div class="tri3d-legend">
+    <span><i style="background:#ff9f0a"></i>feature p_f</span>
+    <span><i style="background:#4fd1ff"></i>camera (clone)</span>
+    <span><i style="background:#35c759"></i>ray to feature</span>
+    <span><i style="background:#ffd60a"></i>image plane + projection</span>
+    <span><i style="background:#8aa6bf"></i>IMU + extrinsic</span>
+  </div>
+</div>
+
+<script>
+  import { mountTriangulation } from './triangulation-scene.js';
+
+  const mounted: Array<{ dispose: () => void }> = [];
+  for (const root of document.querySelectorAll<HTMLElement>('.tri3d')) {
+    const canvas = root.querySelector('canvas') as HTMLCanvasElement;
+    const hud = root.querySelector('.tri3d-hud') as HTMLElement;
+    const fitBtn = root.querySelector('.tri3d-fit') as HTMLButtonElement;
+    const viewer = mountTriangulation({ canvas, hud });
+    const onFit = () => viewer.fitView();
+    fitBtn.addEventListener('click', onFit);
+    mounted.push({ dispose: () => { viewer.dispose(); fitBtn.removeEventListener('click', onFit); } });
+  }
+
+  // Release the WebGL context + GPU resources when leaving the page — both on a
+  // full unload and on Astro client-side (view-transition) navigation.
+  const cleanup = () => { for (const v of mounted) v.dispose(); mounted.length = 0; };
+  window.addEventListener('pagehide', cleanup, { once: true });
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
+</script>
+
+<style>
+  .tri3d {
+    position: relative;
+    width: 100%;
+    border: 1px solid var(--sl-color-gray-5, #30363d);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0e1116;
+  }
+  .tri3d canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+  }
+  .tri3d canvas:active {
+    cursor: grabbing;
+  }
+  .tri3d-hud {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    right: 44px;
+    font-family: var(--sl-font-mono, monospace);
+    font-size: 11px;
+    color: #c9d1d9;
+    text-shadow: 0 1px 2px #000;
+    pointer-events: none;
+    line-height: 1.4;
+  }
+  .tri3d-fit {
+    position: absolute;
+    bottom: 8px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    color: #e6edf3;
+    border: 1px solid #30363d;
+    border-radius: 5px;
+    width: 30px;
+    height: 26px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .tri3d-legend {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-family: var(--sl-font-mono, monospace);
+    font-size: 11px;
+    color: #c9d1d9;
+    text-shadow: 0 1px 2px #000;
+    pointer-events: none;
+  }
+  .tri3d-legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+  }
+</style>
