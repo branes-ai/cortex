@@ -157,6 +157,15 @@ export function mountTriangulation({ canvas, hud }) {
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
+      // Free GPU resources: geometries, materials, and any sprite/label textures.
+      scene.traverse((obj) => {
+        obj.geometry?.dispose?.();
+        const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+        for (const m of mats) {
+          m.map?.dispose?.();
+          m.dispose?.();
+        }
+      });
       renderer.dispose();
     },
   };

@@ -109,8 +109,12 @@ A global translation shifts **every clone *and* the feature by the same vector**
 
 `CameraUpdaterOptions` carries `normalized_sigma` (the measurement σ in normalized
 coordinates — *not* pixels, deliberately named so daemon config can't pass pixel-space
-values) and the gating threshold. The constructor rejects an empty calibration list,
-and an out-of-range `camera_id` is rejected rather than silently aliased to camera 0.
+values) and the gating threshold. The constructor validates **those options** — it
+requires a positive `normalized_sigma`, a positive gate when gating is on, and a
+non-negative `calib_rot_sigma`. The cameras list itself isn't constrained at
+construction; instead an observation whose `camera_index` (or `clone_index`) is
+out of range is **not** aliased to camera 0 — the whole track is dropped at update
+time via a graceful early return.
 
 ## Validated
 
@@ -121,6 +125,7 @@ features, and checks that:
 - a single-observation track and a behind-the-camera track are **rejected**;
 - the filter **stays stable with a well-conditioned innovation over 1000 consecutive
   updates** — the covariance trace is monotonically non-increasing per step (an
-  update only removes information), and every innovation factorizes (stays PD).
+  update only removes uncertainty, never adds it), and every innovation factorizes
+  (stays PD).
 
 This 1000-step stability result is the acceptance bar from issue #44.

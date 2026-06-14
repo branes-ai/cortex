@@ -26,13 +26,22 @@ const { height = 460 } = Astro.props;
 <script>
   import { mountTriangulation } from './triangulation-scene.js';
 
+  const mounted: Array<{ dispose: () => void }> = [];
   for (const root of document.querySelectorAll<HTMLElement>('.tri3d')) {
     const canvas = root.querySelector('canvas') as HTMLCanvasElement;
     const hud = root.querySelector('.tri3d-hud') as HTMLElement;
     const fitBtn = root.querySelector('.tri3d-fit') as HTMLButtonElement;
     const viewer = mountTriangulation({ canvas, hud });
-    fitBtn.addEventListener('click', () => viewer.fitView());
+    const onFit = () => viewer.fitView();
+    fitBtn.addEventListener('click', onFit);
+    mounted.push({ dispose: () => { viewer.dispose(); fitBtn.removeEventListener('click', onFit); } });
   }
+
+  // Release the WebGL context + GPU resources when leaving the page — both on a
+  // full unload and on Astro client-side (view-transition) navigation.
+  const cleanup = () => { for (const v of mounted) v.dispose(); mounted.length = 0; };
+  window.addEventListener('pagehide', cleanup, { once: true });
+  document.addEventListener('astro:before-swap', cleanup, { once: true });
 </script>
 
 <style>
