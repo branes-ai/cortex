@@ -8,7 +8,7 @@
 // file and prints what it recovered. The point is to SEE the schema — run it,
 // then `cat` the .jsonl and read a record without reading any code.
 //
-// Usage:  vio_trace_demo [--out <dir>]      (default build/stage_probes/S4)
+// Usage:  vio_trace_demo [--out <dir>]      (default build/stage_probes/trace)
 //
 // This is NOT a test (that gate is tests/tools/vio_trace.cpp); it is the
 // human-readable demonstration of the format.
@@ -45,10 +45,12 @@ tr::TraceRecord make_frame(std::uint64_t frame, double t_s) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // Reuse the contract registry's S4 entry just for the banner description.
-    StageInfo s4_meta{"S4", "Visual frontend (track generation)", "", {}, {}, {}, {}, "", ""};
-    ProbeArgs args = parse_args(argc, argv, s4_meta);
-    if (args.out.empty())
+    // A throwaway StageInfo drives the shared CLI shell (parse_args): its id is
+    // the default artifact dir (build/stage_probes/trace) and its title shows in
+    // --help. The S4 banner text below is passed separately.
+    StageInfo meta{"trace", "VIO trace bus demo (S4 frontend records)", "", {}, {}, {}, {}, "", ""};
+    ProbeArgs args = parse_args(argc, argv, meta);
+    if (args.out.empty())  // --no-out: still write somewhere the demo can read back
         args.out = "build/stage_probes/trace";
 
     std::error_code ec;
@@ -72,6 +74,10 @@ int main(int argc, char** argv) {
 
     // ── Read back ─────────────────────────────────────────────────────────────
     std::ifstream is(path);
+    if (!is) {
+        std::cerr << "vio_trace_demo: cannot read " << path << "\n";
+        return 1;
+    }
     tr::TraceReader r(is);
     auto records = r.read_all();
     std::cout << "replayed " << records.size() << " S4 records:\n";
