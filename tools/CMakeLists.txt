@@ -15,6 +15,9 @@ target_link_libraries(branes_tools INTERFACE branes::sdk)
 # vio_pipeline writes annotated scene PNGs via stb_image_write (header-only). The
 # include path is harmless on the other tools (none define the implementation).
 target_link_libraries(branes_tools INTERFACE branes::stb_image)
+# The inter-stage trace bus (vio_trace.hpp, #372) serializes per-stage I/O to
+# JSONL and reads it back; nlohmann/json supplies the parser the inspectors need.
+target_link_libraries(branes_tools INTERFACE nlohmann_json::nlohmann_json)
 
 file(GLOB STAGE_PROBE_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 foreach(src ${STAGE_PROBE_SRC})
