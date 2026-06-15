@@ -30,6 +30,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.51.0](https://github.com/branes-ai/cortex/compare/v0.50.3...v0.51.0) (2026-06-15)
+
+
+### Features
+
+* **sdk:** R-IEKF VIO backend adapter + continuous-update divergence localization ([#365](https://github.com/branes-ai/cortex/issues/365)) ([#367](https://github.com/branes-ai/cortex/issues/367)) ([f7c2671](https://github.com/branes-ai/cortex/commit/f7c26718b36bce00066048ed658db6db781cb67b))
+
 ## [0.50.3](https://github.com/branes-ai/cortex/compare/v0.50.2...v0.50.3) (2026-06-14)
 
 
