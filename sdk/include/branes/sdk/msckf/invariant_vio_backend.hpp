@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <span>
 #include <stdexcept>
 #include <unordered_map>
@@ -70,14 +71,14 @@ public:
     void set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t) {
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
-        have_last_ = true;
-        last_gyro_ = Vec3{};
-        last_accel_ = Vec3{};
+        have_last_ = false;
     }
 
     /// IMU sample: propagate from the previous sample (zero-order hold held over to
     /// the next image time). Drops out-of-order / duplicate timestamps.
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
+        if (have_last_ && t <= last_imu_time_)
+            return;
         if (have_last_) {
             const double dt = t - last_imu_time_;
             if (dt > 0.0)
@@ -166,15 +167,7 @@ private:
                 track.push_back(InvariantObs<T>{ci, rec.xy});
         }
         if (track.size() >= 2) {
-            if (be_.update(track)) {
-                static std::size_t n_ok = 0;
-                ++n_ok;
-                if (n_ok % 100 == 0) std::printf("[backend-diag] updates_ok=%zu\n", n_ok);
-            } else {
-                static std::size_t n_fail = 0;
-                ++n_fail;
-                if (n_fail % 100 == 0) std::printf("[backend-diag] update_failed=%zu\n", n_fail);
-            }
+            (void)be_.update(track);
         }
         tracks_.erase(it);
     }

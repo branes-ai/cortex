@@ -11,7 +11,7 @@
 //       ∂h/∂φ = dh·R_cᵀ·[p_f]×,  ∂h/∂ρ = −dh·R_cᵀ,  ∂h/∂p_f = dh·R_cᵀ.
 //     The gauge directions this annihilates are STATE-INDEPENDENT constants, so it
 //     never fabricates yaw information (Phase A: flat yaw leak at every σ);
-//   • the EKF correction is retracted by the right-invariant box-plus
+//   • the EKF correction is retracted by the left-invariant box-plus
 //     R_c ← Exp(δφ)·R_c, p_c ← Exp(δφ)·p_c + δρ (world-frame), not the body-frame
 //     R_c ← R_c·Exp(δθ).
 //
@@ -92,7 +92,9 @@ template <math::Scalar T>
     // cube of the mean eigenvalue) that rejects low-parallax/ill-conditioned tracks
     // regardless of how many observations are stacked, not just exact singularity.
     const T mean_eig = (A(0, 0) + A(1, 1) + A(2, 2)) / T{3};
-    const T eps_rel = T{1} / T{1000000};  // 1e-6 conditioning floor
+    // 1e-6 conditioning floor. Stricter thresholds (like 1e-4) falsely reject
+    // highly-clustered yet valid tracks in specific geometries (such as diagnostic worlds).
+    const T eps_rel = T{1} / T{1000000};
     if (!(dt > eps_rel * mean_eig * mean_eig * mean_eig))
         return {};
     auto cof = [&](std::size_t i, std::size_t j) {
@@ -155,8 +157,8 @@ template <math::Scalar T>
         dh(1, 1) = inv;
         dh(1, 2) = -y[1] * inv * inv;
 
-        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                                // ∂h/∂p_f = dh·R_cᵀ
-        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));    // ∂h/∂φ = dh·R_cᵀ·[p_f]×
+        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                              // ∂h/∂p_f = dh·R_cᵀ
+        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));  // ∂h/∂φ = dh·R_cᵀ·[p_f]×
         const std::size_t row = 2 * i, off = 6 * obs[i].clone_index;
         for (std::size_t a = 0; a < 2; ++a) {
             M.r[row + a] = obs[i].xy[a] - y[a] * inv;

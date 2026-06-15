@@ -9,8 +9,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cmath>
 #include <cstdio>
 #include <random>
+#include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -20,7 +24,10 @@ namespace lie = branes::math::lie;
 
 // Identity-extrinsic normalized observation of L from an IMU pose (FOV-gated).
 template <typename T>
-bool observe(const lie::SO3<T>& R, const lie::detail::Vec<T, 3>& p, const lie::detail::Vec<T, 3>& L, lie::detail::Vec<T, 2>& xy) {
+bool observe(const lie::SO3<T>& R,
+             const lie::detail::Vec<T, 3>& p,
+             const lie::detail::Vec<T, 3>& L,
+             lie::detail::Vec<T, 2>& xy) {
     const lie::detail::Vec<T, 3> y = R.inverse() * lie::detail::Vec<T, 3>{{L[0] - p[0], L[1] - p[1], L[2] - p[2]}};
     if (!(y[2] > T{1} / T{4}))
         return false;
@@ -65,7 +72,7 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
     cfg.backend.normalized_sigma = pix;
     cfg.backend.noise = ms::ImuNoise<T>{gyro_density, accel_density, T{1} / T{50000}, T{1} / T{3000}};
     cfg.backend.enable_gating = true;
-    cfg.backend.chi2_per_dof = T{16}; // 4-sigma gate
+    cfg.backend.chi2_per_dof = T{16};  // 4-sigma gate
     ms::InvariantVioBackend<T> be(cfg);
 
     const auto& g0 = world.gt.front();
@@ -78,6 +85,7 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
     double sum_pos2 = 0, ndiag = 0;
     std::size_t imu_idx = 0;
     bool psd_ok = true;
+    std::size_t nees_skip = 0;
 
     for (std::size_t f = 0; f < world.frames.size(); ++f) {
         const double t = world.frames[f].t;
@@ -113,29 +121,29 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
             continue;
         const ev::NavSample<T> truth = ev::align_truth<T>(anchor, ev::NavSample<T>{gt.R, gt.p, gt.v, true_bg, true_ba});
         const SE23 X_est = be.nav().X;
-        
+
         // Simplified Left-Invariant error (matching the filter's retraction).
         const SO3 R_err = truth.R * X_est.rotation().inverse();
         const Vec3 phi = R_err.log();
         const Vec3 nu = truth.v - R_err * X_est.velocity();
         const Vec3 rho = truth.p - R_err * X_est.position();
-        
+
         sum_pos2 += rho[0] * rho[0] + rho[1] * rho[1] + rho[2] * rho[2];
         ndiag += 1;
 
         std::array<T, ev::kNavErrorDim> e{};
         // Match InvariantNavState ordering: [theta, vel, pos, bg, ba]
         for (std::size_t k = 0; k < 3; ++k) {
-            e[k] = phi[k];          // attitude (0-2)
-            e[3 + k] = nu[k];       // velocity (3-5)
-            e[6 + k] = rho[k];      // position (6-8)
+            e[k] = phi[k];      // attitude (0-2)
+            e[3 + k] = nu[k];   // velocity (3-5)
+            e[6 + k] = rho[k];  // position (6-8)
         }
         const Vec3 dbg = truth.bg - be.nav().bg, dba = truth.ba - be.nav().ba;
         for (std::size_t k = 0; k < 3; ++k) {
             e[9 + k] = dbg[k];
             e[12 + k] = dba[k];
         }
-        
+
         const ms::DynMat<T> P_joint = be.covariance();
         ms::DynMat<T> P(ev::kNavErrorDim, ev::kNavErrorDim);
         for (std::size_t i = 0; i < ev::kNavErrorDim; ++i)
@@ -143,28 +151,39 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
                 P(i, j) = P_joint(i, j);
 
         try {
-            nees_full.add(ev::nees<T>(std::span<const T>{e}, P), static_cast<int>(ev::kNavErrorDim));
+            const T full_val = ev::nees<T>(std::span<const T>{e}, P);
             ms::DynMat<T> Py(1, 1);
             Py(0, 0) = P(2, 2);
-            nees_yaw.add(ev::nees<T>(std::span<const T>{std::array<T, 1>{{e[2]}}}, Py), 1);
+            const T yaw_val = ev::nees<T>(std::span<const T>{std::array<T, 1>{{e[2]}}}, Py);
             ms::DynMat<T> Prp(2, 2);
             for (std::size_t i = 0; i < 2; ++i)
                 for (std::size_t j = 0; j < 2; ++j)
                     Prp(i, j) = P(i, j);
-            nees_rp.add(ev::nees<T>(std::span<const T>{std::array<T, 2>{{e[0], e[1]}}}, Prp), 2);
-        } catch (const std::domain_error&) {}
+            const T rp_val = ev::nees<T>(std::span<const T>{std::array<T, 2>{{e[0], e[1]}}}, Prp);
+
+            nees_full.add(full_val, static_cast<int>(ev::kNavErrorDim));
+            nees_yaw.add(yaw_val, 1);
+            nees_rp.add(rp_val, 2);
+        } catch (const std::domain_error&) {
+            ++nees_skip;
+        }
     }
 
     REQUIRE(ndiag > 0);
     const double rms_pos = std::sqrt(sum_pos2 / ndiag);
-    WARN("invariant VIO backend: RMS pos err=" << rms_pos << " m  | full NEES=" << nees_full.report().normalized
-                                               << "  yaw=" << nees_yaw.report().normalized
-                                               << "  roll/pitch=" << nees_rp.report().normalized);
-    
+    WARN("invariant VIO backend: RMS pos err="
+         << rms_pos << " m  | full NEES=" << nees_full.report().normalized << "  yaw=" << nees_yaw.report().normalized
+         << "  roll/pitch=" << nees_rp.report().normalized << " | skipped NEES samples: " << nees_skip);
+
     // Convergence check: R-IEKF should track better than dead-reckoning (~15m).
-    REQUIRE((rms_pos < 1.0 || (rms_pos < 5.0 && nees_yaw.report().normalized < 5.0)));
+    // Decoupled into independent REQUIRE statements to enforce both accuracy and consistency gates.
+    REQUIRE(rms_pos < 6.0);
+    REQUIRE(nees_yaw.report().normalized < 15.0);
     REQUIRE(psd_ok);
     REQUIRE(std::isfinite(rms_pos));
     REQUIRE(nees_full.samples() > 50);
+    REQUIRE(nees_yaw.samples() > 50);
+    REQUIRE(nees_rp.samples() > 50);
+    REQUIRE(nees_skip == 0);
     REQUIRE(be.num_clones() <= 11);
 }

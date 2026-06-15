@@ -101,6 +101,7 @@ public:
         const std::array<NoiseTerm<T>, 12> q = nav_process_noise(dt);
         cov_.predict(F, std::span<const NoiseTerm<T>>{q});
         prop_.propagate_mean(nav_, gyro, accel, dt);  // joint covariance handled above
+        nav_.timestamp += static_cast<double>(dt);
     }
 
     /// Append a clone of the current nav pose to the window. The clone shares the

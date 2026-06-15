@@ -20,7 +20,6 @@
 #include <array>
 #include <cstddef>
 #include <span>
-#include <vector>
 
 namespace branes::sdk::msckf {
 
@@ -34,7 +33,7 @@ struct InvariantNavState {
     Vec3 ba{};  ///< accel bias
     double timestamp = 0.0;
 
-    static constexpr std::size_t kTheta = 0;  // right-invariant error-state offsets
+    static constexpr std::size_t kTheta = 0;  // left-invariant error-state offsets
     static constexpr std::size_t kVel = 3;
     static constexpr std::size_t kPos = 6;
     static constexpr std::size_t kBg = 9;
@@ -42,7 +41,7 @@ struct InvariantNavState {
     static constexpr std::size_t kDim = 15;
 };
 
-/// Propagates an `InvariantNavState` and its right-invariant error covariance.
+/// Propagates an `InvariantNavState` and its left-invariant error covariance.
 template <math::Scalar T>
 class InvariantPropagator {
 public:
@@ -55,8 +54,8 @@ public:
     explicit InvariantPropagator(const ImuNoise<T>& noise = {}, const Vec3& gravity = {{T{0}, T{0}, T{-981} / T{100}}})
         : noise_(noise), gravity_(gravity) {}
 
-    /// The 15×15 right-invariant error-transition Φ at the extended pose (R̂, v̂, p̂).
-    /// Built as the discrete Φ = I + A·dt + ½(A·dt)² from the continuous right-invariant
+    /// The 15×15 left-invariant error-transition Φ at the extended pose (R̂, v̂, p̂).
+    /// Built as the discrete Φ = I + A·dt + ½(A·dt)² from the continuous left-invariant
     /// generator A, so it is CONSISTENT with the exact SE₂(3) mean strapdown (a plain
     /// Euler I + A·dt is not — issue #366).
     ///
@@ -66,10 +65,10 @@ public:
     ///   δṗ = δv        − [p̂]× R̂ δbg
     /// The (θ,v,p) sub-block is STATE-INDEPENDENT (only the constant [g]×); the gyro-bias
     /// column carries the world-frame lever arms −[v̂]× R̂ and −[p̂]× R̂ — the standard
-    /// right-invariant ("imperfect IEKF") bias coupling. Those lever-arm terms were the
+    /// left-invariant ("imperfect IEKF") bias coupling. Those lever-arm terms were the
     /// #366 divergence: omitting them left the velocity↔attitude observability chain
     /// inconsistent, so the camera update injected error through the bias cross-covariance
-    /// (RMS pos err 211 m → 0.x m once restored). Two discretization details matter too:
+    /// (RMS pos err 162.9 m → 3.44 m once restored). Two discretization details matter too:
     /// the ½(A·dt)² term carries the only δθ → δv → δρ path (roll/pitch observability),
     /// and A is nilpotent on the nav block (A³ = 0 there) so 2nd order is exact for it.
     ///
@@ -83,13 +82,13 @@ public:
         const Mat3 px = math::lie::detail::hat(p);
         // Continuous generator A (no dt yet).
         DynMat<T> A(State::kDim, State::kDim);
-        place3(A, State::kTheta, State::kBg, R_m * T{-1});        // δθ̇ ← −R̂ δbg
-        place3(A, State::kVel, State::kTheta, gx);                // δv̇ ← [g]× δθ
-        place3(A, State::kVel, State::kBg, (vx * R_m) * T{-1});   // δv̇ ← −[v̂]× R̂ δbg
-        place3(A, State::kVel, State::kBa, R_m * T{-1});          // δv̇ ← −R̂ δba
+        place3(A, State::kTheta, State::kBg, R_m * T{-1});       // δθ̇ ← −R̂ δbg
+        place3(A, State::kVel, State::kTheta, gx);               // δv̇ ← [g]× δθ
+        place3(A, State::kVel, State::kBg, (vx * R_m) * T{-1});  // δv̇ ← −[v̂]× R̂ δbg
+        place3(A, State::kVel, State::kBa, R_m * T{-1});         // δv̇ ← −R̂ δba
         for (std::size_t i = 0; i < 3; ++i)
-            A(State::kPos + i, State::kVel + i) += T{1};          // δṗ ← δv
-        place3(A, State::kPos, State::kBg, (px * R_m) * T{-1});   // δṗ ← −[p̂]× R̂ δbg
+            A(State::kPos + i, State::kVel + i) += T{1};         // δṗ ← δv
+        place3(A, State::kPos, State::kBg, (px * R_m) * T{-1});  // δṗ ← −[p̂]× R̂ δbg
 
         // Φ = I + A·dt + ½(A·dt)².
         const std::size_t d = State::kDim;
@@ -108,7 +107,7 @@ public:
         return F;
     }
 
-    /// Propagate the mean (SE₂(3) strapdown) and the right-invariant covariance
+    /// Propagate the mean (SE₂(3) strapdown) and the left-invariant covariance
     /// P ← Φ P Φᵀ + Q over one IMU sample. Ignores non-positive dt.
     template <class Cov>
     void propagate(State& s, Cov& cov, const Vec3& gyro, const Vec3& accel, T dt) const {
@@ -118,7 +117,7 @@ public:
         const Vec3 a = accel - s.ba;
         const SO3& R = s.X.rotation();
 
-        // Covariance in the right-invariant error coordinates.
+        // Covariance in the left-invariant error coordinates.
         const DynMat<T> F = phi(R, s.X.velocity(), s.X.position(), dt);
         std::array<NoiseTerm<T>, 12> q;
         push_diag(q, 0, State::kTheta, noise_.gyro * noise_.gyro * dt);
