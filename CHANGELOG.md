@@ -44,6 +44,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.52.0](https://github.com/branes-ai/cortex/compare/v0.51.1...v0.52.0) (2026-06-15)
+
+
+### Features
+
+* **tools:** inter-stage VIO trace bus — typed, human-readable per-stage I/O records ([#385](https://github.com/branes-ai/cortex/issues/385)) ([e5b8caf](https://github.com/branes-ai/cortex/commit/e5b8caf8be515ae572491822ff187dd777bf65d6))
+
 ## [0.51.1](https://github.com/branes-ai/cortex/compare/v0.51.0...v0.51.1) (2026-06-15)
 
 
