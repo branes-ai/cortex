@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -58,7 +59,12 @@ public:
     };
 
     explicit InvariantVioBackend(const Config& cfg = {})
-        : be_(with_unbounded_window(cfg.backend)), max_clones_(cfg.max_clones) {}
+        : be_(with_unbounded_window(cfg.backend)), max_clones_(cfg.max_clones) {
+        // A window of < 2 clones is degenerate: 0 spins the marginalization loop and
+        // 1 never gives the MSCKF update a second view to triangulate against.
+        if (cfg.max_clones < 2)
+            throw std::invalid_argument("InvariantVioBackend: max_clones must be >= 2");
+    }
 
     /// Seed the nav state — e.g. from a static/dynamic init or ground truth at t0.
     void set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t) {

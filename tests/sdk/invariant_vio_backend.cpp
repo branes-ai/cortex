@@ -12,10 +12,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <random>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -144,6 +146,7 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
         } catch (const std::domain_error&) {}
     }
 
+    REQUIRE(ndiag > 0);  // post-warmup samples accumulated (else the RMS is undefined)
     const double rms_pos = std::sqrt(sum_pos2 / ndiag);
     WARN("invariant VIO backend: RMS pos err=" << rms_pos << " m  | full NEES=" << nees_full.report().normalized
                                                << "  yaw=" << nees_yaw.report().normalized
