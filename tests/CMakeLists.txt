@@ -49,6 +49,15 @@ compile_all(FOLDER "Tests/sdk" LIBS branes::sdk branes::cv
 file(GLOB BENCH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp)
 compile_all(FOLDER "Tests/bench" LIBS branes::bench branes::sdk SOURCES ${BENCH_SRC})
 
+# ── Tools layer (issue #372 — VIO trace bus) ───────────────────────────────
+# branes::tools is host-only (skipped on the KPU cross-build), so gate the group
+# on it existing. It is an INTERFACE target carrying the tools include path plus
+# branes::sdk and nlohmann/json, so the round-trip gate links just that.
+if(TARGET branes::tools)
+    file(GLOB TOOLS_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/*.cpp)
+    compile_all(FOLDER "Tests/tools" LIBS branes::tools SOURCES ${TOOLS_SRC})
+endif()
+
 # ── Integration: foundational deps + the C++↔Rust cxx::bridge ──────────────
 # These two have bespoke link sets (the deps smoke test reaches every third-
 # party library; the bridge test links the Corrosion-generated cxx glue plus

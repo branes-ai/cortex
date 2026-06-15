@@ -74,7 +74,20 @@ FetchContent_Declare(
     GIT_TAG        31c1ad37456438565541f4919958214b6e762fb4
 )
 
-FetchContent_MakeAvailable(mtl5 yaml-cpp Catch2 Tracy stb)
+# ── nlohmann/json — header-only JSON (the VIO trace bus, #372) ──────
+# The inter-stage trace records (tools/include/branes/tools/vio_trace.hpp)
+# are written AND read back by the per-stage inspectors, so the tools layer
+# needs a real parser — the rest of the repo only ever wrote JSON by hand.
+# Header-only; tests are off so it doesn't expand the build.
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(mtl5 yaml-cpp Catch2 Tracy stb nlohmann_json)
 
 # Universal: populate without adding the subdirectory (its CMakeLists
 # uses CMAKE_SOURCE_DIR which is wrong under FetchContent). CMake 3.30+

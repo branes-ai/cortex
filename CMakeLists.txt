@@ -90,11 +90,10 @@ corrosion_add_cxxbridge(cortex_core_cxx
 #    Catch2, Tracy, stb_image). All permissive licenses; see docs/adr/0001.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/deps.cmake)
 
-# 5. Tests (enabled by default; use -DBUILD_TESTING=OFF to skip).
+# 5. Tests (enabled by default; use -DBUILD_TESTING=OFF to skip). The tests
+#    subdirectory is added LAST (below) so it can link the library targets —
+#    including branes::tools — defined by the project subdirectories.
 include(CTest)
-if(BUILD_TESTING)
-    add_subdirectory(tests)
-endif()
 
 # 6. Project subdirectories
 add_subdirectory(math)
@@ -106,4 +105,8 @@ add_subdirectory(daemons)
 # VIO stage-probe study utilities (host-only developer tools — see tools/).
 if(NOT BUILD_TARGET_KPU)
     add_subdirectory(tools)
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()
