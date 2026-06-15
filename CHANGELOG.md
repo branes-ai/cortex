@@ -14,6 +14,20 @@ generates entries automatically from Conventional Commits on `main`.
 
 ## Milestones
 
+- **2026-06-13→15 — R-IEKF backend built; FEJ refuted; system verdict localized a
+  bug (→ v0.50.3).** Built the Right-Invariant EKF backend end to end — `SE2(3)`
+  state, invariant propagation, invariant camera update, `MsckfInvariantBackend` —
+  each **unit-proven** to annihilate/preserve the 4-DoF unobservable gauge by
+  construction (the #212 yaw-leak fix, no FEJ). The surgical FEJ alternative was
+  **implemented, measured, and refuted** (passed the unit metric < 1e-15 but nearly
+  doubled end-to-end NEES, 42.6 → 77.7) — only its production-driver gauge check was
+  kept. Published the camera-calibration / projection-Jacobian docs (KaTeX +
+  interactive 3D triangulation scene). Triaged the Phase-3 milestone (15 → 8 open
+  issues). Drove the invariant backend through the validated front end for the
+  system-level verdict, which **localized a real continuous-update bug** (#366 — the
+  velocity-coupling chain that makes roll/pitch observable is inconsistent). 9 PRs
+  (#353, #354, #356, #357, #358, #360, #362, #364, #367). See
+  [`docs/sessions/2026-06-13-riekf-backend-fej-refuted-system-verdict.md`](docs/sessions/2026-06-13-riekf-backend-fej-refuted-system-verdict.md).
 - **2026-06-05 — VIO Pipeline docs section + 3D visualization (→ v0.40.0).**
   Published the #212 over-confidence analysis as a Starlight section with six
   data-backed stage pages (S0 holds, S1 seed-suspect, S2 cleared, S5 gate-missing,
