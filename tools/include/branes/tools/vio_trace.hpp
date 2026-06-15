@@ -137,7 +137,8 @@ template <class Matrix>
 
 template <branes::math::Scalar T = double>
 [[nodiscard]] inline std::array<T, 3> unpack_vec3(const json& j) {
-    return {static_cast<T>(j.at(0).get<double>()), static_cast<T>(j.at(1).get<double>()),
+    return {static_cast<T>(j.at(0).get<double>()),
+            static_cast<T>(j.at(1).get<double>()),
             static_cast<T>(j.at(2).get<double>())};
 }
 
@@ -301,12 +302,12 @@ private:
 /// gyro-derived rotation prior.
 template <branes::math::Scalar T = double>
 struct S4Input {
-    std::string image_path;                            ///< path the inspector reloads
-    std::uint32_t width = 0;                           ///< image dims, for sanity/overlay
-    std::uint32_t height = 0;                           //
-    std::uint32_t camera_id = 0;                        ///< which camera produced it
+    std::string image_path;                                ///< path the inspector reloads
+    std::uint32_t width = 0;                               ///< image dims, for sanity/overlay
+    std::uint32_t height = 0;                              //
+    std::uint32_t camera_id = 0;                           ///< which camera produced it
     std::vector<sdk::FrontendObservation<T>> prev_tracks;  ///< tracks from the previous frame
-    std::optional<lie::SO3<T>> gyro_prior;             ///< optional rotation prior (S2 → frontend)
+    std::optional<lie::SO3<T>> gyro_prior;                 ///< optional rotation prior (S2 → frontend)
 };
 
 /// S4 output: the surviving observations after tracking + RANSAC — the boundary
@@ -318,8 +319,8 @@ struct S4Output {
 
 template <class T>
 inline void to_json(json& j, const S4Input<T>& in) {
-    j = json{{"image", json{{"path", in.image_path}, {"width", in.width}, {"height", in.height},
-                            {"camera_id", in.camera_id}}}};
+    j = json{{"image",
+              json{{"path", in.image_path}, {"width", in.width}, {"height", in.height}, {"camera_id", in.camera_id}}}};
     json tracks = json::array();
     for (const auto& o : in.prev_tracks)
         tracks.push_back(pack(o));

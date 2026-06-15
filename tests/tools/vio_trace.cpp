@@ -78,7 +78,9 @@ TEST_CASE("shared vocabulary round-trips through JSON", "[tools][vio_trace]") {
         // A tiny dense matrix view exposing operator()(i,j).
         struct Mat {
             std::array<std::array<double, 3>, 3> e;
-            double operator()(std::size_t i, std::size_t j) const { return e[i][j]; }
+            double operator()(std::size_t i, std::size_t j) const {
+                return e[i][j];
+            }
         } P{{{{1.0, 0.1, 0.2}, {0.1, 2.0, 0.3}, {0.2, 0.3, 3.0}}}};
         auto j = tr::pack_covariance(P, 3);
         REQUIRE(j.size() == 3);
