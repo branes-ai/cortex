@@ -45,7 +45,7 @@ struct InvariantObs {
     math::lie::detail::Vec<T, 2> xy{};
 };
 
-/// Right-invariant box-plus on a clone pose: R ← Exp(φ)·R, p ← Exp(φ)·p + ρ.
+/// Left-invariant box-plus on a clone pose: R ← Exp(φ)·R, p ← Exp(φ)·p + ρ.
 template <math::Scalar T>
 void retract_invariant(InvariantClone<T>& c,
                        const math::lie::detail::Vec<T, 3>& phi,
@@ -92,7 +92,7 @@ template <math::Scalar T>
     // cube of the mean eigenvalue) that rejects low-parallax/ill-conditioned tracks
     // regardless of how many observations are stacked, not just exact singularity.
     const T mean_eig = (A(0, 0) + A(1, 1) + A(2, 2)) / T{3};
-    const T eps_rel = T{1} / T{10000};  // 1e-4 conditioning floor
+    const T eps_rel = T{1} / T{1000000};  // 1e-6 conditioning floor
     if (!(dt > eps_rel * mean_eig * mean_eig * mean_eig))
         return {};
     auto cof = [&](std::size_t i, std::size_t j) {
@@ -134,26 +134,29 @@ template <math::Scalar T>
     M.H_x.assign(rows2 * n, T{0});
     M.r.assign(rows2, T{0});
 
+    // Cheirality + a numerical-stability floor: a near-zero depth would make
+    // 1/y[2] explode and dominate the EKF correction. This is a blow-up guard,
+    // not a quality gate (track quality is screened upstream at triangulation).
+    constexpr T kMinDepth = T{1} / T{1000};  // 1 mm
+
     for (std::size_t i = 0; i < m; ++i) {
         if (obs[i].clone_index >= clones.size())
             return M;  // out-of-range clone reference; ok stays false
         const auto& c = clones[obs[i].clone_index];
         const Mat3 Rct = c.R.inverse().matrix();  // R_cᵀ (identity extrinsic)
         const Vec3 y = Rct * (p_f - c.p);
-        // Cheirality + a numerical-stability floor: a near-zero depth would make
-        // 1/y[2] explode and dominate the EKF correction. This is a blow-up guard,
-        // not a quality gate (track quality is screened upstream at triangulation).
-        constexpr T kMinDepth = T{1} / T{1000};  // 1 mm
         if (!(y[2] > kMinDepth))
             return M;  // ok stays false
+
         const T inv = T{1} / y[2];
         math::lie::detail::Mat<T, 2, 3> dh{};
         dh(0, 0) = inv;
         dh(0, 2) = -y[0] * inv * inv;
         dh(1, 1) = inv;
         dh(1, 2) = -y[1] * inv * inv;
-        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                            // ∂h/∂p_f = dh·R_cᵀ
-        const math::lie::detail::Mat<T, 2, 3> Hphi = dhRct * math::lie::detail::hat(p_f);  // dh·R_cᵀ·[p_f]×
+
+        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                                // ∂h/∂p_f = dh·R_cᵀ
+        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));    // ∂h/∂φ = dh·R_cᵀ·[p_f]×
         const std::size_t row = 2 * i, off = 6 * obs[i].clone_index;
         for (std::size_t a = 0; a < 2; ++a) {
             M.r[row + a] = obs[i].xy[a] - y[a] * inv;

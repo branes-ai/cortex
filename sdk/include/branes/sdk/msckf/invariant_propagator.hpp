@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: MIT
 //
-// branes/sdk/msckf/invariant_propagator.hpp — the IMU propagation for the
-// Right-Invariant EKF (R-IEKF) backend (issue #347, Phase B). The mean lives on
-// SE₂(3) (extended pose, R/v/p) plus the IMU biases; the covariance is carried in
-// the RIGHT-INVARIANT error state [δθ; δv; δp; δbg; δba].
+// branes/sdk/msckf/invariant_propagator.hpp — the IMU mean + covariance
+// propagation for the Right-Invariant EKF (R-IEKF) backend (issue #347, Phase B).
+// The mean lives on SE₂(3) (extended pose, R/v/p) plus the body-frame biases.
 //
-// Why this exists: the shipped body-frame propagator (propagator.hpp) couples
-// velocity to attitude through −R̂[a]×·dt — dependent on the rotation ESTIMATE —
-// which is the propagation source of the #212 yaw observability leak (no FEJ
-// variant could freeze it; both diverged). In the right-invariant error the
-// specific force cancels and only GRAVITY survives, so the nav block of the
-// error-transition Φ becomes the constant [g]×·dt and the gyro self-term −[ω]×
-// drops out: the nav Φ depends only on (g, dt), and the unobservable yaw/position
-// gauge is preserved through propagation BY CONSTRUCTION. The bias columns retain
-// an R̂ term — the standard "imperfect IEKF" coupling (biases are body-frame).
-// Phase A measured both halves (flat yaw leak + state-independent nav Φ).
+// Clean-room implementation from the R-IEKF paper (Barrau & Bonnabel, 2017)
+// and the "Imperfect IEKF" bias coupling (van Goor et al., 2020).
 //
 // Header-only, C++20, type-generic.
 
@@ -22,11 +13,14 @@
 #define BRANES_SDK_MSCKF_INVARIANT_PROPAGATOR_HPP
 
 #include <branes/math/lie/se23.hpp>
+#include <branes/math/lie/so3.hpp>
 #include <branes/sdk/msckf/dense.hpp>
 #include <branes/sdk/msckf/propagator.hpp>  // ImuNoise, NoiseTerm
 
 #include <array>
 #include <cstddef>
+#include <span>
+#include <vector>
 
 namespace branes::sdk::msckf {
 
@@ -61,21 +55,56 @@ public:
     explicit InvariantPropagator(const ImuNoise<T>& noise = {}, const Vec3& gravity = {{T{0}, T{0}, T{-981} / T{100}}})
         : noise_(noise), gravity_(gravity) {}
 
-    /// The 15×15 right-invariant error-transition Φ at rotation `R̂`. The nav block
-    /// (θ,v,p) is STATE-INDEPENDENT — the only coupling is the constant [g]×; the
-    /// bias columns carry R̂ (imperfect IEKF). Public so the observability test can
-    /// confirm it preserves the gauge null space at any state.
-    [[nodiscard]] DynMat<T> phi(const SO3& R, T dt) const {
-        DynMat<T> F = DynMat<T>::identity(State::kDim);
+    /// The 15×15 right-invariant error-transition Φ at the extended pose (R̂, v̂, p̂).
+    /// Built as the discrete Φ = I + A·dt + ½(A·dt)² from the continuous right-invariant
+    /// generator A, so it is CONSISTENT with the exact SE₂(3) mean strapdown (a plain
+    /// Euler I + A·dt is not — issue #366).
+    ///
+    /// The continuous generator (ordering [δθ; δv; δp; δbg; δba]):
+    ///   δθ̇ = −R̂ δbg
+    ///   δv̇ = [g]× δθ − [v̂]× R̂ δbg − R̂ δba
+    ///   δṗ = δv        − [p̂]× R̂ δbg
+    /// The (θ,v,p) sub-block is STATE-INDEPENDENT (only the constant [g]×); the gyro-bias
+    /// column carries the world-frame lever arms −[v̂]× R̂ and −[p̂]× R̂ — the standard
+    /// right-invariant ("imperfect IEKF") bias coupling. Those lever-arm terms were the
+    /// #366 divergence: omitting them left the velocity↔attitude observability chain
+    /// inconsistent, so the camera update injected error through the bias cross-covariance
+    /// (RMS pos err 211 m → 0.x m once restored). Two discretization details matter too:
+    /// the ½(A·dt)² term carries the only δθ → δv → δρ path (roll/pitch observability),
+    /// and A is nilpotent on the nav block (A³ = 0 there) so 2nd order is exact for it.
+    ///
+    /// Public so the observability test can confirm Φ·N = N at any state — preserved
+    /// because every bias term multiplies a bias perturbation, which is zero on all four
+    /// gauge directions (global translation + gravity-yaw), and [g]×·ẑ = 0.
+    [[nodiscard]] DynMat<T> phi(const SO3& R, const Vec3& v, const Vec3& p, T dt) const {
         const Mat3 R_m = R.matrix();
-        // δθ̇ = −R̂ δbg            (no [ω]× self-term)
-        place3(F, State::kTheta, State::kBg, R_m * (-dt));
-        // δv̇ = [g]× δθ − R̂ δba   ([g]× constant — state-independent)
-        place3(F, State::kVel, State::kTheta, math::lie::detail::hat(gravity_) * dt);
-        place3(F, State::kVel, State::kBa, R_m * (-dt));
-        // δṗ = δv
+        const Mat3 gx = math::lie::detail::hat(gravity_);
+        const Mat3 vx = math::lie::detail::hat(v);
+        const Mat3 px = math::lie::detail::hat(p);
+        // Continuous generator A (no dt yet).
+        DynMat<T> A(State::kDim, State::kDim);
+        place3(A, State::kTheta, State::kBg, R_m * T{-1});        // δθ̇ ← −R̂ δbg
+        place3(A, State::kVel, State::kTheta, gx);                // δv̇ ← [g]× δθ
+        place3(A, State::kVel, State::kBg, (vx * R_m) * T{-1});   // δv̇ ← −[v̂]× R̂ δbg
+        place3(A, State::kVel, State::kBa, R_m * T{-1});          // δv̇ ← −R̂ δba
         for (std::size_t i = 0; i < 3; ++i)
-            F(State::kPos + i, State::kVel + i) += dt;
+            A(State::kPos + i, State::kVel + i) += T{1};          // δṗ ← δv
+        place3(A, State::kPos, State::kBg, (px * R_m) * T{-1});   // δṗ ← −[p̂]× R̂ δbg
+
+        // Φ = I + A·dt + ½(A·dt)².
+        const std::size_t d = State::kDim;
+        DynMat<T> F = DynMat<T>::identity(d);
+        for (std::size_t i = 0; i < d; ++i)
+            for (std::size_t j = 0; j < d; ++j)
+                F(i, j) += A(i, j) * dt;
+        const T half_dt2 = dt * dt / T{2};
+        for (std::size_t i = 0; i < d; ++i)
+            for (std::size_t j = 0; j < d; ++j) {
+                T a2 = T{0};
+                for (std::size_t k = 0; k < d; ++k)
+                    a2 += A(i, k) * A(k, j);
+                F(i, j) += a2 * half_dt2;
+            }
         return F;
     }
 
@@ -90,7 +119,7 @@ public:
         const SO3& R = s.X.rotation();
 
         // Covariance in the right-invariant error coordinates.
-        const DynMat<T> F = phi(R, dt);
+        const DynMat<T> F = phi(R, s.X.velocity(), s.X.position(), dt);
         std::array<NoiseTerm<T>, 12> q;
         push_diag(q, 0, State::kTheta, noise_.gyro * noise_.gyro * dt);
         push_diag(q, 3, State::kVel, noise_.accel * noise_.accel * dt);
@@ -118,7 +147,6 @@ public:
                            p[2] + v[2] * dt + a_world[2] * (T{1} / T{2} * dt * dt)}};
         const Vec3 v_next{{v[0] + a_world[0] * dt, v[1] + a_world[1] * dt, v[2] + a_world[2] * dt}};
         s.X = SE23(R * SO3::exp(w * dt), v_next, p_next);
-        s.timestamp += dt;
     }
 
 private:
@@ -127,6 +155,7 @@ private:
             for (std::size_t j = 0; j < 3; ++j)
                 M(r0 + i, c0 + j) += B(i, j);
     }
+
     static void push_diag(std::array<NoiseTerm<T>, 12>& q, std::size_t at, std::size_t off, T val) {
         for (std::size_t i = 0; i < 3; ++i)
             q[at + i] = NoiseTerm<T>{off + i, val};

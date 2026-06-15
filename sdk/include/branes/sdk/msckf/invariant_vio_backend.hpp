@@ -71,6 +71,8 @@ public:
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
         have_last_ = true;
+        last_gyro_ = Vec3{};
+        last_accel_ = Vec3{};
     }
 
     /// IMU sample: propagate from the previous sample (zero-order hold held over to
@@ -78,9 +80,8 @@ public:
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
         if (have_last_) {
             const double dt = t - last_imu_time_;
-            if (!(dt > 0.0))
-                return;
-            be_.propagate(gyro, accel, static_cast<T>(dt));
+            if (dt > 0.0)
+                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
         }
         last_imu_time_ = t;
         have_last_ = true;
@@ -164,8 +165,17 @@ private:
             if (ci != kNoClone)  // clone still in the window
                 track.push_back(InvariantObs<T>{ci, rec.xy});
         }
-        if (track.size() >= 2)
-            be_.update(track);
+        if (track.size() >= 2) {
+            if (be_.update(track)) {
+                static std::size_t n_ok = 0;
+                ++n_ok;
+                if (n_ok % 100 == 0) std::printf("[backend-diag] updates_ok=%zu\n", n_ok);
+            } else {
+                static std::size_t n_fail = 0;
+                ++n_fail;
+                if (n_fail % 100 == 0) std::printf("[backend-diag] update_failed=%zu\n", n_fail);
+            }
+        }
         tracks_.erase(it);
     }
 
