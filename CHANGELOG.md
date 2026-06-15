@@ -44,6 +44,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.51.1](https://github.com/branes-ai/cortex/compare/v0.51.0...v0.51.1) (2026-06-15)
+
+
+### Documentation
+
+* session log + changelog for the R-IEKF/FEJ/verdict arc ([#369](https://github.com/branes-ai/cortex/issues/369)) ([24c21ff](https://github.com/branes-ai/cortex/commit/24c21ffd05cbc2d05f8479d0b8334dd6c7cece34))
+
 ## [0.51.0](https://github.com/branes-ai/cortex/compare/v0.50.3...v0.51.0) (2026-06-15)
 
 
