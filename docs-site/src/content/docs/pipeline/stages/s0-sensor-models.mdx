@@ -78,6 +78,40 @@ larger than the ~4.6 px the filter assumes as measurement noise. The filter has 
 state to absorb it, so it shows up as a covariance that is too small: structural
 over-confidence injected at the substrate.
 
+## Real-data inspector (`s0_inspect`)
+
+The metrics above come from the *synthetic* probe — known geometry, exact ground
+truth, run in CI. Its real-data companion, **`s0_inspect`**, runs the same two S0
+operators on a real EuRoC sequence and renders them, so you can see the camera and
+IMU models on the actual sensor — the template member of the trace-tapped,
+real-data inspector family (epic #371); see `tools/README.md`.
+
+```bash
+s0_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s0 --frame 0
+#   --grid-cols  --grid-rows  --allan-small
+node docs-site/scripts/gen-overlay.mjs build/s0   # → build/s0/frames/{distortion,imu_allan}.svg
+```
+
+It writes two `frames.jsonl` records:
+
+- **Camera** (`distortion.svg`) — the camera model run over a pixel grid on the
+  actual `cam0` frame: each node's **undistorted normalized** bearing, the ideal
+  distortion-free pinhole pixel, the lens **displacement**, and the project∘unproject
+  **round-trip residual**. The overlay draws the rectilinear *ideal* grid (grey)
+  against the lens-*warped* grid (green) with displacement vectors coloured by
+  magnitude — you *see* the barrel distortion the front end must invert, and the HUD
+  confirms the round-trip holds (the S0.1 contract) on real geometry.
+- **IMU** (`imu_allan.svg`) — the IMU noise characterizer run over the `imu0`
+  stream: per channel the mean/std, the **Allan-deviation curve** (log-log), and the
+  **white-noise density N**. The −½-slope region gives the `N` the filter's
+  measurement noise needs; compare it against
+  `VioConfig::{gyro,accel}_noise_density` to check the filter is running on the
+  right Q.
+
+Unlike the synthetic probe (known model, known noise), `s0_inspect` measures the
+distortion field and noise density on the **real** sensor — so the numbers the
+filter should actually use come from here, not from the contract gate.
+
 ## Interactive
 
 S0 is a *2-D* contract (geometry → pixels), so its natural visualization is the
