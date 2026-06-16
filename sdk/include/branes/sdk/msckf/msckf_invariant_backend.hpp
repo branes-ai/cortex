@@ -56,6 +56,8 @@ public:
         /// `chi2_per_dof · (#projected rows)`. Loose default, matches the body path.
         T chi2_per_dof = T{5};
         bool enable_gating = true;
+        SO3 R_imu_cam{};                     ///< camera↔IMU extrinsic rotation
+        Vec3 p_imu_cam{};                    ///< camera origin in the IMU frame
     };
 
     explicit MsckfInvariantBackend(const Config& cfg = {})
@@ -144,10 +146,10 @@ public:
     bool update(const InvariantTrack<T>& obs) {
         if (obs.size() < 2 || clones_.empty())
             return false;
-        const auto tri = triangulate_invariant<T>(clones_, obs);
+        const auto tri = triangulate_invariant<T>(clones_, obs, cfg_.R_imu_cam, cfg_.p_imu_cam);
         if (!tri.ok)
             return false;
-        const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f);
+        const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f, cfg_.R_imu_cam, cfg_.p_imu_cam);
         if (!M.ok)
             return false;
 
