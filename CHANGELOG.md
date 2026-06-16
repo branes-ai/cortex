@@ -44,6 +44,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.53.0](https://github.com/branes-ai/cortex/compare/v0.52.0...v0.53.0) (2026-06-16)
+
+
+### Features
+
+* **tools:** --trace tap for EuRoC asl_replay — real per-stage trace dumps ([#387](https://github.com/branes-ai/cortex/issues/387)) ([b9cc112](https://github.com/branes-ai/cortex/commit/b9cc112605d9029b15cbf55fce07cd3a75d768a5))
+
 ## [0.52.0](https://github.com/branes-ai/cortex/compare/v0.51.1...v0.52.0) (2026-06-15)
 
 
