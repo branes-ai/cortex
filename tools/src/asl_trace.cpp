@@ -31,11 +31,13 @@
 #include <branes/tools/vio_trace.hpp>
 #include <branes/tools/vio_trace_tap.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -68,8 +70,19 @@ Args parse(int argc, char** argv) {
             a.dataset = argv[++i];
         else if (v == "--out" && i + 1 < argc)
             a.out = argv[++i];
-        else if (v == "--max-frames" && i + 1 < argc)
-            a.max_frames = std::stoull(argv[++i]);
+        else if (v == "--max-frames" && i + 1 < argc) {
+            const std::string raw = argv[++i];
+            std::size_t pos = 0;
+            unsigned long long parsed = 0;
+            try {
+                parsed = std::stoull(raw, &pos);
+            } catch (const std::exception&) {
+                pos = 0;  // fall through to the trailing-character check below
+            }
+            if (raw.empty() || pos != raw.size())
+                throw std::runtime_error("asl_trace: invalid --max-frames value '" + raw + "'");
+            a.max_frames = parsed;
+        }
     }
     return a;
 }
@@ -80,6 +93,14 @@ void usage() {
                  "  --dataset     sequence mav0 directory (cam0/, imu0/). Required.\n"
                  "  --out         output dir (default build/stage_probes/trace)\n"
                  "  --max-frames  cap emitted records (the run still completes)\n";
+}
+
+// EuRoC timestamps are integer nanoseconds in the CSV; key the path map by ns
+// rather than by double seconds. The parse side and the replay-hook side both
+// derive their seconds from the same CSV via the same conversion, so the ns keys
+// match exactly — and an integer key avoids relying on double hash/equality.
+std::int64_t to_ns(double t_s) {
+    return static_cast<std::int64_t>(std::llround(t_s * 1e9));
 }
 
 // The frontend reports features as id + pixel; lift them to the backend-agnostic
@@ -96,7 +117,13 @@ std::vector<bs::FrontendObservation<T>> to_observations(const Estimator& est) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    Args args = parse(argc, argv);
+    Args args;
+    try {
+        args = parse(argc, argv);
+    } catch (const std::exception& ex) {
+        std::cerr << ex.what() << "\n";
+        return 2;
+    }
     if (args.help) {
         usage();
         return 0;
@@ -121,10 +148,10 @@ int main(int argc, char** argv) {
         std::cerr << "asl_trace: no images under " << args.dataset << "/cam0 — is this an EuRoC mav0 directory?\n";
         return 1;
     }
-    std::unordered_map<double, std::string> path_at;
+    std::unordered_map<std::int64_t, std::string> path_at;
     path_at.reserve(images.size());
     for (const auto& e : images)
-        path_at.emplace(e.t_s, e.path);
+        path_at.emplace(to_ns(e.t_s), e.path);
 
     // EuRoC cameras are fixed-resolution per sequence; read the first frame once
     // for the dimensions rather than re-decoding every frame in the hook.
@@ -154,9 +181,10 @@ int main(int argc, char** argv) {
     const auto on_frame = [&](double t_s, const Estimator& est) {
         if (s4_tap.frames_emitted() >= args.max_frames)
             return;
-        auto it = path_at.find(t_s);
-        const std::string path = it != path_at.end() ? it->second : std::string{};
-        s4_writer.write(s4_tap.step(t_s, path, to_observations(est)));
+        auto it = path_at.find(to_ns(t_s));
+        if (it == path_at.end())  // shouldn't happen — both sides key off the same CSV
+            throw std::runtime_error("asl_trace: no image path for replay timestamp " + std::to_string(t_s));
+        s4_writer.write(s4_tap.step(t_s, it->second, to_observations(est)));
     };
 
     Estimator est;
