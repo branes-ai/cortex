@@ -44,6 +44,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.56.0](https://github.com/branes-ai/cortex/compare/v0.55.0...v0.56.0) (2026-06-16)
+
+
+### Features
+
+* **sdk:** add 6-DoF rigid camera extrinsics to MsckfInvariantBackend ([#396](https://github.com/branes-ai/cortex/issues/396)) ([586081d](https://github.com/branes-ai/cortex/commit/586081de6f1c03bbfee207936a3e9baad246d32e))
+
+
+### Reverts
+
+* **docs:** restore original working vio_run.jsonl ([8762ee7](https://github.com/branes-ai/cortex/commit/8762ee7c1efc7e12326f38da3e066b15125ae8ea))
+
 ## [0.55.0](https://github.com/branes-ai/cortex/compare/v0.54.0...v0.55.0) (2026-06-16)
 
 
