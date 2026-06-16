@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm ci)",
+      "Bash(npm run build)",
+      "Bash(npm --prefix docs-site ci)",
+      "Bash(npm --prefix docs-site run build)",
+      "Bash(npx astro *)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git status --porcelain -- docs-site | grep -q . && { [ -d docs-site/node_modules ] && { npm --prefix docs-site run build >/tmp/cortex-astro-build.log 2>&1 && echo '{\"systemMessage\":\"docs-site changed: astro build OK\"}' || echo '{\"systemMessage\":\"docs-site changed: astro build FAILED (tail /tmp/cortex-astro-build.log)\"}'; } || echo '{\"systemMessage\":\"docs-site changed but node_modules missing; run npm --prefix docs-site ci\"}'; } || true",
+            "timeout": 240,
+            "statusMessage": "Validating docs-site (astro build)…"
+          }
+        ]
+      }
+    ]
+  }
+}
