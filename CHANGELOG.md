@@ -44,6 +44,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.54.0](https://github.com/branes-ai/cortex/compare/v0.53.1...v0.54.0) (2026-06-16)
+
+
+### Features
+
+* **tools:** S4 frontend inspector — real EuRoC FAST+KLT tracks, visualized ([#390](https://github.com/branes-ai/cortex/issues/390)) ([e2add78](https://github.com/branes-ai/cortex/commit/e2add78cbc7bfb6e7a15444121714e0b8f8f7419))
+
+
+### Maintenance
+
+* **repo:** track team Claude config — docs-site build allowlist + auto-build ([#393](https://github.com/branes-ai/cortex/issues/393)) ([c867a1f](https://github.com/branes-ai/cortex/commit/c867a1f42961b98896c76eca1394c90b7ea85c3a))
+
 ## [0.53.1](https://github.com/branes-ai/cortex/compare/v0.53.0...v0.53.1) (2026-06-16)
 
 
