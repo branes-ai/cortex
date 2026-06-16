@@ -77,8 +77,11 @@ TEST_CASE("invariant propagation: Phi preserves the gauge null space at any stat
         N(St::kPos + k, k) = T{1};  // global translation
     N(St::kTheta + 2, 3) = T{1};    // yaw: δθ = (0,0,1), the gravity axis
 
+    // Nonzero v̂, p̂ so the gyro-bias lever-arm terms (−[v̂]×R̂, −[p̂]×R̂) are live; the
+    // gauge must still be preserved (those terms multiply δbg, which is zero on N).
+    const Vec3 vv{{0.3, -0.1, 0.05}}, pp{{0.5, -0.3, 0.2}};
     auto gauge_leak = [&](const SO3& R) {
-        const ms::DynMat<T> PhiN = ms::mul(prop.phi(R, dt), N);
+        const ms::DynMat<T> PhiN = ms::mul(prop.phi(R, vv, pp, dt), N);
         T s = T{0};
         for (std::size_t i = 0; i < PhiN.rows; ++i)
             for (std::size_t j = 0; j < 4; ++j) {

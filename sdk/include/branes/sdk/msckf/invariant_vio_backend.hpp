@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <span>
 #include <stdexcept>
 #include <unordered_map>
@@ -70,17 +71,18 @@ public:
     void set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t) {
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
-        have_last_ = true;
+        have_last_ = false;
     }
 
     /// IMU sample: propagate from the previous sample (zero-order hold held over to
     /// the next image time). Drops out-of-order / duplicate timestamps.
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
+        if (have_last_ && t <= last_imu_time_)
+            return;
         if (have_last_) {
             const double dt = t - last_imu_time_;
-            if (!(dt > 0.0))
-                return;
-            be_.propagate(gyro, accel, static_cast<T>(dt));
+            if (dt > 0.0)
+                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
         }
         last_imu_time_ = t;
         have_last_ = true;
@@ -164,8 +166,9 @@ private:
             if (ci != kNoClone)  // clone still in the window
                 track.push_back(InvariantObs<T>{ci, rec.xy});
         }
-        if (track.size() >= 2)
-            be_.update(track);
+        if (track.size() >= 2) {
+            (void)be_.update(track);
+        }
         tracks_.erase(it);
     }
 

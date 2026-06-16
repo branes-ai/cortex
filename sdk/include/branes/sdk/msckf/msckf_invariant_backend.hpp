@@ -59,7 +59,7 @@ public:
     };
 
     explicit MsckfInvariantBackend(const Config& cfg = {})
-        : cfg_(cfg), prop_(cfg.noise, cfg.gravity), cov_(cfg.initial_sigma, Nav::kDim) {}
+        : cfg_(cfg), prop_(cfg.noise, cfg_.gravity), cov_(cfg.initial_sigma, Nav::kDim) {}
 
     // ── accessors ────────────────────────────────────────────────────
     [[nodiscard]] const Nav& nav() const noexcept {
@@ -94,13 +94,14 @@ public:
         const std::size_t d = dim();
         // Joint Φ: nav block from the invariant propagator, clones identity.
         DynMat<T> F = DynMat<T>::identity(d);
-        const DynMat<T> Fn = prop_.phi(nav_.X.rotation(), dt);
+        const DynMat<T> Fn = prop_.phi(nav_.X.rotation(), nav_.X.velocity(), nav_.X.position(), dt);
         for (std::size_t i = 0; i < Nav::kDim; ++i)
             for (std::size_t j = 0; j < Nav::kDim; ++j)
                 F(i, j) = Fn(i, j);
         const std::array<NoiseTerm<T>, 12> q = nav_process_noise(dt);
         cov_.predict(F, std::span<const NoiseTerm<T>>{q});
         prop_.propagate_mean(nav_, gyro, accel, dt);  // joint covariance handled above
+        nav_.timestamp += static_cast<double>(dt);
     }
 
     /// Append a clone of the current nav pose to the window. The clone shares the
@@ -206,8 +207,12 @@ private:
     /// Box-plus the joint correction: nav on SE₂(3) (left/world-frame), biases
     /// additively (imperfect IEKF), each clone in the right-invariant retraction.
     void retract(const std::vector<T>& dx) {
-        const typename SE23::Tangent xi{{dx[0], dx[1], dx[2], dx[3], dx[4], dx[5], dx[6], dx[7], dx[8]}};
-        nav_.X = SE23::exp(xi) * nav_.X;
+        // Simplified Left-Invariant retraction (dR*p + rho) matching the propagator.
+        const Vec3 dphi{{dx[Nav::kTheta], dx[Nav::kTheta + 1], dx[Nav::kTheta + 2]}};
+        const Vec3 dnu{{dx[Nav::kVel], dx[Nav::kVel + 1], dx[Nav::kVel + 2]}};
+        const Vec3 drho{{dx[Nav::kPos], dx[Nav::kPos + 1], dx[Nav::kPos + 2]}};
+        const SO3 dR = SO3::exp(dphi);
+        nav_.X = SE23(dR * nav_.X.rotation(), dR * nav_.X.velocity() + dnu, dR * nav_.X.position() + drho);
         nav_.bg = nav_.bg + Vec3{{dx[Nav::kBg], dx[Nav::kBg + 1], dx[Nav::kBg + 2]}};
         nav_.ba = nav_.ba + Vec3{{dx[Nav::kBa], dx[Nav::kBa + 1], dx[Nav::kBa + 2]}};
         for (std::size_t c = 0; c < clones_.size(); ++c) {
