@@ -30,7 +30,6 @@
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/synthetic_world.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
-#include <branes/sdk/msckf/invariant_vio_backend.hpp>
 #include <branes/sdk/msckf_backend.hpp>
 #include <branes/sdk/sfm/init_window.hpp>  // so3_from_matrix
 #include <branes/sdk/vio_estimator.hpp>
@@ -69,7 +68,6 @@ struct Args {
     bool sweep = false;
     bool video = false;
     std::string robot = "default";
-    bool invariant = false;
     bool help = false;
 };
 
@@ -80,8 +78,6 @@ Args parse(int argc, char** argv) {
         auto next_is_value = [&] { return i + 1 < argc && std::string_view(argv[i + 1]).substr(0, 2) != "--"; };
         if (v == "--help" || v == "-h")
             a.help = true;
-        else if (v == "--invariant")
-            a.invariant = true;
         else if (v == "--sweep")
             a.sweep = true;
         else if (v == "--video")
@@ -240,115 +236,6 @@ ev::SyntheticConfig<T> robot_preset(const std::string& r) {
         c.yaw_amp = 0.9;
     }
     return c;
-}
-
-// ── Synthetic Invariant source ──────────────────────────────────────────────
-RunResult run_synthetic_invariant(const ev::SyntheticData<T>& w,
-                                  const VioConfig& cfg,
-                                  double ns,
-                                  std::uint64_t seed,
-                                  const Args& args,
-                                  std::ofstream* traj,
-                                  std::ofstream* stream,
-                                  std::ofstream* frames) {
-    using namespace branes::sdk::msckf;
-    using Vec2 = branes::math::lie::detail::Vec<T, 2>;
-    InvariantVioBackend<T, SqrtCovariance<T>>::Config icfg;
-    icfg.max_clones = 11;
-    icfg.backend.initial_sigma = T{1} / T{20};  // Standard initial sigma
-    icfg.backend.normalized_sigma = cfg.camera_noise_normalized * ns;
-    icfg.backend.noise = ImuNoise<T>{cfg.gyro_noise_density, cfg.accel_noise_density, cfg.gyro_bias_random_walk, cfg.accel_bias_random_walk};
-    icfg.backend.enable_gating = true;
-    icfg.backend.chi2_per_dof = T{16}; // 4-sigma gate
-    icfg.backend.R_imu_cam = w.R_imu_cam;
-    icfg.backend.p_imu_cam = w.p_imu_cam;
-
-    InvariantVioBackend<T, SqrtCovariance<T>> backend(icfg);
-
-    const auto& g0 = w.gt.front();
-    backend.set_nav(branes::math::lie::SE23<T>(g0.R, g0.v, g0.p), w.gyro_bias, w.accel_bias, g0.t);
-
-    const double imu_dt = 1.0 / 200.0;
-    const double sg = cfg.gyro_noise_density / std::sqrt(imu_dt) * ns;
-    const double sa = cfg.accel_noise_density / std::sqrt(imu_dt) * ns;
-    const double spx = cfg.camera_noise_normalized * 458.0 * ns;
-    std::mt19937_64 rng(seed);
-    std::normal_distribution<double> N01(0.0, 1.0);
-
-    RunResult r;
-    std::size_t imu_idx = 0, feat_total = 0;
-    double sq_sum = 0;
-    for (std::size_t f = 0; f < w.frames.size(); ++f) {
-        const double t = w.frames[f].t;
-        for (; imu_idx < w.imu.size() && w.imu[imu_idx].timestamp_s <= t; ++imu_idx) {
-            ImuMeasurement<T> m = w.imu[imu_idx];
-            const Vec3 gyro{{m.angular_velocity[0] + sg * N01(rng),
-                             m.angular_velocity[1] + sg * N01(rng),
-                             m.angular_velocity[2] + sg * N01(rng)}};
-            const Vec3 accel{{m.linear_acceleration[0] + sa * N01(rng),
-                              m.linear_acceleration[1] + sa * N01(rng),
-                              m.linear_acceleration[2] + sa * N01(rng)}};
-            backend.process_imu(gyro, accel, m.timestamp_s);
-        }
-
-        const auto& gt_R = w.gt[f].R;
-        const auto& gt_p = w.gt[f].p;
-
-        std::vector<NormalizedObs<T>> obs;
-        obs.reserve(w.frames[f].obs.size());
-        for (const auto& o : w.frames[f].obs) {
-            const double un = o.u + spx * N01(rng);
-            const double vn = o.v + spx * N01(rng);
-            const auto bearing = w.camera.unproject(branes::math::cameras::Vec2<T>{un, vn});
-            if (bearing[2] > 0.0) {
-                obs.push_back({o.feature_id, Vec2{{bearing[0] / bearing[2], bearing[1] / bearing[2]}}});
-            }
-        }
-        backend.process_camera(t, std::span<const NormalizedObs<T>>{obs});
-        feat_total += obs.size();
-
-        const auto est = backend.nav().X;
-        const Vec3 ep = est.position();
-        const Vec3& gp = gt_p;
-        const double err = norm3(Vec3{{ep[0] - gp[0], ep[1] - gp[1], ep[2] - gp[2]}});
-
-        if (f % 50 == 0) {
-            std::printf("[run-diag] f=%zu  t=%.2f  est=(%.4f %.4f %.4f)  gt=(%.4f %.4f %.4f)  err=%.4f\n",
-                        f, t, ep[0], ep[1], ep[2], gp[0], gp[1], gp[2], err);
-        }
-        sq_sum += err * err;
-        r.final_err_m = err;
-        ++r.frames;
-        const double nis = 1.0;
-
-        if (traj && traj->is_open())
-            *traj << t << ',' << gp[0] << ',' << gp[1] << ',' << gp[2] << ',' << ep[0] << ',' << ep[1] << ',' << ep[2]
-                  << ',' << err << ',' << obs.size() << '\n';
-        if (stream && stream->is_open()) {
-            *stream << "{\"type\":\"gt\",\"t\":" << t << ",\"q\":" << qstr(gt_R) << ",\"p\":" << v3str(gp)
-                    << "}\n";
-            *stream << "{\"type\":\"est\",\"t\":" << t << ",\"q\":" << qstr(est.rotation())
-                    << ",\"p\":" << v3str(ep) << ",\"pos_err\":" << err
-                    << ",\"pcov\":" << mat3_json(backend.covariance(), 6) << "}\n";
-        }
-        if (frames && frames->is_open()) {
-            const std::string rel = "scene/frame_" + std::to_string(f) + ".png";
-            std::vector<FrontendObservation<T>> p_obs = w.frames[f].obs;
-            for (auto& o : p_obs) {
-                o.u += spx * N01(rng);
-                o.v += spx * N01(rng);
-            }
-            render_scene_png(args.out + "/" + rel, w.frames[f].obs);
-            *frames << "{\"frame\":" << f << ",\"t\":" << t << ",\"image\":\"" << rel
-                    << "\",\"true\":" << feats_json(w.frames[f].obs) << ",\"obs\":" << feats_json(p_obs)
-                    << ",\"depth\":" << nums_json(w.frames[f].depth) << ",\"nfeat\":" << obs.size()
-                    << ",\"nis\":" << nis << ",\"pos_err\":" << err << ",\"noise\":" << ns << "}\n";
-        }
-    }
-    r.ate_rms_m = r.frames ? std::sqrt(sq_sum / static_cast<double>(r.frames)) : 0;
-    r.nis_normalized = 1.0;
-    r.mean_features = w.frames.empty() ? 0 : static_cast<double>(feat_total) / static_cast<double>(w.frames.size());
-    return r;
 }
 
 // ── Synthetic source ───────────────────────────────────────────────────────
@@ -535,16 +422,14 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
 int main(int argc, char** argv) {
     const Args args = parse(argc, argv);
     if (args.help) {
-        std::cout
-            << "vio_pipeline — end-to-end VIO noise->robustness demo\n"
-               "  --source synthetic|euroc   stream source (default synthetic)\n"
-               "  --dataset ROOT             EuRoC mav0 root (for --source euroc)\n"
-               "  --out DIR                  write JSONL stream + CSVs (+ scene with --video)\n"
-               "  --noise S                  additive sensor-noise scale (synthetic; 1 = matched)\n"
-               "  --sweep                    noise level -> robustness curve (synthetic)\n"
-               "  --video                    emit per-frame scene + overlay data (frames.jsonl)\n"
-               "  --invariant                use the Right-Invariant EKF (R-IEKF) backend instead of standard MSCKF\n"
-               "  --robot ground|drone       motion aggressiveness (synthetic)\n";
+        std::cout << "vio_pipeline — end-to-end VIO noise->robustness demo\n"
+                     "  --source synthetic|euroc   stream source (default synthetic)\n"
+                     "  --dataset ROOT             EuRoC mav0 root (for --source euroc)\n"
+                     "  --out DIR                  write JSONL stream + CSVs (+ scene with --video)\n"
+                     "  --noise S                  additive sensor-noise scale (synthetic; 1 = matched)\n"
+                     "  --sweep                    noise level -> robustness curve (synthetic)\n"
+                     "  --video                    emit per-frame scene + overlay data (frames.jsonl)\n"
+                     "  --robot ground|drone       motion aggressiveness (synthetic)\n";
         return 0;
     }
     // Create the output directory up front — otherwise ofstream::open() fails
@@ -595,9 +480,7 @@ int main(int argc, char** argv) {
         std::cout << "\n  noise   ATE(m)   final(m)   NIS   features\n  "
                      "------------------------------------------------\n";
         for (const double n : {0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0}) {
-            const RunResult r = args.invariant
-                                    ? run_synthetic_invariant(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr)
-                                    : run_synthetic(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr);
+            const RunResult r = run_synthetic(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr);
             std::cout << "  " << std::left << std::setw(7) << n << std::setw(9) << std::setprecision(3) << r.ate_rms_m
                       << std::setw(11) << r.final_err_m << std::setw(7) << r.nis_normalized << r.mean_features << "\n";
             if (sweep.is_open())
@@ -611,10 +494,7 @@ int main(int argc, char** argv) {
         auto stream = open("run.jsonl");
         auto frames = args.video ? open("frames.jsonl") : std::ofstream{};
         const RunResult r =
-            args.invariant
-                ? run_synthetic_invariant(
-                      world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr)
-                : run_synthetic(world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr);
+            run_synthetic(world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr);
         std::cout << "\n  noise scale     : " << args.noise << "\n  frames tracked  : " << r.frames
                   << "\n  mean features   : " << r.mean_features << "\n  ATE (RMS pos)   : " << r.ate_rms_m
                   << " m\n  final pos error : " << r.final_err_m << " m\n  NIS (normalized): " << r.nis_normalized
