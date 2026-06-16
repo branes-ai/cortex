@@ -308,7 +308,8 @@ function s5ResidualsBody(r) {
   const w = r.width ?? W, h = r.height ?? H;
   const res = r.residuals ?? [];
   const errs = res.map((p) => p.err).filter((e) => Number.isFinite(e));
-  const ref = errs.length ? Math.max(2, ...errs) : 2;
+  const maxErr = errs.length ? Math.max(...errs) : null;  // true max, for the HUD
+  const ref = Math.max(2, maxErr ?? 0);                   // colour-scale floor (≥2 px)
   const eColor = (e) => (Number.isFinite(e) ? ramp(Math.min(1, e / ref)) : '#888');
   let s = '';
 
@@ -332,7 +333,7 @@ function s5ResidualsBody(r) {
   const hud = [
     `S5 triangulation — frame ${r.frame}  t=${num(r.t)}s`,
     `landmarks reprojected: ${res.length}`,
-    `reproj err: mean ${num(mean)}px  max ${num(ref, 1)}px`,
+    `reproj err: mean ${num(mean)}px  max ${num(maxErr, 1)}px`,
   ];
   const boxH = 16 + hud.length * 18;
   s += `<rect x="8" y="8" width="290" height="${boxH}" rx="5" fill="#000" opacity="0.55"/>`;

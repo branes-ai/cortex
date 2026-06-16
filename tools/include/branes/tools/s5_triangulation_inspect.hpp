@@ -147,15 +147,17 @@ public:
         trace::S5Output<double> out;
         out.landmarks.reserve(in.tracks.size());
         for (const auto& tr : in.tracks)
-            out.landmarks.push_back(triangulate_one(upd, s, tr));
+            out.landmarks.push_back(triangulate_one(upd, s, cams, tr));
         return out;
     }
 
 private:
     using Obs = branes::sdk::msckf::CameraObservation<double>;
+    using Extrinsics = branes::sdk::msckf::CameraExtrinsics<double>;
 
     [[nodiscard]] trace::S5Landmark<double> triangulate_one(const branes::sdk::msckf::CameraUpdater<double>& upd,
                                                             const branes::sdk::msckf::State<double>& s,
+                                                            const std::vector<Extrinsics>& cams,
                                                             const trace::S5Track<double>& tr) const {
         trace::S5Landmark<double> lm;
         lm.feature_id = tr.feature_id;
@@ -209,19 +211,26 @@ private:
             lmin = std::min(lmin, e);
         }
         lm.condition_number = lmin > 0.0 ? lmax / lmin : std::numeric_limits<double>::infinity();
-        lm.parallax_deg = max_parallax_deg(s, obs);
+        lm.parallax_deg = max_parallax_deg(s, cams, obs);
         return lm;
     }
 
     /// Max inter-view parallax angle (deg) of the world-frame bearings — the
-    /// depth-observability metric the synthetic probe sweeps.
+    /// depth-observability metric the synthetic probe sweeps. The observation ray
+    /// is in the CAMERA frame, so it must be rotated through both the extrinsic
+    /// (R_imu_cam) and the clone (R_world_imu) to reach world: R_wi · R_ic · ray.
+    /// Omitting R_imu_cam skews the angle for a non-trivial camera-IMU alignment
+    /// (EuRoC's is ~90°).
     [[nodiscard]] static double max_parallax_deg(const branes::sdk::msckf::State<double>& s,
+                                                 const std::vector<Extrinsics>& cams,
                                                  const std::vector<Obs>& obs) {
         std::vector<s5_detail::Vec3> dirs;
         dirs.reserve(obs.size());
         for (const auto& o : obs) {
             const auto& cl = s.clones[o.clone_index];
-            s5_detail::Vec3 d = cl.R.matrix() * s5_detail::Vec3{{o.xy[0], o.xy[1], 1.0}};
+            const auto& ex = cams[o.camera_index < cams.size() ? o.camera_index : 0];
+            const s5_detail::Vec3 ray_imu = ex.R_imu_cam.matrix() * s5_detail::Vec3{{o.xy[0], o.xy[1], 1.0}};
+            s5_detail::Vec3 d = cl.R.matrix() * ray_imu;
             const double dn = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
             if (!(dn > 0.0))
                 continue;

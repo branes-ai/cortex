@@ -98,6 +98,49 @@ TEST_CASE("S5 inspector: more parallax gives tighter covariance and lower condit
     REQUIRE(wide.condition_number < narrow.condition_number);
 }
 
+TEST_CASE("S5 inspector: parallax accounts for the camera extrinsic rotation", "[tools][s5_inspect]") {
+    // Two clones with DIFFERENT orientations and a non-trivial camera extrinsic.
+    // The reported parallax must equal the geometric inter-view angle (the angle
+    // between the world rays camera-centre → point), which is independent of how
+    // the bearing is parameterized — so it tests that R_imu_cam is applied. With
+    // identical clone orientations a shared extrinsic cancels and cannot catch the
+    // bug; differing orientations expose it.
+    using Vec3 = lie::detail::Vec<double, 3>;
+    const SO3 R_ic = SO3::exp(Vec3{{0.0, 0.4, 0.0}});  // ~23° camera↔IMU rotation
+    const Vec3 c0{{-0.5, 0.0, 0.0}}, c1{{0.5, 0.0, 0.0}};
+    const SO3 R0{};                                   // clone 0: level
+    const SO3 R1 = SO3::exp(Vec3{{0.0, 0.0, 0.25}});  // clone 1: ~14° yaw
+    const Vec3 P{{0.0, 0.0, 6.0}};
+
+    tr::S5Input<double> in;
+    in.extrinsics.push_back(SE3(R_ic, Vec3{{0.0, 0.0, 0.0}}));  // p_imu_cam = 0 → camera centre = clone centre
+    in.clone_poses.push_back(SE3(R0, c0));
+    in.clone_poses.push_back(SE3(R1, c1));
+    tr::S5Track<double> t;
+    t.feature_id = 11;
+    for (std::uint32_t i = 0; i < 2; ++i) {
+        const SE3 T_wc = in.clone_poses[i] * in.extrinsics[0];  // world ← camera
+        const Vec3 pc = T_wc.inverse() * P;                     // camera-frame point
+        REQUIRE(pc[2] > 0.0);                                   // visible
+        t.obs.push_back(tr::S5Observation<double>{i, 0, {pc[0] / pc[2], pc[1] / pc[2]}});
+    }
+    in.tracks.push_back(std::move(t));
+
+    // Geometric inter-view angle: between the world rays (P − c0) and (P − c1).
+    auto unit = [](Vec3 v) {
+        const double n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        return Vec3{{v[0] / n, v[1] / n, v[2] / n}};
+    };
+    const Vec3 d0 = unit(Vec3{{P[0] - c0[0], P[1] - c0[1], P[2] - c0[2]}});
+    const Vec3 d1 = unit(Vec3{{P[0] - c1[0], P[1] - c1[1], P[2] - c1[2]}});
+    const double expect_deg =
+        std::acos(d0[0] * d1[0] + d0[1] * d1[1] + d0[2] * d1[2]) * (180.0 / 3.14159265358979323846);
+
+    const auto lm = bt::S5TriangulationInspector().run(in).landmarks[0];
+    REQUIRE(lm.success);
+    REQUIRE_THAT(lm.parallax_deg, WithinAbs(expect_deg, 1e-4));  // exact only if R_imu_cam is applied
+}
+
 TEST_CASE("S5 inspector: a single-observation track cannot triangulate", "[tools][s5_inspect]") {
     auto in = two_view(5.0, 0.5);
     in.tracks[0].obs.resize(1);  // drop to one view
