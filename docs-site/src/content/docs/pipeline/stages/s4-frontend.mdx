@@ -66,6 +66,32 @@ with the image noise:
   tracks; the synthetic sweep gives only the best-case slope.
 </Aside>
 
+## Real-data inspector (`s4_inspect`)
+
+The metrics above come from the *synthetic* probe — known warps, exact ground
+truth, run in CI. Its real-data companion, **`s4_inspect`**, runs the same shipped
+operator (FAST + pyramidal KLT, mirroring `track_frame`) on actual EuRoC `cam0`
+frames and renders the result, so you can watch the frontend on real motion, blur,
+and repetitive texture.
+
+```bash
+s4_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s4
+#   --fast-threshold  --target-features  --pyramid-levels  --fb-max  --min-dist
+node docs-site/scripts/gen-overlay.mjs build/s4      # → build/s4/frames/*.svg
+```
+
+It writes `frames.jsonl`, one record per frame, carrying per track the
+previous→current pixel, the **forward-backward residual**, age, and status, plus
+the FAST detections, the pyramid geometry, and a coverage grid. The overlay draws
+these over the EuRoC image: KLT **flow vectors coloured by FB residual**, new
+detections, the coverage grid, a pyramid schematic, and a count HUD.
+
+Crucially — and unlike both the probe and the production path — `s4_inspect`
+**always** computes the forward-backward residual, even when the gate is disabled.
+That lets you *see* exactly which tracks a gate would cull on real imagery before
+committing to enabling `fb_max_residual` (below). It is the template member of the
+trace-tapped, real-data inspector family (epic #371); see `tools/README.md`.
+
 ## The S4 candidate — the outlier gate
 
 By default the frontend applies **only KLT's own `Lost`/`OutOfBounds` status

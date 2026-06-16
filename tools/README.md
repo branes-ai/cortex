@@ -61,6 +61,78 @@ assemble with `ffmpeg` for an `.mp4`.
 The reading: the filter holds up to ~2× its assumed noise, NIS crosses 1 right at
 the matched level, then loses lock — a measured operating envelope.
 
+## Real-data stage inspectors (epic #371)
+
+The stage probes above are **synthetic** contract gates: known ground truth, run
+in CI. Their **real-data** companions run the *actual* operator on a real EuRoC
+sequence, dump what happened at each stage boundary, and render it — so you can
+study one stage on real motion, blur, and texture. The flow is **trace-tapped**:
+run the pipeline once with tracing on → a per-stage JSONL trace → each inspector
+replays a stage and visualizes it.
+
+| Piece | Role |
+|---|---|
+| `tools/include/branes/tools/vio_trace.hpp` | the **trace bus** — the JSONL schema (`{frame, t_s, stage, input, output}`) every inspector reads/writes |
+| `tools/src/asl_trace.cpp` | the **`--trace` tap**: runs the real estimator over EuRoC and dumps per-stage records |
+| `tools/src/s4_inspect.cpp` | **S4 visual-frontend inspector** (the template) — real frames → FAST+KLT → enriched per-track JSONL |
+| `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays |
+
+EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
+the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`
+and `tests/tools/s4_frontend_inspect.cpp`.
+
+### Trace tap (`asl_trace`)
+
+Runs the real `VioEstimator` + `MsckfBackend` over an EuRoC sequence and writes
+one trace-bus record per stage boundary per frame — the real, ground-truthed
+input/output every per-stage inspector replays from.
+
+```bash
+./build/tools/asl_trace --dataset /path/to/V1_01_easy/mav0 --out build/trace
+#   --max-frames N   cap emitted records (the run still completes)
+# → build/trace/s4_frontend.trace.jsonl   (one self-describing line per frame)
+```
+
+Each line is a shared header (`frame`, `t_s`, `stage`) plus a per-stage
+`input`/`output` payload; an optional leading `meta` banner records the schema
+version so a learner can read a trace without reading code. (Today S4 is the
+worked boundary; filter-internal stages join as their operators are decoupled.)
+
+### S4 frontend inspector (`s4_inspect`)
+
+Runs the **shipped** frontend operator — `detect_fast` + pyramidal KLT, mirroring
+`VioEstimator::track_frame` — over real EuRoC frames with full instrumentation,
+exposing what production hides: per-track **forward-backward residual**, status,
+and age; the FAST detections added each frame; the pyramid geometry; and a spatial
+coverage grid. Unlike the production path it **always** computes the FB residual
+(even when the gate is off), so you can *see* which tracks a gate would cull.
+
+```bash
+./build/tools/s4_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s4
+#   --fast-threshold F   --target-features N   --pyramid-levels N
+#   --fb-max PX   (forward-backward GATE; 0 = measure but don't cull)   --min-dist PX
+node docs-site/scripts/gen-overlay.mjs build/s4        # → build/s4/frames/*.svg
+```
+
+Output `frames.jsonl`, one record per frame:
+
+| field | meaning |
+|---|---|
+| `frame`, `t`, `image`, `width`, `height` | frame index, timestamp (s), source PNG path, dimensions |
+| `pyramid` | `{levels, sizes:[[w,h]…]}` — the KLT pyramid geometry |
+| `tracks[]` | per track: `id`, `u`/`v` (this frame), `pu`/`pv` (previous frame), `fb` (forward-backward residual px; `-1` if not computed), `age`, `status` (`"new"` \| `"tracked"`) |
+| `detections[]` | `[x, y]` of the FAST corners added this frame |
+| `counts` | `{tracked, new, lost, fb_culled}` |
+| `grid` | `{cols, rows, occupied}` — spatial coverage |
+| `fb_max` | the FB gate threshold in force (0 = measure-only) |
+
+The overlay (`gen-overlay.mjs`, frontend mode — auto-selected when a record has a
+`tracks` array) draws, over the actual EuRoC image: KLT **flow vectors coloured by
+FB residual**, FAST detections (green `+`), a **coverage grid** shaded by track
+occupancy, a **pyramid schematic**, and a count HUD. Rasterize the SVGs
+(`rsvg-convert`) and assemble with `ffmpeg` for an `.mp4`, as with the pipeline
+overlay.
+
 ## Layout
 
 | Piece | Role |
