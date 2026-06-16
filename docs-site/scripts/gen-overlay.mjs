@@ -120,7 +120,7 @@ function frontendBody(r) {
   }
 
   // FB-residual legend bar.
-  const lx = W - 130, ly = 24, lw = 110, lh = 10;
+  const lx = w - 130, ly = 24, lw = 110, lh = 10;
   for (let k = 0; k < 22; k++)
     s += `<rect x="${lx + (k / 22) * lw}" y="${ly}" width="${lw / 22 + 1}" height="${lh}" fill="${ramp(k / 21)}"/>`;
   s += `<rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="none" stroke="#888"/>`;
@@ -143,7 +143,7 @@ function frontendBody(r) {
   hud.forEach((line, i) => {
     s += `<text x="18" y="${30 + i * 18}" font-family="monospace" font-size="13" fill="#eee">${esc(line)}</text>`;
   });
-  s += `<text x="8" y="${H - 12}" font-family="monospace" font-size="11" fill="#ddd">line = KLT flow (colour = FB residual)   + = new detection   grid = coverage</text>`;
+  s += `<text x="8" y="${h - 12}" font-family="monospace" font-size="11" fill="#ddd">line = KLT flow (colour = FB residual)   + = new detection   grid = coverage</text>`;
   return s;
 }
 
@@ -151,17 +151,22 @@ let count = 0;
 for (const r of records) {
   const uri = dataUri(r.image);
 
-  let body = '';
-  body += `<rect width="${W}" height="${H}" fill="#000"/>`;
-  if (uri) body += `<image href="${uri}" x="0" y="0" width="${W}" height="${H}"/>`;
-
+  // Frontend-inspector records carry their own dimensions; draw at those so the
+  // overlay coordinates (raw pixels) line up with a non-EuRoC frame size.
   if (Array.isArray(r.tracks)) {
+    const w = r.width ?? W, h = r.height ?? H;
+    let body = `<rect width="${w}" height="${h}" fill="#000"/>`;
+    if (uri) body += `<image href="${uri}" x="0" y="0" width="${w}" height="${h}"/>`;
     body += frontendBody(r);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
     writeFileSync(resolve(outDir, `frame_${String(r.frame).padStart(5, '0')}.svg`), svg);
     ++count;
     continue;
   }
+
+  let body = '';
+  body += `<rect width="${W}" height="${H}" fill="#000"/>`;
+  if (uri) body += `<image href="${uri}" x="0" y="0" width="${W}" height="${H}"/>`;
 
   // True projections, colour-coded by depth (near = warm, far = cool) so the
   // parallax — near dots sweep faster than far ones — reads at a glance.

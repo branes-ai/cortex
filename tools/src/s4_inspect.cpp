@@ -60,6 +60,10 @@ struct Args {
 // Parse an unsigned/decimal flag value, turning malformed input into a clean
 // CLI error rather than an uncaught std::sto* exception.
 std::uint64_t to_u64(const std::string& raw) {
+    // std::stoull silently wraps a leading '-' (e.g. "-1" → ULLONG_MAX), which
+    // would then narrow-cast into garbage for --pyramid-levels etc. Reject signs.
+    if (!raw.empty() && (raw.front() == '-' || raw.front() == '+'))
+        throw std::runtime_error("s4_inspect: expected a non-negative integer, got '" + raw + "'");
     std::size_t pos = 0;
     unsigned long long v = 0;
     try {
