@@ -34,23 +34,37 @@ namespace branes::sdk::msckf {
 /// A world-frame clone pose for the invariant window.
 template <math::Scalar T>
 struct InvariantClone {
-    math::lie::SO3<T> R{};
-    math::lie::detail::Vec<T, 3> p{};
+    using SO3 = branes::math::lie::SO3<T>;
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+
+    SO3 R{};
+    Vec3 p{};
 };
 
 /// One observation: which clone saw the feature, in normalized image coords.
 template <math::Scalar T>
 struct InvariantObs {
     std::size_t clone_index = 0;
-    math::lie::detail::Vec<T, 2> xy{};
+    std::size_t camera_index = 0;
+    branes::math::lie::detail::Vec<T, 2> xy{};
+};
+
+/// Camera↔IMU extrinsic calibration state.
+template <math::Scalar T>
+struct InvariantCalib {
+    using SO3 = branes::math::lie::SO3<T>;
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+
+    SO3 R_imu_cam{};
+    Vec3 p_imu_cam{};
 };
 
 /// Left-invariant box-plus on a clone pose: R ← Exp(φ)·R, p ← Exp(φ)·p + ρ.
 template <math::Scalar T>
 void retract_invariant(InvariantClone<T>& c,
-                       const math::lie::detail::Vec<T, 3>& phi,
-                       const math::lie::detail::Vec<T, 3>& rho) {
-    const math::lie::SO3<T> dR = math::lie::SO3<T>::exp(phi);
+                       const branes::math::lie::detail::Vec<T, 3>& phi,
+                       const branes::math::lie::detail::Vec<T, 3>& rho) {
+    const branes::math::lie::SO3<T> dR = branes::math::lie::SO3<T>::exp(phi);
     c.R = dR * c.R;
     c.p = dR * c.p + rho;
 }
@@ -60,23 +74,30 @@ void retract_invariant(InvariantClone<T>& c,
 /// the world-frame bearing. `ok` is false on degenerate (near-coplanar) geometry.
 template <math::Scalar T>
 struct InvariantTriangulation {
-    math::lie::detail::Vec<T, 3> p_f{};
+    branes::math::lie::detail::Vec<T, 3> p_f{};
     bool ok = false;
 };
 
 template <math::Scalar T>
 [[nodiscard]] InvariantTriangulation<T> triangulate_invariant(const std::vector<InvariantClone<T>>& clones,
                                                               const std::vector<InvariantObs<T>>& obs,
-                                                              const math::lie::SO3<T>& R_imu_cam = {},
-                                                              const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
-    using Vec3 = math::lie::detail::Vec<T, 3>;
-    using Mat3 = math::lie::detail::Mat<T, 3, 3>;
+                                                              const std::vector<InvariantCalib<T>>& calib = {}) {
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+    using Mat3 = branes::math::lie::detail::Mat<T, 3, 3>;
     Mat3 A{};
     Vec3 b{};
     for (const auto& o : obs) {
         if (o.clone_index >= clones.size())
             return {};
+        // Early validation: ensure camera_index is within bounds of calib if provided, or 0 if empty.
+        if ((!calib.empty() && o.camera_index >= calib.size()) || (calib.empty() && o.camera_index != 0))
+            return {};
+
         const auto& c = clones[o.clone_index];
+        const auto R_imu_cam = !calib.empty() && o.camera_index < calib.size() ? calib[o.camera_index].R_imu_cam
+                                                                               : branes::math::lie::SO3<T>{};
+        const auto p_imu_cam =
+            !calib.empty() && o.camera_index < calib.size() ? calib[o.camera_index].p_imu_cam : Vec3{};
         const auto R_cam = c.R * R_imu_cam;
         const auto p_cam = c.p + c.R * p_imu_cam;
         const Vec3 d = R_cam.matrix() * Vec3{{o.xy[0], o.xy[1], T{1}}};
@@ -123,19 +144,22 @@ struct InvariantMeasurement {
 template <math::Scalar T>
 [[nodiscard]] InvariantMeasurement<T> build_invariant_measurement(const std::vector<InvariantClone<T>>& clones,
                                                                   const std::vector<InvariantObs<T>>& obs,
-                                                                  const math::lie::detail::Vec<T, 3>& p_f,
-                                                                  const math::lie::SO3<T>& R_imu_cam = {},
-                                                                  const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
-    using Vec3 = math::lie::detail::Vec<T, 3>;
-    using Mat3 = math::lie::detail::Mat<T, 3, 3>;
+                                                                  const branes::math::lie::detail::Vec<T, 3>& p_f,
+                                                                  const std::vector<InvariantCalib<T>>& calib = {},
+                                                                  bool estimate_calib = false) {
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+    using Mat3 = branes::math::lie::detail::Mat<T, 3, 3>;
     const std::size_t m = obs.size();
-    const std::size_t n = 6 * clones.size();
+    const std::size_t n = estimate_calib ? (6 * clones.size() + 6 * calib.size()) : (6 * clones.size());
     const std::size_t rows2 = 2 * m;
     InvariantMeasurement<T> M;
     M.rows2 = rows2;
     M.n = n;
+    M.H_f.reserve(rows2 * 3);
     M.H_f.assign(rows2 * 3, T{0});
+    M.H_x.reserve(rows2 * n);
     M.H_x.assign(rows2 * n, T{0});
+    M.r.reserve(rows2);
     M.r.assign(rows2, T{0});
 
     constexpr T kMinDepth = T{1} / T{1000};  // 1 mm
@@ -143,7 +167,16 @@ template <math::Scalar T>
     for (std::size_t i = 0; i < m; ++i) {
         if (obs[i].clone_index >= clones.size())
             return M;  // out-of-range clone reference; ok stays false
+        // Early validation: ensure camera_index is within bounds of calib if provided, or 0 if empty.
+        if ((!calib.empty() && obs[i].camera_index >= calib.size()) || (calib.empty() && obs[i].camera_index != 0))
+            return M;  // invalid camera index, reject track
+
         const auto& cl = clones[obs[i].clone_index];
+        const auto R_imu_cam = !calib.empty() && obs[i].camera_index < calib.size()
+                                   ? calib[obs[i].camera_index].R_imu_cam
+                                   : branes::math::lie::SO3<T>{};
+        const auto p_imu_cam =
+            !calib.empty() && obs[i].camera_index < calib.size() ? calib[obs[i].camera_index].p_imu_cam : Vec3{};
         const auto R_cam = cl.R * R_imu_cam;
         const auto p_cam = cl.p + cl.R * p_imu_cam;
         const Mat3 Rct = R_cam.inverse().matrix();  // R_cᵀ
@@ -152,21 +185,40 @@ template <math::Scalar T>
             return M;  // ok stays false
 
         const T inv = T{1} / y[2];
-        math::lie::detail::Mat<T, 2, 3> dh{};
+        branes::math::lie::detail::Mat<T, 2, 3> dh{};
         dh(0, 0) = inv;
         dh(0, 2) = -y[0] * inv * inv;
         dh(1, 1) = inv;
         dh(1, 2) = -y[1] * inv * inv;
 
-        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                              // ∂h/∂p_f = dh·R_cᵀ
-        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));  // ∂h/∂φ = dh·R_cᵀ·[p_f]×
+        const branes::math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;  // ∂h/∂p_f = dh·R_cᵀ
+        const branes::math::lie::detail::Mat<T, 2, 3> Hphi =
+            (dhRct * branes::math::lie::detail::hat(p_f));  // ∂h/∂φ = dh·R_cᵀ·[p_f]×
         const std::size_t row = 2 * i, off = 6 * obs[i].clone_index;
+
+        // Compute calibration Jacobians once per observation above the nested loop.
+        // Hext_theta is derived assuming right-perturbation convention: R_ic' = R_ic * Exp(dtheta).
+        // This makes the Jacobian consistent with the right-multiplication retraction in the backend.
+        // ∂h_c/∂δθ_ic = dh·[y]×  where y is the camera-frame landmark point.
+        // ∂h_c/∂δp_ic = −dh·R_icᵀ
+        const Mat3 Rict = R_imu_cam.inverse().matrix();
+        const branes::math::lie::detail::Mat<T, 2, 3> Hext_theta = dh * branes::math::lie::detail::hat(y);
+        const branes::math::lie::detail::Mat<T, 2, 3> Hext_p = (dh * Rict) * T{-1};
+        const std::size_t off_calib =
+            estimate_calib && !calib.empty() ? (6 * clones.size() + 6 * obs[i].camera_index) : 0;
+
         for (std::size_t a = 0; a < 2; ++a) {
             M.r[row + a] = obs[i].xy[a] - y[a] * inv;
             for (std::size_t b = 0; b < 3; ++b) {
                 M.H_f[(row + a) * 3 + b] = dhRct(a, b);             // feature
                 M.H_x[(row + a) * n + off + b] = Hphi(a, b);        // φ_c
                 M.H_x[(row + a) * n + off + 3 + b] = -dhRct(a, b);  // ρ_c
+            }
+            if (estimate_calib && !calib.empty() && obs[i].camera_index < calib.size()) {
+                for (std::size_t b = 0; b < 3; ++b) {
+                    M.H_x[(row + a) * n + off_calib + b] = Hext_theta(a, b);
+                    M.H_x[(row + a) * n + off_calib + 3 + b] = Hext_p(a, b);
+                }
             }
         }
     }
@@ -183,15 +235,17 @@ template <math::Scalar T, class Cov>
 bool invariant_update(std::vector<InvariantClone<T>>& clones,
                       Cov& cov,
                       const std::vector<InvariantObs<T>>& obs,
-                      const math::lie::detail::Vec<T, 3>& p_f,
+                      const branes::math::lie::detail::Vec<T, 3>& p_f,
                       T normalized_sigma = T{1} / T{100},
-                      const math::lie::SO3<T>& R_imu_cam = {},
-                      const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
-    using Vec3 = math::lie::detail::Vec<T, 3>;
+                      const std::vector<InvariantCalib<T>>& calib = {}) {
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
     if (obs.size() < 2)
         return false;
+    if (!calib.empty())
+        return false;  // reject calibration to preserve EKF consistency in stand-alone update helper
+
     const std::size_t n = 6 * clones.size();
-    const InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f, R_imu_cam, p_imu_cam);
+    const InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f);
     if (!M.ok)
         return false;
     const std::size_t rows2 = M.rows2;

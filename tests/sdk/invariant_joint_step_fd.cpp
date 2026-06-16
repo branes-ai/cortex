@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <numbers>
 #include <span>
@@ -180,11 +181,11 @@ TEST_CASE("DIAG FD: measurement-update linearization (proj.r vs -H*e)", "[sdk][r
     for (std::size_t c = 0; c < truth.size(); ++c) {
         const Vec3 y =
             truth[c].R.inverse() * Vec3{{pf[0] - truth[c].p[0], pf[1] - truth[c].p[1], pf[2] - truth[c].p[2]}};
-        obs.push_back({c, Vec2{{y[0] / y[2], y[1] / y[2]}}});
+        obs.push_back({c, 0, Vec2{{y[0] / y[2], y[1] / y[2]}}});
     }
 
     // Known per-clone error e (6 each), applied via the clone retraction.
-    const T s = T{1} / T{10000};
+    const T s = T{1} / T{100000};
     std::vector<T> e(6 * truth.size());
     est = truth;
     for (std::size_t c = 0; c < est.size(); ++c) {
@@ -212,7 +213,74 @@ TEST_CASE("DIAG FD: measurement-update linearization (proj.r vs -H*e)", "[sdk][r
         rmag = std::max(rmag, std::abs(proj.r[i]));
     }
     REQUIRE(rmag > 1e-9);
-    REQUIRE(worst / rmag < 1e-3);
+    REQUIRE(worst / rmag < 1e-4);
+}
+
+TEST_CASE("DIAG FD: measurement-update linearization with extrinsics (proj.r vs -H*e)", "[sdk][riekf][diag366]") {
+    // True clone window and calibration. Perturb both clones and extrinsics by a
+    // known left-invariant error e; check the projected residual ≈ -proj.H*e.
+    std::vector<ms::InvariantClone<T>> truth, est;
+    for (int c = 0; c < 4; ++c) {
+        SO3 R = SO3::exp(Vec3{{T(0.05) * c, T(-0.03) * c, T(0.2) * c}});
+        Vec3 p{{T(0.3) * c, T(0.1) * c, T(0.02) * c}};
+        truth.push_back({R, p});
+    }
+    const Vec3 pf{{T(0.4), T(-0.2), T(3.5)}};
+
+    const ms::InvariantCalib<T> calib_truth{SO3::exp(Vec3{{0.1, -0.2, 0.15}}), Vec3{{0.05, -0.02, 0.03}}};
+    std::vector<ms::InvariantCalib<T>> calibs_truth{calib_truth};
+
+    // True normalized observations using the true extrinsics.
+    std::vector<ms::InvariantObs<T>> obs;
+    for (std::size_t c = 0; c < truth.size(); ++c) {
+        const auto R_cam = truth[c].R * calib_truth.R_imu_cam;
+        const auto p_cam = truth[c].p + truth[c].R * calib_truth.p_imu_cam;
+        const Vec3 y = R_cam.inverse() * (pf - p_cam);
+        obs.push_back({c, 0, Vec2{{y[0] / y[2], y[1] / y[2]}}});
+    }
+
+    // Joint error e (6 * clones + 6 * calibs)
+    const T s = T{1} / T{1000000};
+    const std::size_t n = 6 * truth.size() + 6 * calibs_truth.size();
+    std::vector<T> e(n);
+
+    // Perturb clones
+    est = truth;
+    for (std::size_t c = 0; c < est.size(); ++c) {
+        for (int k = 0; k < 6; ++k)
+            e[6 * c + k] = s * ((k + 1) * (c % 2 ? -1 : 1) + T(0.3) * c);
+        ms::retract_invariant<T>(
+            est[c], Vec3{{e[6 * c], e[6 * c + 1], e[6 * c + 2]}}, Vec3{{e[6 * c + 3], e[6 * c + 4], e[6 * c + 5]}});
+    }
+
+    // Perturb calibration
+    std::vector<ms::InvariantCalib<T>> calibs_est = calibs_truth;
+    for (int k = 0; k < 6; ++k)
+        e[6 * est.size() + k] = s * (k + 1) * T(0.5);
+
+    const Vec3 dtheta{{e[6 * est.size()], e[6 * est.size() + 1], e[6 * est.size() + 2]}};
+    const Vec3 dp{{e[6 * est.size() + 3], e[6 * est.size() + 4], e[6 * est.size() + 5]}};
+    calibs_est[0].R_imu_cam = calibs_est[0].R_imu_cam * SO3::exp(dtheta);
+    calibs_est[0].p_imu_cam = calibs_est[0].p_imu_cam + dp;
+
+    const auto tri = ms::triangulate_invariant<T>(est, obs, calibs_est);
+    REQUIRE(tri.ok);
+    const auto M = ms::build_invariant_measurement<T>(est, obs, tri.p_f, calibs_est, true);
+    REQUIRE(M.ok);
+    const auto proj = branes::sdk::features::msckf_left_nullspace_project<T>(M.H_f, M.H_x, M.r, M.rows2, n);
+    REQUIRE(proj.rows > 0);
+
+    // proj.r ≈ -proj.H*e
+    T worst = 0, rmag = 0;
+    for (std::size_t i = 0; i < proj.rows; ++i) {
+        T He = 0;
+        for (std::size_t j = 0; j < n; ++j)
+            He += proj.H_x[i * n + j] * e[j];
+        worst = std::max(worst, std::abs(proj.r[i] + He));
+        rmag = std::max(rmag, std::abs(proj.r[i]));
+    }
+    REQUIRE(rmag > 1e-9);
+    REQUIRE(worst / rmag < 1e-4);
 }
 
 TEST_CASE("DIAG invariant joint step: perfect-sensor roll-error reproduction (adapter)", "[sdk][riekf][diag366]") {
@@ -257,7 +325,7 @@ TEST_CASE("DIAG invariant joint step: perfect-sensor roll-error reproduction (ad
         for (std::size_t L = 0; L < feats.size(); ++L) {
             Vec2 xy;
             if (visible(Rt, pt, feats[L], xy))
-                obs.push_back({static_cast<std::uint64_t>(L), xy});
+                obs.push_back({static_cast<std::uint64_t>(L), 0, xy});
         }
         be.process_camera(t, std::span<const ms::NormalizedObs<T>>{obs});
 
