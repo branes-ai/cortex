@@ -75,11 +75,12 @@ replays a stage and visualizes it.
 | `tools/include/branes/tools/vio_trace.hpp` | the **trace bus** — the JSONL schema (`{frame, t_s, stage, input, output}`) every inspector reads/writes |
 | `tools/src/asl_trace.cpp` | the **`--trace` tap**: runs the real estimator over EuRoC and dumps per-stage records |
 | `tools/src/s4_inspect.cpp` | **S4 visual-frontend inspector** (the template) — real frames → FAST+KLT → enriched per-track JSONL |
+| `tools/src/s0_inspect.cpp` | **S0 sensor-model inspector** — real `cam0` frame → camera distortion grid + round-trip; real `imu0` stream → per-channel Allan / noise density |
 | `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
-the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`
-and `tests/tools/s4_frontend_inspect.cpp`.
+the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
+`tests/tools/s4_frontend_inspect.cpp` and `tests/tools/s0_sensor_model_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -132,6 +133,32 @@ FB residual**, FAST detections (green `+`), a **coverage grid** shaded by track
 occupancy, a **pyramid schematic**, and a count HUD. Rasterize the SVGs
 (`rsvg-convert`) and assemble with `ffmpeg` for an `.mp4`, as with the pipeline
 overlay.
+
+### S0 sensor-model inspector (`s0_inspect`)
+
+Runs the two real S0 operators on a real EuRoC sequence: the **camera model** over
+a pixel grid on an actual `cam0` frame, and the **IMU-noise characterizer** over
+the `imu0` stream. The real-data companion to the synthetic S0 contract probe
+(`s0_sensor_model`).
+
+```bash
+./build/tools/s0_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s0 --frame 0
+#   --grid-cols N   --grid-rows N   --allan-small N
+node docs-site/scripts/gen-overlay.mjs build/s0   # → build/s0/frames/{distortion,imu_allan}.svg
+```
+
+Output `frames.jsonl`, two records:
+
+| record | fields |
+|---|---|
+| `kind:"s0_camera"` | `image`, `width`/`height`, `model`, `intrinsics`, `grid:{cols,rows}`, `samples[]` (per node `u`/`v` observed pixel, `iu`/`iv` ideal pinhole pixel, `nx`/`ny` undistorted normalized, `dist` lens displacement px, `rt` round-trip px, `inc` incidence °), `max_distortion_px`, `max_roundtrip_px` |
+| `kind:"s0_imu"` | `rate_hz`, `dt_s`, `n_samples`, `duration_s`, `channels[]` (per axis `name`, `unit`, `mean`, `std`, `N` white-noise density, `taus[]`, `allan[]`) |
+
+The overlay (`gen-overlay.mjs`, S0 mode — auto-selected on `kind`) draws the
+**distortion grid** — the rectilinear ideal grid (grey) vs the lens-warped grid
+(green) with displacement vectors coloured by magnitude — over the actual frame
+(`distortion.svg`), and the per-channel **Allan-deviation** log-log curve with each
+channel's `N` (`imu_allan.svg`).
 
 ## Layout
 
