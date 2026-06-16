@@ -71,8 +71,11 @@ vcpkg_installed/
 Testing/
 .cache/
 
-# Claude Code session state
-.claude/
+# Claude Code session state — ignore everything except the shared team config.
+# (Negating a file requires globbing the dir contents, not the dir itself: a
+# file under an excluded *directory* cannot be re-included.)
+.claude/*
+!.claude/settings.json
 
 # Cargo build output (alongside any Cargo.toml in the tree)
 **/target/
