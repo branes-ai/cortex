@@ -9,6 +9,10 @@
 //     image-domain renderer tier — KLT flow vectors coloured by forward-backward
 //     residual, FAST detections, a spatial-coverage grid, a pyramid schematic,
 //     and a track-count HUD.
+//   • S0 sensor-model inspector (tools/src/s0_inspect.cpp, `kind:"s0_camera"` /
+//     `kind:"s0_imu"`): the distortion grid (ideal vs lens-warped) + displacement
+//     field over the actual frame, and the per-channel IMU Allan-deviation /
+//     noise plot. Written to distortion.svg / imu_allan.svg.
 //
 //   node docs-site/scripts/gen-overlay.mjs <dir>
 //
@@ -147,8 +151,171 @@ function frontendBody(r) {
   return s;
 }
 
+// ── S0 sensor-model inspector tier ────────────────────────────────────────
+// Camera record (`kind:"s0_camera"`): draw the rectilinear IDEAL grid (faint,
+// straight) and the lens-WARPED grid (the observed pixels, bowed), with a
+// displacement vector per node coloured by distortion magnitude. The gap between
+// the two grids IS the distortion the front end must invert. `r.samples` carries
+// {u,v,iu,iv,dist,rt} in row-major (cols×rows) order.
+function s0CameraBody(r) {
+  const w = r.width ?? W, h = r.height ?? H;
+  const cols = r.grid?.cols ?? 0, rows = r.grid?.rows ?? 0;
+  const sm = r.samples ?? [];
+  const ref = r.max_distortion_px > 0 ? r.max_distortion_px : 1;
+  const dColor = (d) => ramp(Math.min(1, d / ref));
+  let s = '';
+
+  // The mesh lines need a full, ordered cols×rows grid; pinhole/radtan over a
+  // normal FOV never drops a node, but guard so a sparse fisheye grid still draws
+  // its vectors (below) even when the mesh is skipped.
+  const full = cols > 1 && rows > 1 && sm.length === cols * rows;
+  const at = (cx, cy) => sm[cy * cols + cx];
+  if (full) {
+    // Ideal rectilinear grid — straight, faint grey.
+    for (let cy = 0; cy < rows; cy++) {
+      let d = '';
+      for (let cx = 0; cx < cols; cx++) d += `${cx ? 'L' : 'M'}${at(cx, cy).iu.toFixed(1)},${at(cx, cy).iv.toFixed(1)}`;
+      s += `<path d="${d}" fill="none" stroke="#888" stroke-opacity="0.35" stroke-width="0.7"/>`;
+    }
+    for (let cx = 0; cx < cols; cx++) {
+      let d = '';
+      for (let cy = 0; cy < rows; cy++) d += `${cy ? 'L' : 'M'}${at(cx, cy).iu.toFixed(1)},${at(cx, cy).iv.toFixed(1)}`;
+      s += `<path d="${d}" fill="none" stroke="#888" stroke-opacity="0.35" stroke-width="0.7"/>`;
+    }
+    // Lens-warped grid — the observed pixels, coloured mid-ramp.
+    for (let cy = 0; cy < rows; cy++) {
+      let d = '';
+      for (let cx = 0; cx < cols; cx++) d += `${cx ? 'L' : 'M'}${at(cx, cy).u.toFixed(1)},${at(cx, cy).v.toFixed(1)}`;
+      s += `<path d="${d}" fill="none" stroke="#39d98a" stroke-opacity="0.7" stroke-width="1"/>`;
+    }
+    for (let cx = 0; cx < cols; cx++) {
+      let d = '';
+      for (let cy = 0; cy < rows; cy++) d += `${cy ? 'L' : 'M'}${at(cx, cy).u.toFixed(1)},${at(cx, cy).v.toFixed(1)}`;
+      s += `<path d="${d}" fill="none" stroke="#39d98a" stroke-opacity="0.7" stroke-width="1"/>`;
+    }
+  }
+  // Displacement vectors (ideal → observed) coloured by distortion magnitude.
+  for (const p of sm) {
+    const c = dColor(p.dist);
+    s += `<line x1="${p.iu.toFixed(1)}" y1="${p.iv.toFixed(1)}" x2="${p.u.toFixed(1)}" y2="${p.v.toFixed(1)}" stroke="${c}" stroke-width="1.4" opacity="0.95"/>`;
+    s += `<circle cx="${p.u.toFixed(1)}" cy="${p.v.toFixed(1)}" r="1.6" fill="${c}"/>`;
+  }
+
+  // Distortion colour legend.
+  const lx = w - 130, ly = 24, lw = 110, lh = 10;
+  for (let k = 0; k < 22; k++) s += `<rect x="${lx + (k / 22) * lw}" y="${ly}" width="${lw / 22 + 1}" height="${lh}" fill="${ramp(k / 21)}"/>`;
+  s += `<rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="none" stroke="#888"/>`;
+  s += `<text x="${lx}" y="${ly - 3}" font-family="monospace" font-size="10" fill="#ddd">distortion (px)</text>`;
+  s += `<text x="${lx}" y="${ly + lh + 11}" font-family="monospace" font-size="9" fill="#ddd">0</text>`;
+  s += `<text x="${lx + lw}" y="${ly + lh + 11}" text-anchor="end" font-family="monospace" font-size="9" fill="#ddd">${ref.toFixed(1)}</text>`;
+
+  // HUD.
+  const hud = [
+    `S0 camera: ${r.model ?? '—'}`,
+    `distortion max ${num(r.max_distortion_px, 1)} px`,
+    `round-trip max ${(r.max_roundtrip_px ?? 0).toExponential(1)} px ${r.max_roundtrip_px < 1e-2 ? '(contract OK)' : '(FAIL)'}`,
+    `grid ${cols}×${rows}  (${sm.length} pts)`,
+  ];
+  const boxH = 16 + hud.length * 18;
+  s += `<rect x="8" y="8" width="300" height="${boxH}" rx="5" fill="#000" opacity="0.55"/>`;
+  hud.forEach((line, i) => { s += `<text x="18" y="${30 + i * 18}" font-family="monospace" font-size="13" fill="#eee">${esc(line)}</text>`; });
+  s += `<text x="8" y="${h - 12}" font-family="monospace" font-size="11" fill="#ddd">grey = ideal pinhole   green = lens-warped   vector = distortion (colour = px)</text>`;
+  return s;
+}
+
+// IMU record (`kind:"s0_imu"`): the per-channel Allan-deviation curve on log-log
+// axes — the standard IMU noise characterization. Slope −½ is white noise (the
+// N the filter's measurement noise needs); the flat floor is bias instability.
+function s0ImuBody(r) {
+  const chans = r.channels ?? [];
+  const colours = ['#e6550d', '#fd8d3c', '#fdbe85', '#3182bd', '#6baed6', '#9ecae1']; // gyro xyz warm, accel xyz cool
+  // Plot box.
+  const m = { l: 70, r: 220, t: 50, b: 56 };
+  const px0 = m.l, py0 = m.t, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  let s = '';
+
+  // Data range (log-log) over all finite, positive points.
+  let tmin = Infinity, tmax = -Infinity, smin = Infinity, smax = -Infinity;
+  for (const c of chans)
+    for (let i = 0; i < (c.taus ?? []).length; i++) {
+      const t = c.taus[i], sd = (c.allan ?? [])[i];
+      if (t > 0) { if (t < tmin) tmin = t; if (t > tmax) tmax = t; }
+      if (sd > 0) { if (sd < smin) smin = sd; if (sd > smax) smax = sd; }
+    }
+  const ok = Number.isFinite(tmin) && Number.isFinite(smin) && tmax > tmin && smax > smin;
+  const lx0 = Math.log10(tmin), lx1 = Math.log10(tmax), ly0 = Math.log10(smin), ly1 = Math.log10(smax);
+  const X = (t) => px0 + ((Math.log10(t) - lx0) / (lx1 - lx0)) * pw;
+  const Y = (sd) => py0 + ph - ((Math.log10(sd) - ly0) / (ly1 - ly0)) * ph;
+
+  // Frame + decade gridlines.
+  s += `<rect x="${px0}" y="${py0}" width="${pw}" height="${ph}" fill="#0a0a0a" stroke="#444"/>`;
+  if (ok) {
+    for (let e = Math.ceil(lx0); e <= Math.floor(lx1); e++) {
+      const x = px0 + ((e - lx0) / (lx1 - lx0)) * pw;
+      s += `<line x1="${x.toFixed(1)}" y1="${py0}" x2="${x.toFixed(1)}" y2="${(py0 + ph).toFixed(1)}" stroke="#333" stroke-width="0.7"/>`;
+      s += `<text x="${x.toFixed(1)}" y="${(py0 + ph + 16).toFixed(1)}" text-anchor="middle" font-family="monospace" font-size="10" fill="#bbb">10^${e}</text>`;
+    }
+    for (let e = Math.ceil(ly0); e <= Math.floor(ly1); e++) {
+      const y = py0 + ph - ((e - ly0) / (ly1 - ly0)) * ph;
+      s += `<line x1="${px0}" y1="${y.toFixed(1)}" x2="${(px0 + pw).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#333" stroke-width="0.7"/>`;
+      s += `<text x="${(px0 - 8).toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-family="monospace" font-size="10" fill="#bbb">10^${e}</text>`;
+    }
+    // Per-channel curves.
+    chans.forEach((c, ci) => {
+      let d = '';
+      let started = false;
+      for (let i = 0; i < (c.taus ?? []).length; i++) {
+        const t = c.taus[i], sd = (c.allan ?? [])[i];
+        if (!(t > 0 && sd > 0)) continue;
+        d += `${started ? 'L' : 'M'}${X(t).toFixed(1)},${Y(sd).toFixed(1)}`;
+        started = true;
+      }
+      s += `<path d="${d}" fill="none" stroke="${colours[ci % colours.length]}" stroke-width="1.6" opacity="0.95"/>`;
+    });
+  } else {
+    s += `<text x="${(px0 + pw / 2).toFixed(1)}" y="${(py0 + ph / 2).toFixed(1)}" text-anchor="middle" font-family="monospace" font-size="13" fill="#888">stream too short for an Allan curve</text>`;
+  }
+
+  // Axis titles.
+  s += `<text x="${(px0 + pw / 2).toFixed(1)}" y="${H - 14}" text-anchor="middle" font-family="monospace" font-size="11" fill="#ddd">averaging time τ (s)</text>`;
+  s += `<text x="16" y="${(py0 + ph / 2).toFixed(1)}" text-anchor="middle" font-family="monospace" font-size="11" fill="#ddd" transform="rotate(-90 16 ${(py0 + ph / 2).toFixed(1)})">Allan deviation σ_A(τ)</text>`;
+
+  // Legend with each channel's white-noise density N.
+  const lgx = W - m.r + 14;
+  s += `<text x="${lgx}" y="${py0 + 4}" font-family="monospace" font-size="11" fill="#eee">white-noise density N</text>`;
+  chans.forEach((c, ci) => {
+    const y = py0 + 22 + ci * 18;
+    s += `<line x1="${lgx}" y1="${y - 4}" x2="${lgx + 18}" y2="${y - 4}" stroke="${colours[ci % colours.length]}" stroke-width="2.4"/>`;
+    s += `<text x="${lgx + 24}" y="${y}" font-family="monospace" font-size="10" fill="#ddd">${esc(c.name)}  ${(c.N ?? 0).toExponential(2)}</text>`;
+  });
+
+  // Title HUD.
+  const hud = `S0 IMU noise — ${num(r.rate_hz, 0)} Hz · ${r.n_samples ?? '—'} samples · ${num(r.duration_s, 0)} s`;
+  s += `<text x="${px0}" y="32" font-family="monospace" font-size="14" fill="#eee">${esc(hud)}</text>`;
+  return s;
+}
+
 let count = 0;
 for (const r of records) {
+  if (r.kind === 's0_camera') {
+    const w = r.width ?? W, h = r.height ?? H;
+    const uri = dataUri(r.image);
+    let body = `<rect width="${w}" height="${h}" fill="#000"/>`;
+    if (uri) body += `<image href="${uri}" x="0" y="0" width="${w}" height="${h}"/>`;
+    body += s0CameraBody(r);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
+    writeFileSync(resolve(outDir, 'distortion.svg'), svg);
+    ++count;
+    continue;
+  }
+  if (r.kind === 's0_imu') {
+    const body = `<rect width="${W}" height="${H}" fill="#000"/>${s0ImuBody(r)}`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${body}</svg>`;
+    writeFileSync(resolve(outDir, 'imu_allan.svg'), svg);
+    ++count;
+    continue;
+  }
+
   const uri = dataUri(r.image);
 
   // Frontend-inspector records carry their own dimensions; draw at those so the
