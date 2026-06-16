@@ -3,7 +3,7 @@
 // branes/sdk/msckf/invariant_update.hpp — the camera measurement update for the
 // Right-Invariant EKF backend (issue #347, Phase B). The complement of
 // invariant_propagator.hpp: it marginalizes a feature and corrects a window of
-// cloned poses in the RIGHT-INVARIANT (world-frame) error.
+// cloned poses in the LEFT-INVARIANT (world-frame) error.
 //
 // Two pieces differ from the body-frame CameraUpdater:
 //   • the measurement Jacobian is built w.r.t. the world-frame clone twist
@@ -66,7 +66,9 @@ struct InvariantTriangulation {
 
 template <math::Scalar T>
 [[nodiscard]] InvariantTriangulation<T> triangulate_invariant(const std::vector<InvariantClone<T>>& clones,
-                                                              const std::vector<InvariantObs<T>>& obs) {
+                                                              const std::vector<InvariantObs<T>>& obs,
+                                                              const math::lie::SO3<T>& R_imu_cam = {},
+                                                              const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
     using Vec3 = math::lie::detail::Vec<T, 3>;
     using Mat3 = math::lie::detail::Mat<T, 3, 3>;
     Mat3 A{};
@@ -74,9 +76,12 @@ template <math::Scalar T>
     for (const auto& o : obs) {
         if (o.clone_index >= clones.size())
             return {};
-        const Vec3 d = clones[o.clone_index].R.matrix() * Vec3{{o.xy[0], o.xy[1], T{1}}};
+        const auto& c = clones[o.clone_index];
+        const auto R_cam = c.R * R_imu_cam;
+        const auto p_cam = c.p + c.R * p_imu_cam;
+        const Vec3 d = R_cam.matrix() * Vec3{{o.xy[0], o.xy[1], T{1}}};
         const T n2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-        const Vec3& pc = clones[o.clone_index].p;
+        const Vec3& pc = p_cam;
         for (std::size_t i = 0; i < 3; ++i)
             for (std::size_t j = 0; j < 3; ++j) {
                 const T P = (i == j ? T{1} : T{0}) - d[i] * d[j] / n2;
@@ -86,11 +91,6 @@ template <math::Scalar T>
     }
     const T dt = A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                  A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
-    // Scale-aware degeneracy gate. A is a sum of NORMALISED ray projectors
-    // (I − d̂d̂ᵀ), so it is independent of feature distance; its conditioning is the
-    // parallax. Require det(A) > εᵣ·(tr(A)/3)³ — a dimensionless ratio (det vs the
-    // cube of the mean eigenvalue) that rejects low-parallax/ill-conditioned tracks
-    // regardless of how many observations are stacked, not just exact singularity.
     const T mean_eig = (A(0, 0) + A(1, 1) + A(2, 2)) / T{3};
     // 1e-6 conditioning floor. Stricter thresholds (like 1e-4) falsely reject
     // highly-clustered yet valid tracks in specific geometries (such as diagnostic worlds).
@@ -123,7 +123,9 @@ struct InvariantMeasurement {
 template <math::Scalar T>
 [[nodiscard]] InvariantMeasurement<T> build_invariant_measurement(const std::vector<InvariantClone<T>>& clones,
                                                                   const std::vector<InvariantObs<T>>& obs,
-                                                                  const math::lie::detail::Vec<T, 3>& p_f) {
+                                                                  const math::lie::detail::Vec<T, 3>& p_f,
+                                                                  const math::lie::SO3<T>& R_imu_cam = {},
+                                                                  const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
     using Vec3 = math::lie::detail::Vec<T, 3>;
     using Mat3 = math::lie::detail::Mat<T, 3, 3>;
     const std::size_t m = obs.size();
@@ -136,17 +138,16 @@ template <math::Scalar T>
     M.H_x.assign(rows2 * n, T{0});
     M.r.assign(rows2, T{0});
 
-    // Cheirality + a numerical-stability floor: a near-zero depth would make
-    // 1/y[2] explode and dominate the EKF correction. This is a blow-up guard,
-    // not a quality gate (track quality is screened upstream at triangulation).
     constexpr T kMinDepth = T{1} / T{1000};  // 1 mm
 
     for (std::size_t i = 0; i < m; ++i) {
         if (obs[i].clone_index >= clones.size())
             return M;  // out-of-range clone reference; ok stays false
-        const auto& c = clones[obs[i].clone_index];
-        const Mat3 Rct = c.R.inverse().matrix();  // R_cᵀ (identity extrinsic)
-        const Vec3 y = Rct * (p_f - c.p);
+        const auto& cl = clones[obs[i].clone_index];
+        const auto R_cam = cl.R * R_imu_cam;
+        const auto p_cam = cl.p + cl.R * p_imu_cam;
+        const Mat3 Rct = R_cam.inverse().matrix();  // R_cᵀ
+        const Vec3 y = Rct * (p_f - p_cam);
         if (!(y[2] > kMinDepth))
             return M;  // ok stays false
 
@@ -157,8 +158,8 @@ template <math::Scalar T>
         dh(1, 1) = inv;
         dh(1, 2) = -y[1] * inv * inv;
 
-        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                              // ∂h/∂p_f = dh·R_cᵀ
-        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));  // ∂h/∂φ = dh·R_cᵀ·[p_f]×
+        const math::lie::detail::Mat<T, 2, 3> dhRct = dh * Rct;                                // ∂h/∂p_f = dh·R_cᵀ
+        const math::lie::detail::Mat<T, 2, 3> Hphi = (dhRct * math::lie::detail::hat(p_f));    // ∂h/∂φ = dh·R_cᵀ·[p_f]×
         const std::size_t row = 2 * i, off = 6 * obs[i].clone_index;
         for (std::size_t a = 0; a < 2; ++a) {
             M.r[row + a] = obs[i].xy[a] - y[a] * inv;
@@ -183,16 +184,18 @@ bool invariant_update(std::vector<InvariantClone<T>>& clones,
                       Cov& cov,
                       const std::vector<InvariantObs<T>>& obs,
                       const math::lie::detail::Vec<T, 3>& p_f,
-                      T normalized_sigma = T{1} / T{100}) {
+                      T normalized_sigma = T{1} / T{100},
+                      const math::lie::SO3<T>& R_imu_cam = {},
+                      const math::lie::detail::Vec<T, 3>& p_imu_cam = {}) {
     using Vec3 = math::lie::detail::Vec<T, 3>;
     if (obs.size() < 2)
         return false;
     const std::size_t n = 6 * clones.size();
-    const InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f);
+    const InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f, R_imu_cam, p_imu_cam);
     if (!M.ok)
         return false;
     const std::size_t rows2 = M.rows2;
-    const auto proj = features::msckf_left_nullspace_project<T>(M.H_f, M.H_x, M.r, rows2, n);
+    const auto proj = features::msckf_left_nullspace_project<T>(M.H_f, M.H_x, M.r, M.rows2, n);
     if (proj.rows == 0)
         return false;
     DynMat<T> H(proj.rows, n);
