@@ -84,7 +84,7 @@ TEST_CASE("S5 inspector: recovers a known point with ~0 reprojection residual", 
     REQUIRE(lm.condition_number > 1.0);
 }
 
-TEST_CASE("S5 inspector: more parallax → tighter covariance & lower condition number", "[tools][s5_inspect]") {
+TEST_CASE("S5 inspector: more parallax gives tighter covariance and lower condition number", "[tools][s5_inspect]") {
     bt::S5TriangulationInspector insp;
     const auto narrow = insp.run(two_view(5.0, 0.1)).landmarks[0];  // ~2.3° parallax
     const auto wide = insp.run(two_view(5.0, 1.0)).landmarks[0];    // ~22.6° parallax
