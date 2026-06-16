@@ -40,7 +40,6 @@ SWEEP=0
 KEEP=0
 BUILD=0
 THREED=0
-INVARIANT=0
 
 usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -54,7 +53,6 @@ while [[ $# -gt 0 ]]; do
     --fps)        FPS="$2"; shift 2;;
     --3d)         THREED=1; shift;;
     --sweep)      SWEEP=1; shift;;
-    --invariant)  INVARIANT=1; shift;;
     --keep)       KEEP=1; shift;;
     --build)      BUILD=1; shift;;
     -h|--help)    usage 0;;
@@ -97,7 +95,6 @@ RUN_ARGS=(--source "$SOURCE" --out "$OUT")
 [[ $THREED -eq 0 ]] && RUN_ARGS+=(--video)  # 3D only needs run.jsonl
 [[ "$SOURCE" == "synthetic" ]] && RUN_ARGS+=(--robot "$ROBOT" --noise "$NOISE")
 [[ -n "$DATASET" ]] && RUN_ARGS+=(--dataset "$DATASET")
-[[ $INVARIANT -eq 1 ]] && RUN_ARGS+=(--invariant)
 "$BIN" "${RUN_ARGS[@]}"
 
 # ── 3D mode: render the path/pose video from run.jsonl and stop ─────────────
