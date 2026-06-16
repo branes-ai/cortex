@@ -202,7 +202,9 @@ int main(int argc, char** argv) {
               << " IMU samples\n"
               << "  camera:  distortion max " << cam_report.max_distortion_px << " px, round-trip max "
               << cam_report.max_roundtrip_px << " px (" << cam_report.grid.size() << " grid points)\n";
-    if (!imu_report.channels.empty())
+    // characterize_imu emits either 0 channels (too few samples) or the full 6
+    // (gyro x/y/z, accel x/y/z); require ≥4 explicitly since we index accel_x.
+    if (imu_report.channels.size() >= 4)
         std::cout << "  imu:     " << imu_report.rate_hz
                   << " Hz, gyro_x N=" << imu_report.channels[0].white_noise_density
                   << " rad/s/sqrt(Hz), accel_x N=" << imu_report.channels[3].white_noise_density << " m/s^2/sqrt(Hz)\n";
