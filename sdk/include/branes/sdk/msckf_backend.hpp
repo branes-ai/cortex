@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -332,6 +333,23 @@ public:
         return state_;
     }
 
+    /// Per-update observation hook (S6 inspector, #380). Invoked once per MSCKF
+    /// camera update with the covariance snapshot taken *before* the update, the
+    /// feature track consumed, the resulting NIS sample, whether the update was
+    /// applied (false ⇒ χ²-gated or degenerate), and — implicitly — the state
+    /// *after* (the first argument is the live, updated state). It decouples the
+    /// update from the monolithic backend for study without touching the hot path:
+    /// unset (the default) costs only a branch and no covariance copy. SDK-typed,
+    /// so it adds no dependency on the tools layer.
+    using UpdateObserver = std::function<void(const msckf::State<T, Cov>& state_after,
+                                              const msckf::FeatureTrack<T>& track,
+                                              const msckf::NisSample<T>& nis,
+                                              bool accepted,
+                                              const msckf::DynMat<T>& cov_before)>;
+    void set_update_observer(UpdateObserver observer) {
+        update_observer_ = std::move(observer);
+    }
+
 private:
     // One stored observation of a feature, tagged by the clone time it was
     // taken at (clone indices shift on marginalization; times do not).
@@ -622,11 +640,17 @@ private:
         }
         if (track.observations.size() >= 2) {
             msckf::NisSample<T> ns;
-            updater_.update(state_, track, &ns);
+            // Snapshot the pre-update covariance only when someone is watching.
+            msckf::DynMat<T> cov_before;
+            if (update_observer_)
+                cov_before = state_.covariance();
+            const bool accepted = updater_.update(state_, track, &ns);
             if (ns.valid) {  // record the innovation NIS even if it was gated out
                 nis_.add(static_cast<double>(ns.value), static_cast<int>(ns.dof));
                 innov_.add(static_cast<double>(ns.innov_sum), ns.dof);
             }
+            if (update_observer_)
+                update_observer_(state_, track, ns, accepted, cov_before);
         }
         tracks_.erase(it);
     }
@@ -667,6 +691,7 @@ private:
     msckf::CameraUpdater<T> updater_;
     eval::ConsistencyAccumulator nis_{};            // per-update NIS, accumulated over the run
     eval::InnovationWhitenessAccumulator innov_{};  // per-update innovation mean/whiteness
+    UpdateObserver update_observer_{};              // optional per-update inspector hook (#380); unset in production
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};
