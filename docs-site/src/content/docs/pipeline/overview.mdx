@@ -19,12 +19,12 @@ To understand why VIO is so sensitive, we must look at the physical nature of th
 
 | Metric | Camera (Visual) | IMU (Inertial) |
 | :--- | :--- | :--- |
-| **Observation Type** | High-dimensional pixel arrays (photometric). | Acceleration ($\mathbf{a}$) and angular velocity ($oldsymbol{\omega}$). |
-| **Measurement Rate** | Low rate (usually $10 - 30	ext{ Hz}$). | High rate (usually $200 - 1000	ext{ Hz}$). |
+| **Observation Type** | High-dimensional pixel arrays (photometric). | Acceleration ($\mathbf{a}$) and angular velocity ($\boldsymbol{\omega}$). |
+| **Measurement Rate** | Low rate (usually $10 - 30\text{ Hz}$). | High rate (usually $200 - 1000\text{ Hz}$). |
 | **Drift Profile** | Drift-free under static conditions, but scale-ambiguous in monocular setups. | Quadratic drift in position ($t^2$) and linear drift in velocity ($t$) over time. |
 | **Observability** | Excellent for relative rotation and bearing directions; cannot observe absolute scale from a single camera. | Directly observes absolute roll, pitch (via gravity direction), and physical scale (via acceleration). |
 
-Without the IMU, a monocular camera cannot tell the difference between moving $1	ext{ meter}$ in a small room or $100	ext{ meters}$ in a giant canyon. Without the camera, the IMU's double-integration of raw accelerometer noise would drift by kilometers in minutes. Fusing them requires **absolute mathematical synchrony**.
+Without the IMU, a monocular camera cannot tell the difference between moving $1\text{ meter}$ in a small room or $100\text{ meters}$ in a giant canyon. Without the camera, the IMU's double-integration of raw accelerometer noise would drift by kilometers in minutes. Fusing them requires **absolute mathematical synchrony**.
 
 ---
 
@@ -37,10 +37,10 @@ Our coordinate frame relationships are mapped in the following diagram:
 ![VIO Coordinate Frames Map: Showing the spatial transformations from World frame (gravity-aligned) to IMU/Body frame, and from IMU frame to Camera frame via rigid extrinsics R_ic and p_ic.](/figures/pipeline/coordinate_frames.svg)
 
 Cortex enforces a rigid, unified convention across all eleven stages:
-*   **World Frame ($W$)**: The global reference frame. Gravity is aligned with the global z-axis: \mathbf{g}_W = [0, 0, -9.81]^T$. Yaw (heading) and global position are **unobservable** in this frame.
-*   **IMU Frame ($I$)**: The body frame of the vehicle. Raw acceleration \mathbf{a}_{\text{imu}} and angular rate \boldsymbol{\omega}_{\text{imu}} are sensed relative to this frame.
+*   **World Frame ($W$)**: The global reference frame. Gravity is aligned with the global z-axis: $\mathbf{g}_W = [0, 0, -9.81]^T$. Yaw (heading) and global position are **unobservable** in this frame.
+*   **IMU Frame ($I$)**: The body frame of the vehicle. Raw acceleration $\mathbf{a}_{\text{imu}}$ and angular rate $\boldsymbol{\omega}_{\text{imu}}$ are sensed relative to this frame.
 *   **Camera Frame ($C$)**: The camera coordinate system. The optical axis points along the positive z-axis ($+z$ is forward/depth).
-*   **Extrinsics (\mathbf{R}_{\text{ic}}, \mathbf{p}_{\text{ic}}$)**: The rigid 6-DoF transform mapping the IMU body center to the Camera origin (IMU-to-Camera extrinsics):
+*   **Extrinsics ($\mathbf{R}_{\text{ic}}$, $\mathbf{p}_{\text{ic}}$)**: The rigid 6-DoF transform mapping the IMU body center to the Camera origin (IMU-to-Camera extrinsics):
 
 $$
 \mathbf{p}_{\text{cam}} = \mathbf{p}_{\text{imu}} + \mathbf{R}_{\text{wi}} \mathbf{p}_{\text{ic}}
@@ -67,13 +67,13 @@ $$
 \mathbf{r} \approx \mathbf{H}_x \tilde{\mathbf{x}} + \mathbf{H}_f \tilde{\mathbf{p}}_f + \mathbf{v}
 $$
 
-5.  By projecting this Jacobian onto its left null space (multiplying by a matrix \mathbf{V}^T such that \mathbf{V}^T \mathbf{H}_f = \mathbf{0}$), we **marginalize the landmark completely out of the EKF update**:
+5.  By projecting this Jacobian onto its left null space (multiplying by a matrix $\mathbf{V}^T$ such that $\mathbf{V}^T \mathbf{H}_f = \0$), we **marginalize the landmark completely out of the EKF update**:
 
 $$
 \mathbf{V}^T \mathbf{r} \approx \mathbf{V}^T \mathbf{H}_x \tilde{\mathbf{x}} + \mathbf{V}^T \mathbf{v}
 $$
 
-The landmark position \tilde{\mathbf{p}}_f is **completely eliminated** from the EKF update! The EKF then corrects the cloned IMU poses directly through cross-covariance.
+The landmark position $\tilde{\mathbf{p}}_f$ is **completely eliminated** from the EKF update! The EKF then corrects the cloned IMU poses directly through cross-covariance.
 
 ---
 
@@ -81,7 +81,7 @@ The landmark position \tilde{\mathbf{p}}_f is **completely eliminated** from the
 
 The decision to use MSCKF (which throws away landmarks) rather than SLAM (which retains landmarks in the state) is a **computational trade-off** driven by hardware:
 
-*   **Standard Serial MCUs (CPUs)**: Standard microcontrollers process instructions sequentially. Performing EKF updates on large matrices scales with cubic complexity (\mathcal{O}(N^3)$ where $N$ is state dimension). Keeping the matrix small by marginalizing landmarks (MSCKF) is essential to stay within the real-time loop.
+*   **Standard Serial MCUs (CPUs)**: Standard microcontrollers process instructions sequentially. Performing EKF updates on large matrices scales with cubic complexity ($\mathcal{O}(N^3)$ where $N$ is state dimension). Keeping the matrix small by marginalizing landmarks (MSCKF) is essential to stay within the real-time loop.
 *   **Highly Concurrent Matrix-Oriented KPUs**: Modern Embodied AI hardware introduces **KPUs (Knowledge Processing Units / Tensor Cores)**. These are highly concurrent compute fabrics designed specifically for parallel, high-throughput matrix-multiplication operations (BLAS/LAPACK GEMM).
 *   **The SLAM Trade-off**: If we have KPU hardware capable of processing large-scale matrices in parallel, **retaining landmark states in the covariance matrix becomes highly desirable**. While it grows the covariance matrix, keeping the landmarks allows the filter to preserve the exact spatial correlations, perform loop closures, and achieve significantly higher accuracy and robustness.
 
@@ -99,7 +99,7 @@ To isolate bugs, Cortex slices the MSCKF pipeline into eleven distinct, self-con
 | **S3** | [Pose Augmentation](/pipeline/stages/s3-augmentation/) | State Cloning | Appends the current IMU pose to the covariance, maintaining exact Left-Invariant clones. |
 | **S4** | [Visual Frontend](/pipeline/stages/s4-frontend/) | Track Management | Detects corners, tracks them via KLT optical flow, and purges outliers via 2-point/5-point RANSAC. |
 | **S5** | [Triangulation](/pipeline/stages/s5-triangulation/) | Structure Recovery | Reconstructs 3D coordinates of a feature track from multi-view bearings using least-squares. |
-| **S6** | [MSCKF Update](/pipeline/stages/s6-msckf-update/) | EKF Measurement Update | Performs Left Null-Space projection, QR compression, \chi^2 gating, and EKF state correction. |
+| **S6** | [MSCKF Update](/pipeline/stages/s6-msckf-update/) | EKF Measurement Update | Performs Left Null-Space projection, QR compression, $\chi^2$ gating, and EKF state correction. |
 | **S7** | [SLAM Features](/pipeline/stages/s7-slam-features/) | Persistent Landmarks | Integrates permanent 3D landmarks in the EKF state for long-term drift-free mapping. |
 | **S8** | [Zero-Velocity (ZUPT)](/pipeline/stages/s8-zero-velocity/) | Stationary Robustness | Applies zero-velocity pseudo-measurements to constrain drift when the drone is stationary. |
 | **S9** | [Marginalization](/pipeline/stages/s9-marginalization/) | Window Pruning | Drops the oldest clone, correctly transferring its cross-covariance block out of the window. |
@@ -115,8 +115,8 @@ In visual-inertial odometry, accuracy is not enough. You can have sub-meter drif
 Measured using **Absolute Trajectory Error (ATE)** and **Relative Pose Error (RPE)**. Proves that your integration, camera projection, and triangulation are geometrically aligned.
 
 ### 2. Consistency (The Safety Property)
-Consistency means the filter is **honest**. When the covariance matrix \mathbf{P} claims the drone's position is known to \pm10\text{ cm}, the true position error must indeed be roughly within that \pm10\text{ cm} envelope.
-*   **Over-Confidence**: If the error is 1.5 \text{ m} but the covariance claims \pm5\text{ cm}, the filter is over-confident. The state estimator will discard new visual measurements because it "thinks" it knows its position perfectly, causing the filter to diverge completely under aggressive motion.
+Consistency means the filter is **honest**. When the covariance matrix $\mathbf{P}$ claims the drone's position is known to $\pm10\text{ cm}$, the true position error must indeed be roughly within that $\pm10\text{ cm}$ envelope.
+*   **Over-Confidence**: If the error is $1.5 \text{ m}$ but the covariance claims $\pm5\text{ cm}$, the filter is over-confident. The state estimator will discard new visual measurements because it "thinks" it knows its position perfectly, causing the filter to diverge completely under aggressive motion.
 *   Consistency is verified mathematically using the **Normalized Innovation Squared (NIS)** and **Normalized Estimation Error Squared (NEES)** metrics.
     For an $N$-DoF state estimator, the expectation of raw NEES is $N$:
 
