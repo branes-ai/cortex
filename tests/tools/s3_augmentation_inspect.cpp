@@ -17,6 +17,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
+#include <cmath>
+
 namespace bt = branes::tools;
 namespace ms = branes::sdk::msckf;
 using Catch::Matchers::WithinAbs;
@@ -62,8 +65,20 @@ TEST_CASE("S3 inspector: a clone is a faithful stochastic copy of the pose", "[t
 TEST_CASE("S3 inspector: run does not mutate the caller's state", "[tools][s3_inspect]") {
     bt::S3AugmentationInspector::S3Input in{correlated_state(2)};
     const std::size_t d = in.state.dim();
+    const std::size_t clones = in.state.clones.size();
+    const auto cov_before = in.state.covariance();  // full snapshot
+
     (void)bt::S3AugmentationInspector().run(in);
-    REQUIRE(in.state.dim() == d);  // augmentation ran on a copy
+
+    REQUIRE(in.state.dim() == d);                  // dimension unchanged
+    REQUIRE(in.state.clones.size() == clones);     // no clone appended to the caller
+    const auto cov_after = in.state.covariance();  // and the covariance content is identical
+    REQUIRE(cov_after.rows == cov_before.rows);
+    double maxdiff = 0.0;
+    for (std::size_t i = 0; i < cov_before.rows; ++i)
+        for (std::size_t j = 0; j < cov_before.cols; ++j)
+            maxdiff = std::max(maxdiff, std::abs(cov_after(i, j) - cov_before(i, j)));
+    REQUIRE(maxdiff == 0.0);  // augmentation ran entirely on a copy
 }
 
 TEST_CASE("S3 inspector: record serializes to the figure schema", "[tools][s3_inspect]") {

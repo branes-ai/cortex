@@ -81,7 +81,7 @@ const oxB = ox + gridA + gap;
 s += heat(B, da, oxB, 'after');
 
 // Outline the new clone block in the "after" matrix (rows/cols [off, off+cd)).
-const off = R.clone_offset | 0, cd = R.clone_dim | 6;
+const off = R.clone_offset | 0, cd = (R.clone_dim ?? 6) | 0;  // ?? for the default, | 0 to int
 const bx = oxB + off * cell, by = oy + off * cell, bs = cd * cell;
 // the new block's row band and column band (cross-covariance), then the diagonal block
 s += `<rect x="${oxB}" y="${by}" width="${da * cell}" height="${bs}" fill="none" stroke="#ffd60a" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="3 2"/>`;

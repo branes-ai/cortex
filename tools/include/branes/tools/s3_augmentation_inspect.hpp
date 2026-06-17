@@ -94,11 +94,21 @@ public:
         StateHelper::augment_clone(s);
         const DynMat Pp = s.covariance();
         r.dim_after = s.dim();
-        r.clone_offset = d;  // the new clone is appended at the end
         r.n_clones_after = s.clones.size();
         r.cov_after = flatten(Pp);
+        r.psd = ms::is_positive_semidefinite(Pp);
 
-        const std::vector<std::size_t> clone{d + 0, d + 1, d + 2, d + 3, d + 4, d + 5};
+        // Postcondition: augment appends exactly one 6-DoF clone block at the end.
+        // Derive the offset from dim_after and only index the clone block when the
+        // postcondition holds, so the inspector never reads out of bounds if the
+        // operator's contract ever changes.
+        if (r.dim_after != d + State::kCloneDim) {
+            r.clone_offset = d;
+            return r;  // residuals left at their defaults; the ctest pins the contract
+        }
+        r.clone_offset = r.dim_after - State::kCloneDim;
+        const std::size_t o = r.clone_offset;
+        const std::vector<std::size_t> clone{o + 0, o + 1, o + 2, o + 3, o + 4, o + 5};
         // marginal: P'[clone,clone] must equal P[pose,pose].
         r.clone_marginal_err = block_diff(Pp, clone, clone, P, pose, pose);
         // cross: P'[clone, existing k] must equal P[pose, k] for every prior state k.
@@ -107,7 +117,6 @@ public:
             for (std::size_t k = 0; k < d; ++k)
                 cross = std::max(cross, std::abs(Pp(clone[i], k) - P(pose[i], k)));
         r.clone_cross_err = cross;
-        r.psd = ms::is_positive_semidefinite(Pp);
         return r;
     }
 
