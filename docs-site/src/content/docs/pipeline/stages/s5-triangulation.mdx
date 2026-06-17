@@ -96,6 +96,37 @@ over-confidence is dominated by the other input-side source, the
 [S10 unmodeled calibration](/pipeline/stages/s10-online-calibration/). This is the
 measure-don't-assume discipline working: a plausible lead, refuted by one experiment.
 
+## Real-data inspector (`s5_inspect`)
+
+The sweep above is the *synthetic* probe — exact two-view geometry, known parallax,
+run in CI. Its real-data companion, **`s5_inspect`**, **establishes the 3-D
+renderer tier** (epic #371): it runs the same shipped triangulator
+(`CameraUpdater::triangulate`) on **real EuRoC tracks** (the shipped FAST + KLT
+frontend) with **ground-truth clone poses**, and renders the 3-D landmark cloud the
+camera reconstructs.
+
+```bash
+s5_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s5 --min-obs 3
+#   --px-noise PX   --fast-threshold F   --target-features N
+node docs-site/scripts/gen-overlay.mjs build/s5     # → reprojection residuals (per frame)
+# 3-D landmark cloud + covariance ellipsoids: load scene.json + run.jsonl in the Scene3D viewer
+```
+
+Triangulation is decoupled behind the `trace::S5Input` / `trace::S5Output` I/O
+struct (the clone-pose window + feature tracks in, the landmark cloud out). The
+inspector exposes what the update path hides: for each landmark the **position
+covariance** — computed analytically from the operator's *own* reprojection
+Jacobian, `σ² · (Σ Hfᵀ Hf)⁻¹` — plus the inter-view **parallax**, the system
+**condition number**, and the per-observation **reprojection residual**. It emits:
+
+- `scene.json` — the landmark cloud + a per-landmark covariance ellipsoid, drawn in
+  the [3-D viewer](/vio/scene3d/). A low-parallax feature shows the intuition
+  directly: its ellipsoid stretches far along the line of sight (depth is the
+  unobservable direction), while a wide-baseline feature is a tight sphere.
+- `frames.jsonl` — per-frame reprojection residuals over the image (observed pixel
+  vs the landmark's reprojection), drawn by the overlay renderer; a large,
+  structured residual flags a triangulation the backend should not trust.
+
 ## Interactive
 
 Parallax is the apparent motion difference between near and far features as the

@@ -76,11 +76,14 @@ replays a stage and visualizes it.
 | `tools/src/asl_trace.cpp` | the **`--trace` tap**: runs the real estimator over EuRoC and dumps per-stage records |
 | `tools/src/s4_inspect.cpp` | **S4 visual-frontend inspector** (the template) — real frames → FAST+KLT → enriched per-track JSONL |
 | `tools/src/s0_inspect.cpp` | **S0 sensor-model inspector** — real `cam0` frame → camera distortion grid + round-trip; real `imu0` stream → per-channel Allan / noise density |
-| `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays |
+| `tools/src/s5_inspect.cpp` | **S5 triangulation inspector** (3-D tier) — real tracks + GT clone poses → real triangulator → 3-D landmark cloud + covariance + reprojection residuals |
+| `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays (image-domain tier) |
+| `docs-site/src/components/scene3d.js` | the **3-D tier** — renders the landmark cloud + per-landmark covariance ellipsoids (`scene.json`) |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
-`tests/tools/s4_frontend_inspect.cpp` and `tests/tools/s0_sensor_model_inspect.cpp`.
+`tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`
+and `tests/tools/s5_triangulation_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -159,6 +162,35 @@ The overlay (`gen-overlay.mjs`, S0 mode — auto-selected on `kind`) draws the
 (green) with displacement vectors coloured by magnitude — over the actual frame
 (`distortion.svg`), and the per-channel **Allan-deviation** log-log curve with each
 channel's `N` (`imu_allan.svg`).
+
+### S5 triangulation inspector (`s5_inspect`)
+
+**Establishes the 3-D renderer tier.** Runs the shipped triangulator
+(`CameraUpdater::triangulate`) on real EuRoC feature tracks (the shipped FAST + KLT
+frontend) with **ground-truth clone poses**, turning each multi-view track into a
+3-D landmark. Triangulation is decoupled behind the `trace::S5Input` /
+`trace::S5Output` I/O struct (in `vio_trace.hpp`).
+
+```bash
+./build/tools/s5_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s5 --min-obs 3
+#   --px-noise PX   --fast-threshold F   --target-features N   --max-frames N
+node docs-site/scripts/gen-overlay.mjs build/s5     # → build/s5/frames/*.svg (reprojection residuals)
+```
+
+It exposes what the update path hides — per landmark the **position covariance**
+(`σ² · (Σ Hfᵀ Hf)⁻¹`, reusing the operator's own reprojection Jacobian), the
+inter-view **parallax**, the system **condition number**, and per-observation
+**reprojection residuals** — and writes three artifacts:
+
+| artifact | role |
+|---|---|
+| `scene.json` | `{landmarks:[[x,y,z]…], landmark_cov:[[9 row-major]…], camera:{R_imu_cam, p_imu_cam, frustum_rays}}` — the 3-D landmark cloud + per-landmark covariance, drawn by `scene3d.js` (low-parallax features stretch along the line of sight) |
+| `run.jsonl` | the camera path through the clone window (the viewer's frames) |
+| `frames.jsonl` | per-frame reprojection residuals (`kind:"s5_residuals"`) — observed pixel vs the landmark's reprojection, drawn over the image by `gen-overlay.mjs` |
+
+The 3-D landmark cloud + covariance ellipsoids render in the
+[Scene3D](../docs-site/src/components/scene3d.js) viewer (load `scene.json` +
+`run.jsonl`); the reprojection residuals render image-domain via `gen-overlay.mjs`.
 
 ## Layout
 

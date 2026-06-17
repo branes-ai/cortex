@@ -13,6 +13,10 @@
 //     `kind:"s0_imu"`): the distortion grid (ideal vs lens-warped) + displacement
 //     field over the actual frame, and the per-channel IMU Allan-deviation /
 //     noise plot. Written to distortion.svg / imu_allan.svg.
+//   • S5 triangulation inspector (tools/src/s5_inspect.cpp, `kind:"s5_residuals"`):
+//     per-frame reprojection residuals over the actual frame — observed pixel vs
+//     the triangulated landmark's reprojection, the vector coloured by error. The
+//     3-D landmark cloud + covariance ellipsoids render in the Scene3D viewer.
 //
 //   node docs-site/scripts/gen-overlay.mjs <dir>
 //
@@ -295,8 +299,62 @@ function s0ImuBody(r) {
   return s;
 }
 
+// ── S5 triangulation inspector tier (image-domain) ────────────────────────────
+// Per-frame reprojection residuals: the observed pixel (white ring) vs the
+// triangulated landmark's reprojection (coloured dot), the connecting vector
+// coloured by error magnitude. A large, structured residual flags a bad
+// triangulation (low parallax / outlier) the backend would otherwise trust.
+function s5ResidualsBody(r) {
+  const w = r.width ?? W, h = r.height ?? H;
+  const res = r.residuals ?? [];
+  const errs = res.map((p) => p.err).filter((e) => Number.isFinite(e));
+  const maxErr = errs.length ? Math.max(...errs) : null;  // true max, for the HUD
+  const ref = Math.max(2, maxErr ?? 0);                   // colour-scale floor (≥2 px)
+  const eColor = (e) => (Number.isFinite(e) ? ramp(Math.min(1, e / ref)) : '#888');
+  let s = '';
+
+  for (const p of res) {
+    const c = eColor(p.err);
+    s += `<line x1="${p.u.toFixed(1)}" y1="${p.v.toFixed(1)}" x2="${p.pu.toFixed(1)}" y2="${p.pv.toFixed(1)}" stroke="${c}" stroke-width="1.6" opacity="0.95"/>`;
+    s += `<circle cx="${p.u.toFixed(1)}" cy="${p.v.toFixed(1)}" r="3.5" fill="none" stroke="#fff" stroke-width="1" opacity="0.85"/>`;
+    s += `<circle cx="${p.pu.toFixed(1)}" cy="${p.pv.toFixed(1)}" r="2" fill="${c}"/>`;
+  }
+
+  // Error colour legend.
+  const lx = w - 130, ly = 24, lw = 110, lh = 10;
+  for (let k = 0; k < 22; k++) s += `<rect x="${lx + (k / 22) * lw}" y="${ly}" width="${lw / 22 + 1}" height="${lh}" fill="${ramp(k / 21)}"/>`;
+  s += `<rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="none" stroke="#888"/>`;
+  s += `<text x="${lx}" y="${ly - 3}" font-family="monospace" font-size="10" fill="#ddd">reproj err (px)</text>`;
+  s += `<text x="${lx}" y="${ly + lh + 11}" font-family="monospace" font-size="9" fill="#ddd">0</text>`;
+  s += `<text x="${lx + lw}" y="${ly + lh + 11}" text-anchor="end" font-family="monospace" font-size="9" fill="#ddd">${ref.toFixed(1)}</text>`;
+
+  // HUD.
+  const mean = errs.length ? errs.reduce((a, b) => a + b, 0) / errs.length : null;
+  const hud = [
+    `S5 triangulation — frame ${r.frame}  t=${num(r.t)}s`,
+    `landmarks reprojected: ${res.length}`,
+    `reproj err: mean ${num(mean)}px  max ${num(maxErr, 1)}px`,
+  ];
+  const boxH = 16 + hud.length * 18;
+  s += `<rect x="8" y="8" width="290" height="${boxH}" rx="5" fill="#000" opacity="0.55"/>`;
+  hud.forEach((line, i) => { s += `<text x="18" y="${30 + i * 18}" font-family="monospace" font-size="13" fill="#eee">${esc(line)}</text>`; });
+  s += `<text x="8" y="${h - 12}" font-family="monospace" font-size="11" fill="#ddd">white ring = observed   dot = reprojection   vector = residual (colour = px)</text>`;
+  return s;
+}
+
 let count = 0;
 for (const r of records) {
+  if (r.kind === 's5_residuals') {
+    const w = r.width ?? W, h = r.height ?? H;
+    const uri = dataUri(r.image);
+    let body = `<rect width="${w}" height="${h}" fill="#000"/>`;
+    if (uri) body += `<image href="${uri}" x="0" y="0" width="${w}" height="${h}"/>`;
+    body += s5ResidualsBody(r);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`;
+    writeFileSync(resolve(outDir, `frame_${String(r.frame).padStart(5, '0')}.svg`), svg);
+    ++count;
+    continue;
+  }
   if (r.kind === 's0_camera') {
     const w = r.width ?? W, h = r.height ?? H;
     const uri = dataUri(r.image);
