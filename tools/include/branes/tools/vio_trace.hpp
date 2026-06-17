@@ -358,6 +358,143 @@ inline void from_json(const json& j, S4Output<T>& out) {
         out.observations.push_back(unpack_observation<T>(o));
 }
 
+// ── S5 — Feature triangulation ───────────────────────────────────────────────
+// signature: triangulate(tracks, clone_poses) → landmarks[(p_world, covariance)]
+// (vio_stage_contracts.hpp kS5). The decoupled S5 I/O struct (issue #379): the
+// triangulation operator's input is feature tracks across a window of clone
+// poses; its output is the 3-D landmark cloud with per-landmark uncertainty.
+
+/// One observation of a feature in a specific clone, in NORMALIZED image coords
+/// (x/z, y/z) — the dialect `CameraUpdater::triangulate` consumes.
+template <branes::math::Scalar T = double>
+struct S5Observation {
+    std::uint32_t clone_index = 0;  ///< index into S5Input::clone_poses
+    std::uint32_t camera_id = 0;    ///< index into S5Input::extrinsics
+    lie::detail::Vec<T, 2> xy{};    ///< normalized image coords
+};
+
+/// One feature's observations across the clone window (≥2 to triangulate).
+template <branes::math::Scalar T = double>
+struct S5Track {
+    std::uint64_t feature_id = 0;
+    std::vector<S5Observation<T>> obs;
+};
+
+/// S5 input: the clone-pose window (T_world_imu), the camera extrinsics
+/// (T_imu_cam), and the feature tracks to triangulate against them.
+template <branes::math::Scalar T = double>
+struct S5Input {
+    std::vector<lie::SE3<T>> clone_poses;
+    std::vector<lie::SE3<T>> extrinsics;
+    std::vector<S5Track<T>> tracks;
+};
+
+/// One triangulated landmark with the uncertainty the production path hides.
+template <branes::math::Scalar T = double>
+struct S5Landmark {
+    std::uint64_t feature_id = 0;
+    bool success = false;
+    lie::detail::Vec<T, 3> p_world{};  ///< triangulated 3-D point (world frame)
+    std::array<T, 9> cov{};            ///< row-major 3×3 position covariance (m²)
+    T reproj_rms_px = 0;               ///< reprojection RMS at the solution
+    T parallax_deg = 0;                ///< max inter-view parallax (depth observability)
+    T condition_number = 0;            ///< cond(HᵀH) of the triangulation system
+    std::uint32_t n_obs = 0;
+};
+
+/// S5 output: the landmark cloud.
+template <branes::math::Scalar T = double>
+struct S5Output {
+    std::vector<S5Landmark<T>> landmarks;
+};
+
+template <class T>
+inline void to_json(json& j, const S5Input<T>& in) {
+    json clones = json::array();
+    for (const auto& c : in.clone_poses)
+        clones.push_back(pack(c));
+    json ext = json::array();
+    for (const auto& e : in.extrinsics)
+        ext.push_back(pack(e));
+    json tracks = json::array();
+    for (const auto& tr : in.tracks) {
+        json obs = json::array();
+        for (const auto& o : tr.obs)
+            obs.push_back(json{{"clone_index", o.clone_index}, {"camera_id", o.camera_id}, {"xy", pack(o.xy)}});
+        tracks.push_back(json{{"feature_id", tr.feature_id}, {"obs", std::move(obs)}});
+    }
+    j = json{{"clone_poses", std::move(clones)}, {"extrinsics", std::move(ext)}, {"tracks", std::move(tracks)}};
+}
+
+template <class T>
+inline void from_json(const json& j, S5Input<T>& in) {
+    in.clone_poses.clear();
+    for (const auto& c : j.at("clone_poses"))
+        in.clone_poses.push_back(unpack_se3<T>(c));
+    in.extrinsics.clear();
+    for (const auto& e : j.at("extrinsics"))
+        in.extrinsics.push_back(unpack_se3<T>(e));
+    in.tracks.clear();
+    for (const auto& tr : j.at("tracks")) {
+        S5Track<T> t;
+        t.feature_id = tr.at("feature_id").get<std::uint64_t>();
+        for (const auto& o : tr.at("obs")) {
+            S5Observation<T> obs;
+            obs.clone_index = o.at("clone_index").get<std::uint32_t>();
+            obs.camera_id = o.at("camera_id").get<std::uint32_t>();
+            obs.xy = unpack_vecn<T, 2>(o.at("xy"));
+            t.obs.push_back(obs);
+        }
+        in.tracks.push_back(std::move(t));
+    }
+}
+
+template <class T>
+inline void to_json(json& j, const S5Landmark<T>& lm) {
+    j = json{{"feature_id", lm.feature_id},
+             {"success", lm.success},
+             {"p_world", pack(lm.p_world)},
+             {"cov", lm.cov},
+             {"reproj_rms_px", num(lm.reproj_rms_px)},
+             {"parallax_deg", num(lm.parallax_deg)},
+             {"condition_number", num(lm.condition_number)},
+             {"n_obs", lm.n_obs}};
+}
+
+template <class T>
+inline void from_json(const json& j, S5Landmark<T>& lm) {
+    lm.feature_id = j.at("feature_id").get<std::uint64_t>();
+    lm.success = j.at("success").get<bool>();
+    lm.p_world = unpack_vecn<T, 3>(j.at("p_world"));
+    for (std::size_t i = 0; i < 9; ++i)
+        lm.cov[i] = static_cast<T>(j.at("cov").at(i).get<double>());
+    lm.reproj_rms_px = static_cast<T>(j.at("reproj_rms_px").get<double>());
+    lm.parallax_deg = static_cast<T>(j.at("parallax_deg").get<double>());
+    lm.condition_number = static_cast<T>(j.at("condition_number").get<double>());
+    lm.n_obs = j.at("n_obs").get<std::uint32_t>();
+}
+
+template <class T>
+inline void to_json(json& j, const S5Output<T>& out) {
+    json lms = json::array();
+    for (const auto& lm : out.landmarks) {
+        json o;
+        to_json(o, lm);
+        lms.push_back(std::move(o));
+    }
+    j = json{{"landmarks", std::move(lms)}};
+}
+
+template <class T>
+inline void from_json(const json& j, S5Output<T>& out) {
+    out.landmarks.clear();
+    for (const auto& o : j.at("landmarks")) {
+        S5Landmark<T> lm;
+        from_json(o, lm);
+        out.landmarks.push_back(std::move(lm));
+    }
+}
+
 /// Build a record from a typed stage input/output pair. The header's `stage`
 /// must be set by the caller (the typed payload doesn't carry it).
 template <class In, class Out>

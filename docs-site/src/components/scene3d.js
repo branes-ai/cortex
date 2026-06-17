@@ -85,6 +85,35 @@ export function createViewer({ canvas, hud, records, scene: sceneData, options =
     scene.add(points);
   }
 
+  // ── Per-landmark covariance ellipsoids (the S5 triangulation tier) ────────
+  // When the scene carries `landmark_cov` (parallel to `landmarks`, each a
+  // row-major 3×3 position covariance in m²), draw one static σ-ellipsoid per
+  // landmark — so triangulation uncertainty (large for low-parallax features)
+  // reads directly. Reuses the same eigSym3 → orient+scale machinery as the
+  // pose ellipsoid. Opt-in: absent field → nothing drawn.
+  if (sceneData?.landmark_cov?.length && sceneData?.landmarks?.length) {
+    const sharedGeo = new THREE.SphereGeometry(1, 12, 8);
+    const mat = new THREE.MeshPhongMaterial({ color: 0x4fd1ff, transparent: true, opacity: 0.16, depthWrite: false });
+    const n = Math.min(sceneData.landmarks.length, sceneData.landmark_cov.length);
+    for (let i = 0; i < n; i++) {
+      const cov = sceneData.landmark_cov[i];
+      if (!cov || cov.some((v) => !Number.isFinite(v))) continue;
+      const { values, vectors } = eigSym3(cov);
+      const basis = new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(...vectors[0]),
+        new THREE.Vector3(...vectors[1]),
+        new THREE.Vector3(...vectors[2]),
+      );
+      const q = new THREE.Quaternion().setFromRotationMatrix(basis);
+      const s = values.map((v) => sigmaK * Math.sqrt(Math.max(v, 0)));
+      const e = new THREE.Mesh(sharedGeo, mat);
+      e.position.set(...sceneData.landmarks[i]);
+      e.quaternion.copy(q);
+      e.scale.set(Math.max(s[0], 1e-5), Math.max(s[1], 1e-5), Math.max(s[2], 1e-5));
+      scene.add(e);
+    }
+  }
+
   // ── Estimated-camera frustum (rebuilt per frame from the pose + extrinsics) ─
   let frustum = null, fRays = null, qImuCam = null, pImuCam = null, fDepth = 0;
   if (sceneData?.camera?.frustum_rays) {
