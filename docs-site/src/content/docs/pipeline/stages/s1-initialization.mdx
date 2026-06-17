@@ -86,6 +86,33 @@ over-confidence the filter never fully recovers from, and a plausible origin for
 the **attitude-localized** over-confidence seen later (per-block NEES is worst on
 attitude — see [Consistency Analysis](/pipeline/consistency-analysis/)).
 
+## Real-data inspector (`s1_inspect`)
+
+The measurements above come from the *synthetic* probe — known tilt, known scale,
+run in CI. Its real-data companion, **`s1_inspect`**, runs the **real estimator**
+over a real EuRoC sequence and captures the bootstrap the moment
+`backend().initialized()` flips true: the seeded state, the 15×15 initial
+covariance, and the init diagnostics. No SDK change is needed — the init operators
+are already decoupled and the backend exposes `initialized()` / `state()` /
+`init_diagnostics()`, so the inspector polls per frame.
+
+```bash
+s1_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s1 [--prefer-dynamic]
+node docs-site/scripts/gen-init-figures.mjs build/s1   # → init_state.svg, init_covariance.svg
+```
+
+It writes `init.json` and renders two figures:
+
+- **recovered state vs ground truth** — the yaw-invariant **gravity-direction
+  (roll/pitch) error**, the **speed error**, gyro/accel-bias error, and — on the
+  dynamic path — the **scale error** against EuRoC's metric truth. (Yaw is an
+  unobservable gauge and is reported, not scored.)
+- **the initial-covariance heatmap** — the seeded `P₀` as log|P| with the
+  θ/p/v/b_g/b_a blocks labelled. This makes the **isotropic-seed** finding visible
+  on real data: the diagonal is a flat σ·I, *not* enlarged on the unobservable
+  yaw/scale or the weakly-observable accel bias — the structural over-confidence
+  the synthetic probe predicts, now confirmed at a real bootstrap.
+
 ## Interactive
 
 In the [3-D viewer](/vio/scene3d/), watch the very first frames: the covariance
