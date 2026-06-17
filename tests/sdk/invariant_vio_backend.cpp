@@ -104,7 +104,7 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
         for (std::size_t L = 0; L < landmarks.size(); ++L) {
             Vec2 xy;
             if (observe<T>(world.gt[f].R, world.gt[f].p, landmarks[L], xy))
-                obs.push_back({L, Vec2{{xy[0] + pix * nd(rng), xy[1] + pix * nd(rng)}}});
+                obs.push_back({L, 0, Vec2{{xy[0] + pix * nd(rng), xy[1] + pix * nd(rng)}}});
         }
         be.process_camera(t, std::span<const ms::NormalizedObs<T>>{obs});
 

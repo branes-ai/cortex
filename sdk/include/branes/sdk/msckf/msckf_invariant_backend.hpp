@@ -27,6 +27,7 @@
 #include <array>
 #include <cstddef>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace branes::sdk::msckf {
@@ -42,6 +43,7 @@ class MsckfInvariantBackend {
 public:
     using Nav = InvariantNavState<T>;
     using Clone = InvariantClone<T>;
+    using Calib = InvariantCalib<T>;
     using Vec3 = math::lie::detail::Vec<T, 3>;
     using SE23 = math::lie::SE23<T>;
     using SO3 = math::lie::SO3<T>;
@@ -70,11 +72,23 @@ public:
     [[nodiscard]] const std::vector<Clone>& clones() const noexcept {
         return clones_;
     }
+    [[nodiscard]] const std::vector<Calib>& calib() const noexcept {
+        return calib_;
+    }
     [[nodiscard]] std::size_t num_clones() const noexcept {
         return clones_.size();
     }
+    [[nodiscard]] std::size_t calib_dim() const noexcept {
+        return kCalibBlock * calib_.size();
+    }
     [[nodiscard]] std::size_t dim() const noexcept {
-        return Nav::kDim + kCloneDim * clones_.size();
+        return Nav::kDim + calib_dim() + kCloneDim * clones_.size();
+    }
+    [[nodiscard]] std::size_t calib_offset(std::size_t j) const noexcept {
+        return Nav::kDim + kCalibBlock * j;
+    }
+    [[nodiscard]] std::size_t clone_offset(std::size_t i) const noexcept {
+        return Nav::kDim + calib_dim() + kCloneDim * i;
     }
     [[nodiscard]] DynMat<T> covariance() const {
         return cov_.covariance();
@@ -84,6 +98,39 @@ public:
         nav_.bg = bg;
         nav_.ba = ba;
         nav_.timestamp = t;
+    }
+
+    /// Turn on online extrinsic calibration: append a calibration block.
+    void enable_calibration(std::vector<Calib> init, T rot_sigma, T trans_sigma) {
+        if (!clones_.empty())
+            throw std::logic_error("enable_calibration must precede any clone");
+        if (!calib_.empty())
+            throw std::logic_error("enable_calibration: calibration already enabled");
+        const std::size_t add = kCalibBlock * init.size();
+        if (add == 0)
+            return;
+        const std::size_t d0 = cov_.dim();  // 15
+        DynMat<T> G(d0 + add, d0);
+        for (std::size_t i = 0; i < d0; ++i)
+            G(i, i) = T{1};
+        cov_.transform(G);
+        DynMat<T> Iden(d0 + add, d0 + add);
+        for (std::size_t i = 0; i < d0 + add; ++i)
+            Iden(i, i) = T{1};
+        std::vector<NoiseTerm<T>> q;
+        q.reserve(add);
+        for (std::size_t j = 0; j < init.size(); ++j) {
+            const std::size_t off = Nav::kDim + kCalibBlock * j;
+            for (std::size_t a = 0; a < 3; ++a)
+                q.push_back({off + a, rot_sigma * rot_sigma});
+            for (std::size_t a = 0; a < 3; ++a)
+                q.push_back({off + 3 + a, trans_sigma * trans_sigma});
+        }
+        // To preserve positive semidefiniteness and comply with the generic CovarianceModel
+        // interface policy (supporting both FullCovariance and SqrtCovariance), we inject
+        // the initial calibration priors as process noise via `predict()` with identity.
+        cov_.predict(Iden, q);
+        calib_ = std::move(init);
     }
 
     // ── filter operations ────────────────────────────────────────────
@@ -146,22 +193,33 @@ public:
     bool update(const InvariantTrack<T>& obs) {
         if (obs.size() < 2 || clones_.empty())
             return false;
-        const auto tri = triangulate_invariant<T>(clones_, obs, cfg_.R_imu_cam, cfg_.p_imu_cam);
+        // Keep fixed projection extrinsics separate from "estimated calibration columns" fallback.
+        // If calib_ is empty (calibration is disabled), we fall back to static non-estimable cfg_ parameters.
+        const auto& active_cal = calib_.empty() ? std::vector<Calib>{{cfg_.R_imu_cam, cfg_.p_imu_cam}} : calib_;
+        const bool estimate_cal = !calib_.empty();
+
+        const auto tri = triangulate_invariant<T>(clones_, obs, active_cal);
         if (!tri.ok)
             return false;
-        const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f, cfg_.R_imu_cam, cfg_.p_imu_cam);
+        const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f, active_cal, estimate_cal);
         if (!M.ok)
             return false;
 
-        // Scatter the clone-only H_x (2m × 6·#clones) into the joint H (2m × dim),
-        // placing each clone's 6-block at its joint offset; nav columns stay zero.
+        // Scatter the clone-only H_x (2m × nc_calib) into the joint H (2m × dim),
+        // placing each clone/calib block at its joint offset; nav columns stay zero.
         const std::size_t d = dim();
         const std::size_t nc6 = kCloneDim * clones_.size();
+        const std::size_t n_calib = kCalibBlock * calib_.size();
+        const std::size_t nc_calib = nc6 + n_calib;
         std::vector<T> Hj(M.rows2 * d, T{0});
-        for (std::size_t row = 0; row < M.rows2; ++row)
+        for (std::size_t row = 0; row < M.rows2; ++row) {
             for (std::size_t c = 0; c < clones_.size(); ++c)
                 for (std::size_t k = 0; k < kCloneDim; ++k)
-                    Hj[row * d + clone_offset(c) + k] = M.H_x[row * nc6 + kCloneDim * c + k];
+                    Hj[row * d + clone_offset(c) + k] = M.H_x[row * nc_calib + kCloneDim * c + k];
+            for (std::size_t j = 0; j < calib_.size(); ++j)
+                for (std::size_t k = 0; k < kCalibBlock; ++k)
+                    Hj[row * d + calib_offset(j) + k] = M.H_x[row * nc_calib + nc6 + kCalibBlock * j + k];
+        }
 
         const auto proj = features::msckf_left_nullspace_project<T>(M.H_f, Hj, M.r, M.rows2, d);
         if (proj.rows == 0)
@@ -187,12 +245,9 @@ public:
     }
 
     static constexpr std::size_t kCloneDim = 6;
+    static constexpr std::size_t kCalibBlock = 6;
 
 private:
-    [[nodiscard]] std::size_t clone_offset(std::size_t i) const {
-        return Nav::kDim + kCloneDim * i;
-    }
-
     [[nodiscard]] std::array<NoiseTerm<T>, 12> nav_process_noise(T dt) const {
         std::array<NoiseTerm<T>, 12> q;
         auto fill = [&](std::size_t at, std::size_t off, T val) {
@@ -217,6 +272,16 @@ private:
         nav_.X = SE23(dR * nav_.X.rotation(), dR * nav_.X.velocity() + dnu, dR * nav_.X.position() + drho);
         nav_.bg = nav_.bg + Vec3{{dx[Nav::kBg], dx[Nav::kBg + 1], dx[Nav::kBg + 2]}};
         nav_.ba = nav_.ba + Vec3{{dx[Nav::kBa], dx[Nav::kBa + 1], dx[Nav::kBa + 2]}};
+        if (!calib_.empty()) {
+            for (std::size_t j = 0; j < calib_.size(); ++j) {
+                const std::size_t off = calib_offset(j);
+                const Vec3 dtheta{{dx[off], dx[off + 1], dx[off + 2]}};
+                const Vec3 dp{{dx[off + 3], dx[off + 4], dx[off + 5]}};
+                // Rotation retracts via right-multiplication semantics matching the Jacobian's perturbation convention
+                calib_[j].R_imu_cam = calib_[j].R_imu_cam * SO3::exp(dtheta);
+                calib_[j].p_imu_cam = calib_[j].p_imu_cam + dp;
+            }
+        }
         for (std::size_t c = 0; c < clones_.size(); ++c) {
             const std::size_t off = clone_offset(c);
             retract_invariant<T>(
@@ -228,6 +293,7 @@ private:
     InvariantPropagator<T> prop_;
     Nav nav_{};
     std::vector<Clone> clones_;
+    std::vector<Calib> calib_;
     Cov cov_;
 };
 

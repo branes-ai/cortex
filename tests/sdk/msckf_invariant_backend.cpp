@@ -52,7 +52,7 @@ Vec2 project(const Pose& c, const Vec3& pf) {
 ms::InvariantTrack<T> track(const std::vector<Pose>& poses, const Vec3& pf) {
     ms::InvariantTrack<T> obs;
     for (std::size_t c = 0; c < poses.size(); ++c)
-        obs.push_back({c, project(poses[c], pf)});
+        obs.push_back({c, 0, project(poses[c], pf)});
     return obs;
 }
 // Gauge-invariant inconsistency of the backend's clones vs the true observations.
@@ -138,7 +138,7 @@ TEST_CASE("invariant backend: a degenerate (zero-baseline) track is rejected wit
     const DynMat cov_before = b.covariance();
 
     const Vec2 obs = project(pose, features()[6]);
-    const bool applied = b.update(ms::InvariantTrack<T>{{0, obs}, {1, obs}});
+    const bool applied = b.update(ms::InvariantTrack<T>{{0, 0, obs}, {1, 0, obs}});
     REQUIRE_FALSE(applied);  // low-parallax track rejected
     REQUIRE(b.num_clones() == 2);
     // Covariance untouched.

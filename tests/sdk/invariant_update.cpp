@@ -57,7 +57,7 @@ Vec2 project(const ms::InvariantClone<T>& c, const Vec3& pf) {
 std::vector<ms::InvariantObs<T>> track(const Scene& s, const Vec3& pf) {
     std::vector<ms::InvariantObs<T>> obs;
     for (std::size_t c = 0; c < s.clones.size(); ++c)
-        obs.push_back({c, project(s.clones[c], pf)});
+        obs.push_back({c, 0, project(s.clones[c], pf)});
     return obs;
 }
 

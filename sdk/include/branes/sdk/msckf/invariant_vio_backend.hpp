@@ -38,7 +38,8 @@ namespace branes::sdk::msckf {
 template <math::Scalar T>
 struct NormalizedObs {
     std::uint64_t feature_id = 0;
-    math::lie::detail::Vec<T, 2> xy{};
+    std::size_t camera_index = 0;
+    branes::math::lie::detail::Vec<T, 2> xy{};
 };
 
 /// Wraps `MsckfInvariantBackend` and feeds it through the body-frame backend's
@@ -49,10 +50,11 @@ template <math::Scalar T, class Cov = FullCovariance<T>>
 class InvariantVioBackend {
 public:
     using Backend = MsckfInvariantBackend<T, Cov>;
-    using Vec3 = math::lie::detail::Vec<T, 3>;
-    using Vec2 = math::lie::detail::Vec<T, 2>;
-    using SE23 = math::lie::SE23<T>;
-    using SO3 = math::lie::SO3<T>;
+    using Calib = InvariantCalib<T>;
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+    using Vec2 = branes::math::lie::detail::Vec<T, 2>;
+    using SE23 = branes::math::lie::SE23<T>;
+    using SO3 = branes::math::lie::SO3<T>;
 
     struct Config {
         typename Backend::Config backend{};  ///< noise, gravity, σ's, gating
@@ -72,6 +74,11 @@ public:
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
         have_last_ = false;
+    }
+
+    /// Turn on online extrinsic calibration: append a calibration block.
+    void enable_calibration(std::vector<Calib> init, T rot_sigma, T trans_sigma) {
+        be_.enable_calibration(std::move(init), rot_sigma, trans_sigma);
     }
 
     /// IMU sample: propagate from the previous sample (zero-order hold held over to
@@ -112,7 +119,7 @@ public:
         std::unordered_set<std::uint64_t> seen;
         seen.reserve(obs.size());
         for (const auto& o : obs) {
-            tracks_[o.feature_id].push_back(ObsRec{t, o.xy});
+            tracks_[o.feature_id].push_back(ObsRec{t, o.camera_index, o.xy});
             seen.insert(o.feature_id);
         }
         // Features not observed this frame have ENDED — fuse their full track, drop.
@@ -129,6 +136,9 @@ public:
     [[nodiscard]] const typename Backend::Nav& nav() const noexcept {
         return be_.nav();
     }
+    [[nodiscard]] const std::vector<Calib>& calib() const noexcept {
+        return be_.calib();
+    }
     [[nodiscard]] DynMat<T> covariance() const {
         return be_.covariance();
     }
@@ -140,6 +150,7 @@ private:
     static constexpr std::size_t kNoClone = static_cast<std::size_t>(-1);
     struct ObsRec {
         double clone_time = 0.0;
+        std::size_t camera_index = 0;
         Vec2 xy{};
     };
 
@@ -159,12 +170,17 @@ private:
         auto it = tracks_.find(id);
         if (it == tracks_.end())
             return;
-        InvariantTrack<T> track;
+        std::vector<InvariantObs<T>> track;
         track.reserve(it->second.size());
         for (const ObsRec& rec : it->second) {
             const std::size_t ci = clone_index_at(rec.clone_time);
-            if (ci != kNoClone)  // clone still in the window
-                track.push_back(InvariantObs<T>{ci, rec.xy});
+            if (ci != kNoClone) {  // clone still in the window
+                InvariantObs<T> io;
+                io.clone_index = ci;
+                io.camera_index = rec.camera_index;
+                io.xy = rec.xy;
+                track.push_back(io);
+            }
         }
         if (track.size() >= 2) {
             (void)be_.update(track);
