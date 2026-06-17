@@ -85,12 +85,15 @@ replays a stage and visualizes it.
 | `docs-site/scripts/gen-init-figures.mjs` | recovered-state-vs-GT panel + initial-covariance heatmap (θ/p/v/bg/ba blocks) |
 | `tools/src/s2_inspect.cpp` | **S2 propagation inspector** (filter-internal tier) — real IMU window → real propagator → covariance growth + propagated-vs-GT drift inside the ±σ envelope |
 | `docs-site/scripts/gen-propagation-figures.mjs` | per-state σ-growth heatmap + drift-vs-3σ-envelope plot |
+| `tools/src/s3_inspect.cpp` | **S3 augmentation inspector** (filter-internal tier) — real keyframe state → real `augment_clone` → before/after covariance with the new clone block |
+| `docs-site/scripts/gen-augmentation-figures.mjs` | before/after covariance heatmap with the new clone block outlined |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
-`tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`
-`tests/tools/s1_init_inspect.cpp` and `tests/tools/s2_propagation_inspect.cpp`.
+`tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`,
+`tests/tools/s1_init_inspect.cpp`, `tests/tools/s2_propagation_inspect.cpp` and
+`tests/tools/s3_augmentation_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -268,6 +271,24 @@ time, row-normalized) and the **drift-vs-±3σ-envelope** plot — where the
 dead-reckoning drift escaping the envelope flags the propagated covariance
 under-covering the error (the diagonal-Q / no-position-term #212 candidate the
 synthetic S2 probe quantifies).
+
+### S3 augmentation inspector (`s3_inspect`)
+
+Runs the real estimator over EuRoC until the window holds a genuinely-correlated
+covariance (initialized + a few clones), then takes a **copy** of that keyframe
+state and runs the real `StateHelper::augment_clone` on it. No SDK change — the
+operator is standalone and `backend().state()` is exposed.
+
+```bash
+./build/tools/s3_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s3 --min-clones 5
+node docs-site/scripts/gen-augmentation-figures.mjs build/s3   # → augment_covariance.svg
+```
+
+Output `augmentation.json`: the before/after covariance, the new clone block's
+placement, and the stochastic-cloning residuals — the clone's marginal and its
+cross-covariance with every existing state must equal the cloned pose's (a clone
+is a deterministic copy), with a PSD check. The figure draws the before/after
+heatmap with the **new clone block outlined**, making the clone literally appear.
 
 ## Layout
 
