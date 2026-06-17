@@ -221,6 +221,8 @@ generates entries automatically from Conventional Commits on `main`.
 * **site:** add S2 IMU-propagation stage page (a cleared [#212](https://github.com/branes-ai/cortex/issues/212) candidate) ([8623a9a](https://github.com/branes-ai/cortex/commit/8623a9a633cbd5b75f6035333b4a302df4986158))
 * **site:** add the S1 initialization stage page ([54d8f33](https://github.com/branes-ai/cortex/commit/54d8f33fb227251ab7f5386f82c7822d56ca6b2a))
 * **site:** add the S10 online-calibration stage page ([#212](https://github.com/branes-ai/cortex/issues/212) centerpiece) ([91ead13](https://github.com/branes-ai/cortex/commit/91ead132c3a0e76770ab26d991bb45a3fbe45784))
+* **site:** improve VIO pipeline overview, S0, and S1 stages ([d701c99](https://github.com/branes-ai/cortex/commit/d701c99b6431d534fec64bdfa75f9bd13b1832d2))
+* **site:** improve VIO pipeline overview, S0, and S1 stages ([d701c99](https://github.com/branes-ai/cortex/commit/d701c99b6431d534fec64bdfa75f9bd13b1832d2))
 * **site:** migrate the diagnostic-methodology doc as a section page ([fd4b7bb](https://github.com/branes-ai/cortex/commit/fd4b7bb288a32eed1278f27f0f186033ad668e63))
 * **site:** widen the triangulation baseline so the 3D view reads ([#364](https://github.com/branes-ai/cortex/issues/364)) ([31d584f](https://github.com/branes-ai/cortex/commit/31d584f467fe0052182441c3a2623450b4680ff0))
 * **test:** explain pyramidal KLT + add the numerical failure-mode taxonomy ([49f77d2](https://github.com/branes-ai/cortex/commit/49f77d230dede5b19c35886e31af9cc39e51ffc5))
