@@ -44,6 +44,15 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.60.2](https://github.com/branes-ai/cortex/compare/v0.60.1...v0.60.2) (2026-06-17)
+
+
+### Documentation
+
+* **site:** fix un-gated inline math delimiters and escape sequences ([#412](https://github.com/branes-ai/cortex/issues/412)) ([fcf64bc](https://github.com/branes-ai/cortex/commit/fcf64bc62b097cf6e65c2537062c8b5ba15b982c))
+* **site:** fix un-gated inline math delimiters and escape sequences on overview, S0, and S1 ([fcf64bc](https://github.com/branes-ai/cortex/commit/fcf64bc62b097cf6e65c2537062c8b5ba15b982c))
+* **site:** restore authoritative VIO stage-flow architectural SVG in overview ([a1a2729](https://github.com/branes-ai/cortex/commit/a1a272937ca254975f170b3fa6bac9b6ec921cb6))
+
 ## [0.60.1](https://github.com/branes-ai/cortex/compare/v0.60.0...v0.60.1) (2026-06-17)
 
 
