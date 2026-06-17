@@ -158,12 +158,20 @@ function renderCovariance() {
     return null;
   }
 
+  // both heatmaps are indexed [0,N) × [0,N), so before/after must be square and
+  // equal-sized — otherwise heat(B) would index out of bounds on malformed JSON.
+  if (B.length !== N) {
+    console.error(`covariance.json: before/after row count mismatch (${N} vs ${B.length}), skipping covariance.svg`);
+    return null;
+  }
+
   // Shared log scale over both matrices. Validate the row-major shape so a
-  // corrupt (scalar) row fails loudly instead of throwing "not iterable".
+  // corrupt (scalar) or short row fails loudly instead of throwing "not iterable"
+  // or indexing undefined.
   let amax = -Infinity, amin = Infinity;
   for (const Mx of [A, B]) for (const row of Mx) {
-    if (!Array.isArray(row)) {
-      console.error('covariance.json: a matrix row is not an array, skipping covariance.svg');
+    if (!Array.isArray(row) || row.length !== N) {
+      console.error('covariance.json: a matrix row is missing or not N-wide, skipping covariance.svg');
       return null;
     }
     for (const v of row) {
