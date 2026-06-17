@@ -44,6 +44,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.58.0](https://github.com/branes-ai/cortex/compare/v0.57.0...v0.58.0) (2026-06-17)
+
+
+### Features
+
+* **sdk:** implement Phase C 6-DoF online extrinsic calibration for MsckfInvariantBackend ([f9007da](https://github.com/branes-ai/cortex/commit/f9007dad737fc18815c3f3208d754df45f319625))
+* **sdk:** Phase C - 6-DoF online extrinsic calibration for MsckfInvariantBackend ([#400](https://github.com/branes-ai/cortex/issues/400)) ([f9007da](https://github.com/branes-ai/cortex/commit/f9007dad737fc18815c3f3208d754df45f319625))
+
 ## [0.57.0](https://github.com/branes-ai/cortex/compare/v0.56.0...v0.57.0) (2026-06-17)
 
 
