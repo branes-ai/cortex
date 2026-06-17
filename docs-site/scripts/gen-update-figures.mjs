@@ -153,11 +153,22 @@ function renderCovariance() {
   if (!Array.isArray(A) || !Array.isArray(B) || !A.length) return null;
   const N = A.length;
   const imuDim = cov.imu_dim ?? 15, cloneDim = cov.clone_dim ?? 6;
+  if (!(cloneDim > 0)) {  // a 0/negative block stride would make the separator loop spin forever
+    console.error(`covariance.json: invalid clone_dim ${cloneDim}, skipping covariance.svg`);
+    return null;
+  }
 
-  // Shared log scale over both matrices.
+  // Shared log scale over both matrices. Validate the row-major shape so a
+  // corrupt (scalar) row fails loudly instead of throwing "not iterable".
   let amax = -Infinity, amin = Infinity;
-  for (const Mx of [A, B]) for (const row of Mx) for (const v of row) {
-    const a = Math.abs(v); if (a > 0) { if (a > amax) amax = a; if (a < amin) amin = a; }
+  for (const Mx of [A, B]) for (const row of Mx) {
+    if (!Array.isArray(row)) {
+      console.error('covariance.json: a matrix row is not an array, skipping covariance.svg');
+      return null;
+    }
+    for (const v of row) {
+      const a = Math.abs(v); if (a > 0) { if (a > amax) amax = a; if (a < amin) amin = a; }
+    }
   }
   const lo = Math.log10(Math.max(amin, amax * 1e-6)), hi = Math.log10(amax);
   const col = (v) => { const a = Math.abs(v); if (!(a > 0)) return '#0a0a0a'; return ramp((Math.log10(a) - lo) / (hi - lo || 1)); };

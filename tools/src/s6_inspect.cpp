@@ -44,6 +44,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -104,6 +105,8 @@ double to_f64(const std::string& raw) {
     }
     if (raw.empty() || pos != raw.size())
         throw std::runtime_error("s6_inspect: invalid number value '" + raw + "'");
+    if (!std::isfinite(v))  // std::stod accepts "nan"/"inf" — reject them for σ/threshold flags
+        throw std::runtime_error("s6_inspect: non-finite number value '" + raw + "'");
     return v;
 }
 
@@ -124,15 +127,24 @@ Args parse(int argc, char** argv) {
             a.out = next(i);
         else if (v == "--max-frames")
             a.max_frames = to_u64(next(i));
-        else if (v == "--camera-noise")
+        else if (v == "--camera-noise") {
             a.camera_noise = to_f64(next(i));
-        else if (v == "--calib-rot-deg")
+            if (!(a.camera_noise > 0.0))
+                throw std::runtime_error("s6_inspect: --camera-noise must be > 0 (it is the modeled σ)");
+        } else if (v == "--calib-rot-deg") {
             a.calib_rot_deg = to_f64(next(i));
-        else if (v == "--min-parallax")
+            if (a.calib_rot_deg < 0.0)
+                throw std::runtime_error("s6_inspect: --calib-rot-deg must be >= 0");
+        } else if (v == "--min-parallax") {
             a.min_parallax = to_f64(next(i));
-        else if (v == "--dump-update")
-            a.dump_update = static_cast<std::int64_t>(to_u64(next(i)));
-        else
+            if (a.min_parallax < 0.0)
+                throw std::runtime_error("s6_inspect: --min-parallax must be >= 0");
+        } else if (v == "--dump-update") {
+            const std::uint64_t k = to_u64(next(i));
+            if (k > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+                throw std::runtime_error("s6_inspect: --dump-update value out of range");
+            a.dump_update = static_cast<std::int64_t>(k);
+        } else
             throw std::runtime_error("s6_inspect: unknown argument '" + std::string(v) + "'");
     }
     return a;
@@ -312,9 +324,21 @@ int main(int argc, char** argv) {
         ++processed;
     }
 
+    // Fail fast on a truncated record stream (disk-full / late I/O error): the
+    // observer's per-update writes set failbit silently, so check once at the end.
+    upd_os.flush();
+    if (!upd_os) {
+        std::cerr << "s6_inspect: error writing " << upd_path << " (output may be truncated)\n";
+        return 1;
+    }
     if (dumped) {
-        std::ofstream cov_os(args.out + "/covariance.json");
+        const std::string cov_path = args.out + "/covariance.json";
+        std::ofstream cov_os(cov_path);
         cov_os << cov_dump.dump(0) << '\n';
+        if (!cov_os) {
+            std::cerr << "s6_inspect: error writing " << cov_path << "\n";
+            return 1;
+        }
     }
 
     const double mean_nod = nis_count ? sum_nis_over_dof / static_cast<double>(nis_count) : 0.0;
