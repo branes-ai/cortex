@@ -44,6 +44,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.61.0](https://github.com/branes-ai/cortex/compare/v0.60.2...v0.61.0) (2026-06-17)
+
+
+### Features
+
+* **tools:** s2 propagation inspector — real EuRoC IMU window → covariance growth & drift ([#414](https://github.com/branes-ai/cortex/issues/414)) ([f8b1292](https://github.com/branes-ai/cortex/commit/f8b1292430379ef61cc3913154f8cc788ad10b23))
+
+
+### Documentation
+
+* wip workload analysis ([7d1f437](https://github.com/branes-ai/cortex/commit/7d1f437ff1e4174dac5330dc46957337855ecc6e))
+
 ## [0.60.2](https://github.com/branes-ai/cortex/compare/v0.60.1...v0.60.2) (2026-06-17)
 
 
