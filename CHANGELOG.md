@@ -44,6 +44,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.57.0](https://github.com/branes-ai/cortex/compare/v0.56.0...v0.57.0) (2026-06-17)
+
+
+### Features
+
+* **tools:** s5 triangulation inspector — real EuRoC tracks+poses → 3D landmarks ([#398](https://github.com/branes-ai/cortex/issues/398)) ([a3999ab](https://github.com/branes-ai/cortex/commit/a3999ab112a0af40c60ef68bc7bcd3595861438e))
+
 ## [0.56.0](https://github.com/branes-ai/cortex/compare/v0.55.0...v0.56.0) (2026-06-16)
 
 
