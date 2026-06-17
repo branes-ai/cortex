@@ -92,6 +92,34 @@ sits **right at its target** with the shipped noise:
 At the default `Q`, NEES ≈ 6.4 ≈ the 6-DoF target — **the propagated covariance is
 essentially honest on its own.**
 
+## Real-data inspector (`s2_inspect`)
+
+The measurements above come from the *synthetic* probe — known IMU, known Q, run
+in CI. Its real-data companion, **`s2_inspect`**, runs the **real propagator**
+(`msckf::Propagator`) over a real EuRoC IMU window. It seeds the prior pose+velocity
+from ground truth at the window start (plus the filter's initial-P seed), then
+propagates step by step — no SDK change, since the propagator is already standalone.
+
+```bash
+s2_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s2 --window-s 0.5
+node docs-site/scripts/gen-propagation-figures.mjs build/s2   # → cov_growth.svg, pose_drift.svg
+```
+
+It writes `propagation.json` and renders two figures:
+
+- **the covariance-growth heatmap** — each of the 15 IMU error states' σ over the
+  window (row-normalized), with the θ/p/v/b_g/b_a blocks marked. The position block
+  growing only via the velocity coupling (no direct position-Q term) is exactly the
+  diagonal-`Q` simplification, now visible on real data.
+- **drift vs the ±3σ envelope** — the propagated pose's dead-reckoning drift from
+  ground truth, plotted against the filter's *own* growing 3σ band. Drift that
+  stays inside the band means the propagated covariance honestly covers the error;
+  drift that escapes it (red) is the local, real-data image of an under-noised `Q`.
+
+This is the real-data check on the synthetic finding below: on EuRoC the envelope
+covers the inter-frame drift, confirming propagation is essentially honest on its
+own — the #212 over-confidence enters elsewhere.
+
 <Aside type="tip" title="Status — cleared (with a small fix outstanding)">
   S2 is **not** a primary source of the #212 over-confidence. The diagonal-`Q`
   simplification is real but costs &lt;1% of position-σ over a frame, every
