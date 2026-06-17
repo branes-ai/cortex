@@ -20,10 +20,10 @@ $$
 \text{project}(\mathbf{p}_c) \rightarrow \mathbf{z} = [u, v]^T
 $$
 
-where \mathbf{p}_c = [x, y, z]^T \in \mathbb{R}^3 is a 3D point in the camera-frame coordinate system. Cortex supports both the standard **Pinhole-RadTan** model (for rectilinear lenses) and the **Kannala-Brandt** model (for wide-angle fisheye lenses).
+where $\mathbf{p}_c = [x, y, z]^T \in \mathbb{R}^3$ is a 3D point in the camera-frame coordinate system. Cortex supports both the standard **Pinhole-RadTan** model (for rectilinear lenses) and the **Kannala-Brandt** model (for wide-angle fisheye lenses).
 
 ### A. Pinhole Projection (The Core Perspective)
-The ideal pinhole camera projects the 3D camera-frame coordinate \mathbf{p}_c to the normalized image plane coordinates \mathbf{x}_n = [x_n, y_n]^T$:
+The ideal pinhole camera projects the 3D camera-frame coordinate $\mathbf{p}_c$ to the normalized image plane coordinates $\mathbf{x}_n = [x_n, y_n]^T$:
 
 $$
 x_n = \cfrac{x}{z}, \qquad y_n = \cfrac{y}{z}
@@ -40,7 +40,7 @@ $$
 *   **Principal Points ($c_x, c_y$)**: Represent the exact pixel coordinate where the camera's optical axis physically pierces the image sensor. Because the lens assembly is never perfectly centered on the silicon during manufacturing, the principal point is almost never exactly at the geometric center of the pixel grid.
 
 ### B. Distortion Models (Modeling Lens Curvature)
-Real lenses bend light, introducing distortion. Before mapping to pixels, the normalized coordinates \mathbf{x}_n are warped to distorted coordinates \mathbf{x}_d = [x_d, y_d]^T$.
+Real lenses bend light, introducing distortion. Before mapping to pixels, the normalized coordinates $\mathbf{x}_n$ are warped to distorted coordinates $\mathbf{x}_d = [x_d, y_d]^T$.
 
 #### 1. Radial-Tangential (RadTan) Distortion (5-Lens / 4-Intrinsic Parameters)
 The complete camera projection model combines **5 lens distortion parameters** ($k_1, k_2, k_3, p_1, p_2$) and **4 intrinsic calibration parameters** ($f_x, f_y, c_x, c_y$):
@@ -64,7 +64,7 @@ $$
 #### 2. Kannala-Brandt (KB) Fisheye Distortion (4-Parameters)
 Wide-angle fisheye lenses cannot be modeled by simple rectilinear perspective because their field of view often exceeds $180^\circ$ (light rays can literally bend around behind the camera origin).
 
-Instead of assuming light travels in straight lines to a flat plane, the Kannala-Brandt model maps the **angular direction of the incoming light ray** (\theta) relative to the optical axis using an odd-power polynomial series:
+Instead of assuming light travels in straight lines to a flat plane, the Kannala-Brandt model maps the **angular direction of the incoming light ray** ($\theta$) relative to the optical axis using an odd-power polynomial series:
 
 $$
 r = \sqrt{x_n^2 + y_n^2}, \qquad \theta = \text{atan2}(r, 1)
@@ -79,26 +79,26 @@ $$
 x_d = \cfrac{d(\theta)}{r} x_n, \qquad y_d = \cfrac{d(\theta)}{r} y_n
 $$
 
-*   **Optical Center Limit (r = 0)**: When $r = 0$ (the principal ray), the angle \theta = 0$, and the ratio $d(\theta) / r$ is mathematically defined as its limit: \lim_{r\to0} d(\theta)/r = 1$. Thus, at the principal point, $x_d = x_n = 0$ and $y_d = y_n = 0$ with zero distortion, preventing any division-by-zero NaN values.
+*   **Optical Center Limit (r = 0)**: When $r = 0$ (the principal ray), the angle $\theta = 0$, and the ratio $d(\theta) / r$ is mathematically defined as its limit: $\lim_{r\to0} d(\theta)/r = 1$. Thus, at the principal point, $x_d = x_n = 0$ and $y_d = y_n = 0$ with zero distortion, preventing any division-by-zero NaN values.
 
 ### C. The Analytical Projection Jacobian
-To perform the **EKF Measurement Update** (where we update our state estimate using the visual tracking error), we need to write the derivative of pixel coordinates \mathbf{z} = [u, v]^T$ w.r.t the 3D camera-frame point \mathbf{p}_c. This Jacobian, \mathbf{H}_p, is computed via the chain rule:
+To perform the **EKF Measurement Update** (where we update our state estimate using the visual tracking error), we need to write the derivative of pixel coordinates $\mathbf{z} = [u, v]^T$ w.r.t the 3D camera-frame point $\mathbf{p}_c$. This Jacobian, $\mathbf{H}_p$, is computed via the chain rule:
 
 $$
 \mathbf{H}_p = \cfrac{\partial \mathbf{z}}{\partial \mathbf{p}_c} = \cfrac{\partial \mathbf{z}}{\partial \mathbf{x}_d} \ccdot \cfrac{\partial \mathbf{x}_d}{\partial \mathbf{x}_n} \ccdot \cfrac{\partial \mathbf{x}_n}{\partial \mathbf{p}_c}
 $$
 
-*   **Pinhole Quotient Rule**: The normalized image coordinate is a quotient of coordinates: $x_n = x/z$. Under the standard quotient rule, its derivatives w.r.t the 3D coordinate vector \mathbf{p}_c = [x, y, z]^T$ are given by:
-    *   \partial x_n/\partial x = 1/z
-    *   \partial x_n/\partial y = 0
-    *   \partial x_n/\partial z = -x / z^2
+*   **Pinhole Quotient Rule**: The normalized image coordinate is a quotient of coordinates: $x_n = x/z$. Under the standard quotient rule, its derivatives w.r.t the 3D coordinate vector $\mathbf{p}_c = [x, y, z]^T$ are given by:
+    *   $\partial x_n/\partial x = 1/z
+    *   $\partial x_n/\partial y = 0
+    *   $\partial x_n/\partial z = -x / z^2
     This forms the linear perspective term:
 
 $$
 \cfrac{\partial \mathbf{x}_n}{\partial \mathbf{p}_c} = \begin{bmatrix} 1/z & 0 & -x/z^2 \ 0 & 1/z & -y/z^2 \end{bmatrix}
 $$
 
-Cortex checks the rank of \mathbf{H}_p$ (which must be strictly 2) and validates its analytic derivatives against numerical finite differences during unit testing down to machine precision (\approx10^{-15}$).
+Cortex checks the rank of $\mathbf{H}_p$ (which must be strictly 2) and validates its analytic derivatives against numerical finite differences during unit testing down to machine precision ($\approx10^{-15}$).
 
 ---
 
@@ -114,17 +114,17 @@ $$
 $$
 
 Where:
-*   \tilde{\boldsymbol{\omega}}, \tilde{\mathbf{a}}: The raw gyro and accelerometer measurements.
-*   \boldsymbol{\omega}, \mathbf{a}_W: The true angular velocity and true world-frame acceleration of the IMU.
-*   \mathbf{b}_g, \mathbf{b}_a: The slow-varying **sensor biases** (modeled as random walks).
-*   \mathbf{n}_g, \mathbf{n}_a: White Gaussian measurement noise.
-*   \mathbf{g}_W: The global gravity vector.
+*   $\tilde{\boldsymbol{\omega}}, \tilde{\mathbf{a}}$: The raw gyro and accelerometer measurements.
+*   $\boldsymbol{\omega}, \mathbf{a}_W$: The true angular velocity and true world-frame acceleration of the IMU.
+*   $\mathbf{b}_g, \mathbf{b}_a$: The slow-varying **sensor biases** (modeled as random walks).
+*   $\mathbf{n}_g, \mathbf{n}_a$: White Gaussian measurement noise.
+*   $\mathbf{g}_W$: The global gravity vector.
 
 ### Why an IMU Resting on a Table Reads $+9.81\text{ m/s}^2$
 This is a common point of confusion for beginners. Accelerometers measure **specific force** (the reaction force relative to free-fall), not true acceleration. 
 When an IMU is stationary on a flat table:
-*   Its true world acceleration is \mathbf{a}_W = \mathbf{0}$.
-*   The world gravity is \mathbf{g}_W = [0, 0, -9.81]^T$.
+*   Its true world acceleration is $\mathbf{a}_W = \mathbf{0}$.
+*   The world gravity is $\mathbf{g}_W = [0, 0, -9.81]^T$.
 *   Thus, the accelerometer reads:
 
 $$
@@ -140,7 +140,7 @@ $$
 Sensors do not live at the same physical point, nor do they capture data at the exact same instant. We must calibrate both spatial and temporal offsets.
 
 ### A. Spatial Extrinsics (6-DoF Calibration)
-The camera is offset from the IMU center by a translation \mathbf{p}_{ic} and a rotation \mathbf{R}_{ic} (or \mathbf{T}_{ci} \in \text{SE}(3)$). A point \mathbf{p}_f$ in the world frame is mapped to the camera frame $C$ via the intermediate IMU frame $I$:
+The camera is offset from the IMU center by a translation $\mathbf{p}_{ic}$ and a rotation $\mathbf{R}_{ic}$ (or $\mathbf{T}_{ci} \in \text{SE}(3)$). A point $\mathbf{p}_f$ in the world frame is mapped to the camera frame $C$ via the intermediate IMU frame $I$:
 
 $$
 \mathbf{p}_{\text{imu}} = \mathbf{R}_{W}^{I} (\mathbf{p}_f - \mathbf{p}_{\text{W\_imu}})
@@ -172,9 +172,9 @@ The contract defines the required behavior of the sensor and calibration mathema
 
 | Element | Contract Specification |
 | :--- | :--- |
-| **Signature** | `project(p_c, ζ) → (u,v)`; `imu_model(ω, a, R, g, b, n)`; `T_ci ∈ SE(3)`; `t_d ∈ ℝ` |
+| **Signature** | $\text{project}(p_c, \zeta) \rightarrow (u,v)$ | $\text{imu\_model}(\omega, a, R, g, b, n)$ | $\mathbf{T}_{ci} \in \text{SE}(3)$ | $t_d \in \mathbb{R}$ |
 | **Pre-conditions** | Focal lengths $f_x, f_y > 0$; distortion parameters are within stable convergence bounds; gravity vector orientation is frame-consistent. |
-| **Post-conditions & Invariants** | **1. Round-Trip consistency**: `unproject(project(p_c)) ≈ p_c / ‖p_c‖` down to $10^{-15}$ machine precision for all depth $z > 0$.<br/>**2. Jacobian rank**: Projection Jacobian \mathbf{H}_p$ is strictly rank-2 and matches numerical finite-differences.<br/>**3. Cheirality**: Points behind the lens ($z \le 0$) are rejected, never projected.<br/>**4. Inertial Identity**: A zero-noise, gravity-compensated stationary IMU integrates to exactly zero velocity and zero translation over time. |
+| **Post-conditions & Invariants** | **1. Round-Trip consistency**: $\text{unproject}(\text{project}(p_c)) \approx p_c / \|p_c\|$ down to $10^{-15}$ machine precision for all depth $z > 0$.<br/>**2. Jacobian rank**: Projection Jacobian $\mathbf{H}_p$ is strictly rank-2 and matches numerical finite-differences.<br/>**3. Cheirality**: Points behind the lens ($z \le 0$) are rejected, never projected.<br/>**4. Inertial Identity**: A zero-noise, gravity-compensated stationary IMU integrates to exactly zero velocity and zero translation over time. |
 
 ---
 
@@ -197,7 +197,7 @@ Superimposes an ideal, distortion-free rectilinear grid (grey) against the actua
 
 ### B. IMU Allan Deviation Curve (`imu_allan.svg`)
 Computes the **Allan Deviation** of the gyroscope and accelerometer streams under static conditions. The Allan deviation curve (plotted on a log-log scale) allows you to extract:
-1.  **White Noise Density (N)**: Sourced from the slope of $-0.5$ at $t = 1\text{ s}$. This represents the continuous-time noise parameters used in the process noise covariance \mathbf{Q}$.
+1.  **White Noise Density (N)**: Sourced from the slope of $-0.5$ at $t = 1\text{ s}$. This represents the continuous-time noise parameters used in the process noise covariance $\mathbf{Q}$.
 2.  **Bias Instability (B)**: Sourced from the flat bottom of the curve.
 3.  **Random Walk (K)**: Sourced from the slope of $+0.5$ at long integration times.
 
