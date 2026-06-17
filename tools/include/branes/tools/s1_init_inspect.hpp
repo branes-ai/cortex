@@ -188,8 +188,11 @@ private:
     }
     /// ZYX (roll about x, pitch about y, yaw about z) from a world←body matrix.
     static std::array<double, 3> euler_zyx(const Mat3& R) {
-        const double r20 = R(2, 0);
-        const double pitch = std::asin(r20 < -1.0 ? -1.0 : (r20 > 1.0 ? 1.0 : -r20));
+        // pitch = asin(-R(2,0)); clamp the SINE argument (after negation) so numeric
+        // drift outside [-1,1] saturates to the correct ±90°, not the wrong sign.
+        double sp = -R(2, 0);
+        sp = sp < -1.0 ? -1.0 : (sp > 1.0 ? 1.0 : sp);
+        const double pitch = std::asin(sp);
         const double roll = std::atan2(R(2, 1), R(2, 2));
         const double yaw = std::atan2(R(1, 0), R(0, 0));
         return {roll, pitch, yaw};

@@ -181,8 +181,12 @@ int main(int argc, char** argv) {
         images = bs::euroc::parse_images(args.dataset);
         try {
             gt = bs::euroc::parse_groundtruth_states<T>(args.dataset);  // optional — comparison only
-        } catch (const std::exception&) {
+        } catch (const std::exception& gex) {
+            // Ground truth is optional, but a parse FAILURE must not look like an
+            // intentional no-GT run — surface it so a malformed file is visible.
             gt.clear();
+            std::cerr << "s1_inspect: ground truth unavailable (" << gex.what()
+                      << ") — proceeding without GT comparison\n";
         }
     } catch (const std::exception& ex) {
         std::cerr << "s1_inspect: " << ex.what() << "\n";
@@ -201,11 +205,25 @@ int main(int argc, char** argv) {
     est.configure(cfg);
     est.activate();
 
-    // Replay until init flips false→true, then capture the seeded state.
+    // Replay until init flips false→true, then capture the SEEDED state. The check
+    // runs both right after IMU ingestion and right after image processing: on the
+    // static path init completes during process_imu (before any clone is augmented),
+    // so capturing post-IMU snapshots the pristine 15×15 seed rather than a state
+    // already grown by the first frame's clone; the dynamic path completes during
+    // process_camera, caught post-image.
     std::uint64_t processed = 0;
     std::size_t imu_idx = 0;
     bool captured = false;
     bt::S1InitRecord record;
+    auto try_capture = [&](double t_at) -> bool {
+        if (captured || !est.backend().initialized())
+            return false;
+        const auto& diag = est.backend().init_diagnostics();
+        const ev::NavSample<T>* gt_nav = nearest_nav(gt, diag.t_s > 0 ? diag.t_s : t_at);
+        record = bt::S1InitInspector().build(diag, est.backend().state(), gt_nav);
+        captured = true;
+        return true;
+    };
     for (const auto& frame : images) {
         if (processed >= args.max_frames)
             break;
@@ -216,6 +234,8 @@ int main(int argc, char** argv) {
             est.feed_imu(std::span<const bs::ImuMeasurement<T>>{imu.data() + imu_idx, end - imu_idx});
             imu_idx = end;
         }
+        if (try_capture(frame.t_s))  // static path: init during IMU ingestion → pristine seed
+            break;
         cv::OwnedImage<std::uint8_t> img;
         try {
             img = cv::read_png(frame.path);
@@ -224,14 +244,8 @@ int main(int argc, char** argv) {
         }
         est.feed_image(frame.t_s, std::as_const(img).view());
         ++processed;
-
-        if (est.backend().initialized()) {  // false→true: capture once
-            const auto& diag = est.backend().init_diagnostics();
-            const ev::NavSample<T>* gt_nav = nearest_nav(gt, diag.t_s > 0 ? diag.t_s : frame.t_s);
-            record = bt::S1InitInspector().build(diag, est.backend().state(), gt_nav);
-            captured = true;
+        if (try_capture(frame.t_s))  // dynamic path: init during image processing
             break;
-        }
     }
 
     if (!captured) {
