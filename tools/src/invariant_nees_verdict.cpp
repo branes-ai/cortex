@@ -195,7 +195,7 @@ int main(int argc, char** argv) {
                     for (std::size_t c = 0; c < clone_obs.size(); ++c) {
                         const auto it = clone_obs[c].find(L);
                         if (it != clone_obs[c].end())
-                            tr.push_back({c, it->second});
+                            tr.push_back({c, 0, it->second});
                     }
                     if (tr.size() >= 2 && !no_update) {
                         b.update(tr);

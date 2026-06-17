@@ -41,6 +41,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <numbers>
 #include <random>
 #include <span>
 #include <sstream>
@@ -266,6 +267,14 @@ RunResult run_synthetic_invariant(const ev::SyntheticData<T>& w,
 
     InvariantVioBackend<T, SqrtCovariance<T>> backend(icfg);
 
+    // Phase C: Enable 6-DoF online camera-to-IMU extrinsic calibration
+    const T rot_sigma = cfg.calib_ext_rot_prior_deg * std::numbers::pi_v<T> / T{180};
+    const T trans_sigma = cfg.calib_ext_trans_prior_mm / T{1000};
+    typename InvariantVioBackend<T, SqrtCovariance<T>>::Calib cal;
+    cal.R_imu_cam = w.R_imu_cam;
+    cal.p_imu_cam = w.p_imu_cam;
+    backend.enable_calibration({cal}, rot_sigma, trans_sigma);
+
     const auto& g0 = w.gt.front();
     backend.set_nav(branes::math::lie::SE23<T>(g0.R, g0.v, g0.p), w.gyro_bias, w.accel_bias, g0.t);
 
@@ -302,7 +311,7 @@ RunResult run_synthetic_invariant(const ev::SyntheticData<T>& w,
             const double vn = o.v + spx * N01(rng);
             const auto bearing = w.camera.unproject(branes::math::cameras::Vec2<T>{un, vn});
             if (bearing[2] > 0.0) {
-                obs.push_back({o.feature_id, Vec2{{bearing[0] / bearing[2], bearing[1] / bearing[2]}}});
+                obs.push_back({o.feature_id, 0, Vec2{{bearing[0] / bearing[2], bearing[1] / bearing[2]}}});
             }
         }
         backend.process_camera(t, std::span<const NormalizedObs<T>>{obs});
