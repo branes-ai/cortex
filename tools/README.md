@@ -83,12 +83,14 @@ replays a stage and visualizes it.
 | `docs-site/scripts/gen-update-figures.mjs` | the **filter-internal tier** — NIS-over-updates + χ² band, residuals, covariance before/after heatmap |
 | `tools/src/s1_inspect.cpp` | **S1 initialization inspector** (filter-internal tier) — captures the real bootstrap (state, initial covariance, gravity/scale/velocity vs GT) by polling `initialized()` |
 | `docs-site/scripts/gen-init-figures.mjs` | recovered-state-vs-GT panel + initial-covariance heatmap (θ/p/v/bg/ba blocks) |
+| `tools/src/s2_inspect.cpp` | **S2 propagation inspector** (filter-internal tier) — real IMU window → real propagator → covariance growth + propagated-vs-GT drift inside the ±σ envelope |
+| `docs-site/scripts/gen-propagation-figures.mjs` | per-state σ-growth heatmap + drift-vs-3σ-envelope plot |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
 `tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`
-and `tests/tools/s1_init_inspect.cpp`.
+`tests/tools/s1_init_inspect.cpp` and `tests/tools/s2_propagation_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -246,6 +248,26 @@ the GT comparison: yaw-invariant **gravity-direction error**, **speed error**,
 gyro/accel-bias error, and (dynamic path) **scale error** vs the metric truth. The
 figures draw the recovered-state-vs-GT panel and the initial-covariance heatmap
 (θ/p/v/bg/ba blocks labelled).
+
+### S2 propagation inspector (`s2_inspect`)
+
+Takes a real EuRoC IMU window, seeds the prior pose+velocity from ground truth at
+the window start (plus the initial-P seed), and runs the **real** IMU propagator
+(`msckf::Propagator`) step by step. No SDK change — the propagator is already
+standalone (`propagate(state,…)` → mean + `state.covariance()`).
+
+```bash
+./build/tools/s2_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s2 [--start-t T] [--window-s S] [--sigma0 σ]
+node docs-site/scripts/gen-propagation-figures.mjs build/s2   # → cov_growth.svg, pose_drift.svg
+```
+
+Output `propagation.json`: per step the per-block covariance σ (θ/p/v/bg/ba) and
+the full 15-state diagonal, the propagated mean, and the drift vs GT with a
+`pos_within_3sigma` flag. The figures draw the **σ-growth heatmap** (15 states ×
+time, row-normalized) and the **drift-vs-±3σ-envelope** plot — where the
+dead-reckoning drift escaping the envelope flags the propagated covariance
+under-covering the error (the diagonal-Q / no-position-term #212 candidate the
+synthetic S2 probe quantifies).
 
 ## Layout
 
