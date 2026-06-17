@@ -55,6 +55,28 @@ copy-selection `G` is an exact algebraic operation, so cortex carries the full
 clone correlation — it does **not** commit the zero-cross-covariance inconsistency.
 Marginalizing the just-added clone restores `P` exactly (the round-trip).
 
+## Real-data inspector (`s3_inspect`)
+
+The measurements above come from the *synthetic* probe — a hand-built correlated
+covariance, run in CI. Its real-data companion, **`s3_inspect`**, runs the real
+estimator over a real EuRoC sequence until the window holds a genuinely-correlated
+covariance (initialized, with a few clones), then takes a **copy** of that keyframe
+state and runs the real `StateHelper::augment_clone` on it. No SDK change — the
+operator is standalone and `backend().state()` is exposed.
+
+```bash
+s3_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s3 --min-clones 5
+node docs-site/scripts/gen-augmentation-figures.mjs build/s3   # → augment_covariance.svg
+```
+
+It writes `augmentation.json` and renders the **before/after covariance heatmap
+with the new clone block outlined** — the cloned 6-DoF block, its row band, and its
+column band (the cross-covariance) appearing in `P'`. The HUD reports the
+stochastic-cloning residuals on real data: the clone's marginal and its
+cross-covariance with every existing state vs the cloned pose's. On EuRoC these
+come out **identically zero**, confirming the exact `P' = G P Gᵀ` algebra holds on
+a real, fully-correlated filter covariance, not just the synthetic one.
+
 <Aside type="tip" title="Status — correct">
   S3 is **correct** and **not** a source of the #212 over-confidence. The
   stochastic-cloning correlation is exact to machine precision, so the clone window
