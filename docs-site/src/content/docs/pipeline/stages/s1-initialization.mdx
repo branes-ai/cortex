@@ -8,9 +8,9 @@ import { Aside } from '@astrojs/starlight/components';
 **A filter has to start somewhere.** 
 Visual-Inertial Odometry is a highly non-linear, recursive estimation process. For its linearizations (first-order Taylor-series expansions / Jacobians) to remain valid, the filter must be initialized incredibly close to the true initial state.
 
-S1 bootstraps the initial state — attitude, gyro/accel biases, gravity direction, and (for a moving dynamic start) metric scale — **and** seeds the initial covariance \mathbf{P}_0 that represents the filter's starting uncertainty. 
+S1 bootstraps the initial state — attitude, gyro/accel biases, gravity direction, and (for a moving dynamic start) metric scale — **and** seeds the initial covariance $\mathbf{P}_0$ that represents the filter's starting uncertainty. 
 
-If S1 fails, it introduces two severe failure modes: returning a *confidently wrong* state when the motion cannot observe it, or seeding \mathbf{P}_0 too tight on the directions the initialization could not physically observe. The first causes immediate divergence; the second quietly poisons the EKF with structural over-confidence from $t = 0$.
+If S1 fails, it introduces two severe failure modes: returning a *confidently wrong* state when the motion cannot observe it, or seeding $\mathbf{P}_0$ too tight on the directions the initialization could not physically observe. the first causes immediate divergence; the second quietly poisons the EKF with structural over-confidence from $t = 0$.
 
 ---
 
@@ -19,18 +19,18 @@ If S1 fails, it introduces two severe failure modes: returning a *confidently wr
 When the vehicle starts stationary on the ground, S1 detects a quiet window by checking that the standard deviation of gyroscope and accelerometer readings is below a strict threshold. It then averages the raw readings over $M$ samples:
 
 $$
-\mathbf{a}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{a}}_i, \qquad \mathbf{w}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{w}}_i
+$\mathbf{a}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{a}}_i, \qquad \mathbf{w}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{w}}_i$
 $$
 
 ### A. Gyroscope Bias Seeding
-Since the vehicle is stationary (\boldsymbol{\omega}_{\text{true}} = \mathbf{0}$), any measured angular rate is pure bias. We seed the gyroscope bias directly:
+Since the vehicle is stationary ($\boldsymbol{\omega}_{\text{true}} = \mathbf{0}$), any measured angular rate is pure bias. We seed the gyroscope bias directly:
 
 $$
 \mathbf{b}_g = \mathbf{w}_{\text{avg}}
 $$
 
 ### B. Attitude Seeding from Gravity (Leveling)
-Since the accelerometer only senses gravity when static, the mean specific force vector \mathbf{a}_{\text{avg}} points exactly opposite to gravity. We use this to compute the initial roll and pitch of the vehicle relative to gravity, represented by the rotation matrix \mathbf{R}_{I}^{W}$ (IMU-to-World transformation).
+Since the accelerometer only senses gravity when static, the mean specific force vector $\mathbf{a}_{\text{avg}}$ points exactly opposite to gravity. We use this to compute the initial roll and pitch of the vehicle relative to gravity, represented by the rotation matrix $\mathbf{R}_{I}^{W}$ (IMU-to-World transformation).
 
 We define the vertical z-axis of the IMU frame in the world frame as:
 
@@ -40,16 +40,16 @@ $$
 
 To build a full orthogonal rotation matrix $\mathbf{R}_{I}^{W}$ that maps gravity $\mathbf{g}_W = [0, 0, -g]^T$ to $\mathbf{a}_{	ext{avg}}$ (or conversely, aligns $\mathbf{z}_I$ with gravity), we use Gram-Schmidt orthonormalization:
 
-1.  **Temporary Horizontal Axis**: Assume an arbitrary temporary horizontal x-axis: \mathbf{x}_{\text{tmp}} = [1, 0, 0]^T.
-2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: \mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where \times is the cross-product).
-3.  **True Orthogonal X Axis**: Compute the true orthogonal x-axis: \mathbf{x}_I = \mathbf{y}_I \times \mathbf{z}_I.
+1.  **Temporary Horizontal Axis**: Assume an arbitrary temporary horizontal x-axis: $\mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$.
+2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: $\mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where $\times$ is the cross-product).
+3.  **True Orthogonal X Axis**: Compute the true orthogonal x-axis: $\mathbf{x}_I = \mathbf{y}_I \times \mathbf{z}_I$.
 4.  **Assemble Rotation**: The initial rotation matrix is then:
 
 $$
 \mathbf{R}_{I}^{W} = \begin{bmatrix} \mathbf{x}_I & \mathbf{y}_I & \mathbf{z}_I \end{bmatrix}
 $$
 
-*   **Orthonormalization Singularity & Fallback**: If the gravity vector \mathbf{z}_I is parallel or near-parallel to the temporary horizontal axis \mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$ (which happens if the drone is tilted exactly $90^\circ$ on its side), the cross product \mathbf{z}_I \times \mathbf{x}_{\text{tmp}} collapses to zero, making step 2 undefined. Cortex solves this by checking the norm of \mathbf{z}_I \times \mathbf{x}_{\text{tmp}}$. If it falls below a strict threshold (e.g., $0.1$), it dynamically falls back to using \mathbf{x}_{\text{tmp}} = [0, 1, 0]^T$ as the temporary axis, ensuring the basis construction is always well-conditioned.
+*   **Orthonormalization Singularity & Fallback**: If the gravity vector $\mathbf{z}_I$ is parallel or near-parallel to the temporary horizontal axis $\mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$ (which happens if the drone is tilted exactly $90^\circ$ on its side), the cross product $\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}$ collapses to zero, making step 2 undefined. Cortex solves this by checking the norm of $\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}$. If it falls below a strict threshold (e.g., $0.1$), it dynamically falls back to using $\mathbf{x}_{\text{tmp}} = [0, 1, 0]^T$ as the temporary axis, ensuring the basis construction is always well-conditioned.
 
 Because gravity has zero horizontal components, **static accelerometer readings can only observe the two tilt axes (roll and pitch)**. The heading (**yaw**) is completely unobservable relative to gravity. Yaw is a free gauge direction; we can set it to an arbitrary starting value ($0^\circ$), but the filter must be told that this yaw direction is completely unobserved.
 
@@ -63,26 +63,26 @@ This spatial alignment matching process is shown in the following diagram:
 
 ![S1 Alignment Diagram: Showing the matching of unscaled relative visual trajectories (recovered via Structure from Motion) and metric trajectories double-integrated from raw IMU accelerometer readings using a scale factor s.](/figures/pipeline/initialization_alignment.svg)
 
-1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle-adjustment to recover a **set of relative camera translations \mathbf{p}_{\text{ci}} up to a scale factor $s$**.
-2.  **IMU Preintegration**: The IMU Simple-integrated velocities and positions are double-integrated over the same intervals to compute relative displacement estimates \Delta \mathbf{p}_{\text{imu},i}$.
+1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle-adjustment to recover a **set of relative camera translations $\mathbf{p}_{\text{ci}}$ up to a scale factor $s$**.
+2.  **IMU Preintegration**: The IMU Simple-integrated velocities and positions are double-integrated over the same intervals to compute relative displacement estimates $\Delta \mathbf{p}_{\text{imu},i}$.
 3.  **Linear Scale Alignment**: We set up a linear system matching the visual translations to the double-integrated IMU displacements, solving for the **metric scale $s$, initial velocities $\mathbf{v}_i$, and gravity vector $\mathbf{g}_W$**:
 
 $$
-\mathbf{R}_{W}^{c_0} \ccdot \mathbf{p}_{c_i} = s \ccdot \Delta \mathbf{p}_{\text{imu},i} + \mathbf{v}_0 \Delta t_i + \cfrac{1}{2} \mathbf{g}_W \Delta t_i^2
+$\mathbf{R}_{W}^{c_0} \ccdot \mathbf{p}_{c_i} = s \ccdot \Delta \mathbf{p}_{\text{imu},i} + \mathbf{v}_0 \Delta t_i + \cfrac{1}{2} \mathbf{g}_W \Delta t_i^2$
 $$
 
 ### The Scale-Observability Cliff
 Under gentle motion (such as hover or pure rotation), the acceleration vector does not change. In this regime, the system of equations is **ill-conditioned**, and the metric scale $s$ is physically unobservable. 
 
-To prevent the EKF from starting with a confidently wrong metric scale, Cortex runs a **Singular Value Decomposition (SVD) condition check** on the alignment matrix \mathbf{A}$. If the ratio of the maximum to minimum singular values (condition number) exceeds a strict threshold (usually 100), the dynamic initialization is safely **declined**, forcing the system to wait for sufficient acceleration excitation.
+To prevent the EKF from starting with a confidently wrong metric scale, Cortex runs a **Singular Value Decomposition (SVD) condition check** on the alignment matrix $\mathbf{A}$. If the ratio of the maximum to minimum singular values (condition number) exceeds a strict threshold (usually 100), the dynamic initialization is safely **declined**, forcing the system to wait for sufficient acceleration excitation.
 
 ---
 
 ## 3. The Covariance Seed Suspect: Isotropic Over-Confidence
 
-The initial covariance \mathbf{P}_0$ is a 15 x 15 matrix that represents the filter's starting uncertainty. 
+The initial covariance $\mathbf{P}_0$ is a 15 x 15 matrix that represents the filter's starting uncertainty. 
 
-Historically, many VIO implementations (including those generated by AI Code Assistants) initialize \mathbf{P}_0$ as an **isotropic matrix**:
+Historically, many VIO implementations (including those generated by AI Code Assistants) initialize $\mathbf{P}_0$ as an **isotropic matrix**:
 
 $$
 \mathbf{P}_0 = \sigma^2 \mathbf{I}
@@ -92,12 +92,12 @@ Where every block (roll, pitch, yaw, velocity, position, gyroscope bias, acceler
 
 This isotropic seed is **mathematically dishonest and a major source of over-confidence**:
 
-| State Block | Physical Observation at Static Init | Isotropic Seed (\sigma = 5.73^\circ$) | Physically Honest Seed |
+| State Block | Physical Observation at Static Init | Isotropic Seed ($\sigma = 5.73^\circ$) | Physically Honest Seed |
 | :--- | :--- | :--- | :--- |
-| **Roll / Pitch** | **Observed** via gravity-leveling (\mathbf{a}_{\text{avg}}$). | $5.73^\circ$ | **Small** (\approx 0.1^\circ$ to $0.5^\circ$) |
-| **Yaw (Heading)** | **Unobserved** (gravity has no horizontal component). | $5.73^\circ$ | **Huge** (\approx 180^\circ$ or treated as infinite) |
-| **Velocity** | **Observed** (stationary table is $\mathbf{v} = \mathbf{0}$). | $0.1\text{ m/s}$ | **Small** (\approx 10^{-4}\text{ m/s}$) |
-| **Accel Bias** | **Weakly Observed** over a static window. | $0.1\text{ m/s}^2$ | **Large** (\approx 1.0\text{ m/s}^2$) |
+| **Roll / Pitch** | **Observed** via gravity-leveling ($\mathbf{a}_{\text{avg}}$). | $5.73^\circ$ | **Small** ($\approx 0.1^\circ$ to $0.5^\circ$) |
+| **Yaw (Heading)** | **Unobserved** (gravity has no horizontal component). | $5.73^\circ$ | **Huge** ($\approx 180^\circ$ or treated as infinite) |
+| **Velocity** | **Observed** (stationary table is $\mathbf{v} = \mathbf{0}$). | $0.1\text{ m/s}$ | **Small** ($\approx 10^{-4}\text{ m/s}$) |
+| **Accel Bias** | **Weakly Observed** over a static window. | $0.1\text{ m/s}^2$ | **Large** ($\approx 1.0\text{ m/s}^2$) |
 
 By claiming that the unobservable yaw heading is known to $\pm5.73^\circ$ at $t = 0$, the isotropic seed injects false information into the EKF. Because the filter "thinks" its heading is highly accurate, it will reject visual measurements that deviate slightly due to camera rotation, leading directly to the **attitude-localized over-confidence** seen on the [Consistency Analysis](/pipeline/consistency-analysis/) page.
 
@@ -109,9 +109,9 @@ The mathematical contracts ensuring safe filter bootstrapping:
 
 | Element | Contract Specification |
 | :--- | :--- |
-| **Signature** | `init(imu_window, [vision_window]) → (R_I_to_W, v, b_g, b_a, g, [scale])` + initial `P_0` |
+| **Signature** | $\text{init}(\text{imu\_window}, \text{vision\_window}) \rightarrow (\mathbf{R}_{I}^{W}, v, b_g, b_a, g, \text{scale})$ | $\mathbf{P}_0$ |
 | **Pre-conditions** | Gyro/accel variance is below stationary noise threshold (static init); singular-value conditioning of SfM-IMU matrix is below 100 (dynamic init). |
-| **Post-conditions & Invariants** | **1. Gravity alignment**: Gravity vector aligns with measured mean specific force: $\|\mathbf{R}_{I}^{W} \mathbf{a}_{\text{avg}} - [0, 0, g]^T\| < 1e-4\text{ m/s}^2$.<br/>**2. Positive Scale**: Dynamically recovered scale $s$ is strictly positive ($s > 0$) and finite.<br/>**3. Realistic Yaw Prior**: Heading (yaw) standard deviation is seeded with a large variance: \text{std\_dev}(yaw) \ge 45^\circ$ to reflect its unobserved status. |
+| **Post-conditions & Invariants** | **1. Gravity alignment**: Gravity vector aligns with measured mean specific force: $\|\mathbf{R}_{I}^{W} \mathbf{a}_{\text{avg}} - [0, 0, g]^T\| < 10^{-4}\text{ m/s}^2$.<br/>**2. Positive Scale**: Dynamically recovered scale $s$ is strictly positive ($s > 0$) and finite.<br/>**3. Realistic Yaw Prior**: Heading (yaw) standard deviation is seeded with a large variance: $\text{std\_dev}(yaw) \ge 45^\circ$ to reflect its unobserved status. |
 
 ---
 
