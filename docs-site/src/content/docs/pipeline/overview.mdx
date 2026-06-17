@@ -11,6 +11,8 @@ Despite its elegance, **VIO is notoriously difficult to implement**. In practice
 
 This section documents the VIO pipeline cortex implements, **stage by stage**. To isolate and conquer the bugs that plague VIO development, each stage is treated as a **rigorous mathematical contract**: specifying its why, what, and how, its pre-conditions, its post-conditions, and the diagnostics/unit probes used to prove its consistency.
 
+![VIO pipeline S0–S10 stage flow: a one-shot S1 initialization seeds the per-frame MSCKF cycle (S2 IMU propagation → S3 state augmentation → S4 visual frontend → S5 triangulation → S6 update → S9 marginalization), which loops every camera frame on the S0 sensor/calibration substrate; S7/S8/S10 are optional layers. Colour marks the measured #212 verdict — green stages are measured-consistent, amber stages (S1 initial covariance, S10 calibration) are the open input-side over-confidence candidates.](/figures/pipeline/vio_stage_flow.svg)
+
 ---
 
 ## The Core Challenge: Fusing Two Worlds
