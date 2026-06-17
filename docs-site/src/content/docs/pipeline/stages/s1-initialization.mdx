@@ -41,7 +41,7 @@ $$
 To build a full orthogonal rotation matrix $\mathbf{R}_{I}^{W}$ that maps gravity $\mathbf{g}_W = [0, 0, -g]^T$ to $\mathbf{a}_{	ext{avg}}$ (or conversely, aligns $\mathbf{z}_I$ with gravity), we use Gram-Schmidt orthonormalization:
 
 1.  **Temporary Horizontal Axis**: Assume an arbitrary temporary horizontal x-axis: $\mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$.
-2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: $\mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where $\times$ is the cross-product).
+2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: $\mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{%%text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where $\times$ is the cross-product).
 3.  **True Orthogonal X Axis**: Compute the true orthogonal x-axis: $\mathbf{x}_I = \mathbf{y}_I \times \mathbf{z}_I$.
 4.  **Assemble Rotation**: The initial rotation matrix is then:
 
@@ -68,7 +68,7 @@ This spatial alignment matching process is shown in the following diagram:
 3.  **Linear Scale Alignment**: We set up a linear system matching the visual translations to the double-integrated IMU displacements, solving for the **metric scale $s$, initial velocities $\mathbf{v}_i$, and gravity vector $\mathbf{g}_W$**:
 
 $$
-$\mathbf{R}_{W}^{c_0} \ccdot \mathbf{p}_{c_i} = s \ccdot \Delta \mathbf{p}_{\text{imu},i} + \mathbf{v}_0 \Delta t_i + \cfrac{1}{2} \mathbf{g}_W \Delta t_i^2$
+\mathbf{R}_{W}^{c_0} \ccdot \mathbf{p}_{c_i} = s \ccdot \Delta \mathbf{p}_{\text{imu},i} + \mathbf{v}_0 \Delta t_i + \cfrac{1}{2} \mathbf{g}_W \Delta t_i^2
 $$
 
 ### The Scale-Observability Cliff
