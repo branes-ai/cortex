@@ -81,11 +81,14 @@ replays a stage and visualizes it.
 | `docs-site/src/components/scene3d.js` | the **3-D tier** — renders the landmark cloud + per-landmark covariance ellipsoids (`scene.json`) |
 | `tools/src/s6_inspect.cpp` | **S6 MSCKF-update inspector** (filter-internal tier) — taps every real update (NIS, χ²-gate, residuals, covariance before/after) via the backend observer |
 | `docs-site/scripts/gen-update-figures.mjs` | the **filter-internal tier** — NIS-over-updates + χ² band, residuals, covariance before/after heatmap |
+| `tools/src/s1_inspect.cpp` | **S1 initialization inspector** (filter-internal tier) — captures the real bootstrap (state, initial covariance, gravity/scale/velocity vs GT) by polling `initialized()` |
+| `docs-site/scripts/gen-init-figures.mjs` | recovered-state-vs-GT panel + initial-covariance heatmap (θ/p/v/bg/ba blocks) |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
-`tests/tools/s5_triangulation_inspect.cpp` and `tests/tools/s6_update_inspect.cpp`.
+`tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`
+and `tests/tools/s1_init_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -221,6 +224,28 @@ The figures (`gen-update-figures.mjs`, filter-internal tier) draw the
 gate decision), the **residual-RMS** series, and the covariance **before/after
 heatmap** (log|P|, IMU/clone blocks marked). Sweeping `--camera-noise` /
 `--calib-rot-deg` moves the NIS curve into the band — the real-data "R×4" analogue.
+
+### S1 initialization inspector (`s1_inspect`)
+
+Runs the **real estimator** over a real EuRoC sequence and watches
+`backend().initialized()` flip false→true; at that moment it snapshots the seeded
+state + 15×15 covariance + init diagnostics and compares the recovered bootstrap
+against EuRoC ground truth. No SDK change — the init operators are already
+decoupled and the backend exposes `initialized()`/`state()`/`init_diagnostics()`,
+so polling per frame suffices.
+
+```bash
+./build/tools/s1_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s1 [--prefer-dynamic]
+node docs-site/scripts/gen-init-figures.mjs build/s1   # → init_state.svg, init_covariance.svg
+```
+
+Output `init.json`: the init `method`, recovered attitude/velocity/biases/`scale`,
+the full initial covariance + per-block σ (with an `isotropic_seed` flag — the
+S1.3 contract point that the seed is σ·I, not structured per observability), and
+the GT comparison: yaw-invariant **gravity-direction error**, **speed error**,
+gyro/accel-bias error, and (dynamic path) **scale error** vs the metric truth. The
+figures draw the recovered-state-vs-GT panel and the initial-covariance heatmap
+(θ/p/v/bg/ba blocks labelled).
 
 ## Layout
 
