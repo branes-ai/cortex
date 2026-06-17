@@ -5,101 +5,100 @@ description: Bootstrapping attitude, biases, gravity, and metric scale — plus 
 
 import { Aside } from '@astrojs/starlight/components';
 
-A filter has to start *somewhere*. S1 bootstraps the initial state — attitude,
-gyro/accel bias, gravity direction, and (for a moving start) metric scale — **and**
-the initial covariance `P₀` that says how sure it is. Two failure modes hide here:
-returning a *confidently wrong* state when the motion can't observe it, and seeding
-`P₀` too tight on the directions initialization could not pin down. The probe shows
-the cortex algorithm handles the first well — and stumbles on the second.
+**A filter has to start somewhere.** 
+VIO is a highly non-linear estimator. For its Taylor-series linearizations (Jacobians) to remain valid, the filter must be initialized incredibly close to the true initial state.
 
-## What it does
+S1 bootstraps the initial state — attitude, gyro/accel biases, gravity direction, and (for a moving dynamic start) metric scale — **and** seeds the initial covariance $\mathbf{P}_0$ that informs the filter of its starting uncertainty. 
 
-- **Static init** — detect a stationary window; average accel → gravity direction
-  (fixes roll/pitch; yaw is a free gauge), average gyro → `b_g`, set `v = 0`. The
-  gravity magnitude is checked against `‖g‖`.
-- **Dynamic init** — a visual-inertial alignment over a short window solving for
-  gravity, velocity, and **scale** by matching SfM motion to preintegrated IMU.
-  Scale and accel-bias are weakly observable under gentle / pure-rotation motion,
-  so a **scale-observability gate** must guard this.
-- **The initial covariance `P₀`** — must honestly reflect what was *not* observed:
-  large variance on yaw, on accel bias, on scale. An over-tight `P₀` is
-  over-confidence injected at t = 0 that the filter never recovers from.
+If S1 fails, it introduces two severe failure modes: returning a *confidently wrong* state when the motion cannot observe it, or seeding $\mathbf{P}_0$ too tight on the directions the initialization could not physically observe. The first causes immediate divergence; the second quietly poisons the EKF with structural over-confidence from $t = 0$.
 
-## The contract
+---
 
-| | |
-|---|---|
-| **Signature** | `init(imu_window, [vision_window]) → (R_GI, v, b_g, b_a, g, [scale])` + initial `P` |
-| **Pre** | static: accel/gyro std below stationarity thresholds · dynamic: **sufficient acceleration excitation** (a scale-observability gate must guard it) |
-| **Post / invariants** | `R_GI` aligns measured-accel-mean to gravity (residual ≈ 0); `‖g‖` within tolerance; dynamic scale > 0, finite, alignment condition number bounded · **`P₀` carries large variance on the unobserved directions (yaw, accel bias, scale)** |
-| **cortex** | `imu_init.hpp` (`try_static`, `try_gravity_align`, `try_dynamic`); SfM bootstrap in `sfm/` |
+## 1. Static Initialization (Gravity-Leveling)
 
-## Metrics
+When the vehicle starts stationary on the ground, S1 detects a quiet window by checking that the standard deviation of gyroscope and accelerometer readings is below a strict threshold. It then averages the raw readings over $M$ samples:
 
-### The algorithm is sound
+$$\bar{\mathbf{a}} = \frac{1}{M} \sum_{i=1}^M 	ilde{\mathbf{a}}_i, \quad \bar{\boldsymbol{\omega}} = \frac{1}{M} \sum_{i=1}^M 	ilde{\boldsymbol{\omega}}_i$$
 
-Driving the real initializer on synthetic data, every functional check passes:
+### A. Gyroscope Bias Seeding
+Since the vehicle is stationary ($\boldsymbol{\omega}_{true} = \mathbf{0}$), any measured angular rate is pure bias:
+$$\mathbf{b}_g = \bar{\boldsymbol{\omega}}$$
 
-| check | result |
-|---|---|
-| static gravity-leveling residual | 2.2e-16 m/s² — exact |
-| recovered gravity magnitude | 9.80 m/s² (≈ 9.81) |
-| roll/pitch leveling error (accel noise) | 0.026° |
-| gyro-bias recovery error | 1.6e-4 rad/s |
-| dynamic metric-scale recovery error | 0.05% (scale 2.001 vs 2.000) |
+### B. Attitude Seeding from Gravity
+Since the accelerometer only senses gravity, the mean specific force $\bar{\mathbf{a}}$ points exactly opposite to gravity. We use this to compute the initial roll and pitch of the vehicle relative to gravity.
 
-![Static init: roll/pitch leveling error vs accel noise](/figures/s1/init_static.svg)
+We define the $z$-axis of the IMU frame in the world frame as:
+$$\mathbf{z}_I = \frac{\bar{\mathbf{a}}}{\|\bar{\mathbf{a}}\|}$$
 
-### The observability gate works — it declines, it doesn't guess
+To build a full orthogonal rotation matrix $\mathbf{R}_W^I$ that maps gravity $\mathbf{g}_W = [0, 0, -g]^T$ to $\bar{\mathbf{a}}$, we use Gram-Schmidt orthonormalization:
+1.  Assume a temporary horizontal $x$-axis: $\mathbf{x}_{tmp} = [1, 0, 0]^T$.
+2.  Compute the orthogonal $y$-axis: $\mathbf{y}_I = \frac{\mathbf{z}_I 	imes \mathbf{x}_{tmp}}{\|\mathbf{z}_I 	imes \mathbf{x}_{tmp}\|}$.
+3.  Compute the true orthogonal $x$-axis: $\mathbf{x}_I = \mathbf{y}_I 	imes \mathbf{z}_I$.
+4.  The initial rotation matrix is then:
+    $$\mathbf{R}_I^W = \begin{bmatrix} \mathbf{x}_I & \mathbf{y}_I & \mathbf{z}_I \end{bmatrix}$$
 
-Sweeping acceleration excitation, the dynamic-init gate correctly **declines** when
-motion is too gentle to make scale observable, rather than returning a confident
-wrong scale:
+Because gravity has zero horizontal components, **static accelerometer readings can only observe the two tilt axes (roll and pitch)**. The heading (**yaw**) is completely unobservable relative to gravity. Yaw is a free gauge direction; we can set it to an arbitrary starting value ($0^\circ$), but the filter must be told that this yaw direction is completely unobserved.
 
-| excitation | outcome |
-|---|---|
-| 0.05 m/s² | **declined** (unobservable) |
-| 0.15 m/s² | accept, scale error 0.12% |
-| 1.0 m/s² | accept, scale error 0.05% |
+---
 
-![Dynamic init: the scale-observability cliff](/figures/s1/init_excitation.svg)
-![Dynamic init: metric-scale error vs excitation](/figures/s1/init_scale_error.svg)
+## 2. Dynamic Initialization (Visual-Inertial Alignment)
 
-### The seed is the suspect — `P₀` is isotropic
+If the vehicle starts in motion (e.g., hand-launched or already flying), static gravity-leveling is impossible because $\mathbf{a}_W 
+eq \mathbf{0}$. S1 must perform a **Visual-Inertial Alignment** over a short sliding window (usually $1 - 2	ext{ seconds}$).
 
-This is the S1 over-confidence candidate. The initial covariance is an **isotropic
-`σ·I`** — every block gets the same `σ`:
+```
+[Camera Track (SfM)] ──▶ Recover up-to-scale relative translations (p_c)
+                                                                 │
+                                                                 ▼  (Match via scale "s")
+[IMU Preintegration] ──▶ Double-integrate raw accelerations (s · Δp_imu)
+```
 
-| state block | initial σ | should be |
-|---|---|---|
-| roll/pitch | 5.73° | small — gravity-leveled |
-| **yaw** | **5.73°** | **large — unobservable at static init** |
-| position | 0.1 m | (global position is a gauge) |
-| accel bias | 0.1 m/s² | larger — weakly observable |
+1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle adjustment (or five-point algorithm) to recover a **set of relative camera translations $\mathbf{p}_{ci}$ up to a scale factor $s$**.
+2.  **IMU Preintegration**: The IMU accelerations are double-integrated over the same intervals to compute relative displacement estimates $\Delta \mathbf{p}_{imu,i}$.
+3.  **Linear Scale Alignment**: We set up a linear system matching the visual translations to the double-integrated IMU displacements, solving for the **metric scale $s$, initial velocities $\mathbf{v}_i$, and gravity vector $\mathbf{g}_W$**:
+    $$\mathbf{R}_{W}^{c_0} \cdot \mathbf{p}_{c_i} = s \cdot \Delta \mathbf{p}_{imu,i} + \mathbf{v}_0 \Delta t_i + \frac{1}{2} \mathbf{g}_W \Delta t_i^2$$
 
-**Yaw gets the same 5.73° as the gravity-leveled roll/pitch — but yaw is
-unobservable from a static accel-only init** (gravity fixes only the two tilt
-axes; the heading is a free gauge). A structured seed would give yaw, scale, and
-accel-bias large variance to reflect that they were *not* observed. The isotropic
-seed instead claims the filter knows its heading to 5.73° at t = 0 — first-frame
-over-confidence the filter never fully recovers from, and a plausible origin for
-the **attitude-localized** over-confidence seen later (per-block NEES is worst on
-attitude — see [Consistency Analysis](/pipeline/consistency-analysis/)).
+### The Scale-Observability Cliff
+Under gentle motion (such as hover or pure rotation), the acceleration vector does not change. In this regime, the system of equations is **ill-conditioned**, and the metric scale $s$ is physically unobservable. 
 
-## Interactive
+To prevent the EKF from starting with a confidently wrong metric scale, Cortex runs a **Singular Value Decomposition (SVD) condition check** on the alignment matrix $A$. If the ratio of the maximum to minimum singular values (condition number) exceeds a strict threshold, the dynamic initialization is safely **declined**, forcing the system to wait for sufficient acceleration excitation.
 
-In the [3-D viewer](/vio/scene3d/), watch the very first frames: the covariance
-ellipsoid starts already-small. A faithful `P₀` would start it *large* along the
-unobserved directions and let the first measurements shrink it — the opposite of
-an over-tight isotropic seed.
+---
 
-<Aside type="caution" title="Status — algorithm sound, seed suspect">
-  The initialization **algorithm checks out**: exact static leveling, gravity and
-  metric scale recovered, and the observability gate declines (rather than guessing)
-  when excitation is too low. The open item is the **isotropic `P₀` seed** — yaw,
-  scale, and accel-bias are seeded with the same small σ as the observed states,
-  understating the uncertainty on exactly the directions init could not pin down.
-  This is a structural over-confidence source at t = 0 that resonates with the
-  attitude-localized NEES. Tracked, with the full decomposition, on
-  [Engineering Status](/pipeline/engineering-status/).
-</Aside>
+## 3. The Covariance Seed Suspect: Isotropic Over-Confidence
+
+The initial covariance $\mathbf{P}_0$ is a $15 	imes 15$ matrix that represents the filter's starting uncertainty. 
+
+Historically, many VIO implementations (including those generated by AI Code Assistants) initialize $\mathbf{P}_0$ as an **isotropic matrix**:
+$$\mathbf{P}_0 = \sigma^2 \mathbf{I}$$
+Where every block (roll, pitch, yaw, velocity, position, gyroscope bias, accelerometer bias) gets the same small initial uncertainty (e.g., $\sigma = 5.73^\circ$ for rotation).
+
+This isotropic seed is **mathematically dishonest and a major source of over-confidence**:
+
+| State Block | Physical Observation at Static Init | Isotropic Seed ($\sigma = 5.73^\circ$) | Physically Honest Seed |
+| :--- | :--- | :--- | :--- |
+| **Roll / Pitch** | **Observed** via gravity-leveling ($\bar{\mathbf{a}}$). | $5.73^\circ$ | **Small** ($\approx 0.1^\circ$ to $0.5^\circ$) |
+| **Yaw (Heading)** | **Unobserved** (gravity has no horizontal component). | $5.73^\circ$ | **Huge** ($\approx 180^\circ$ or treated as infinite) |
+| **Velocity** | **Observed** (stationary table is $\mathbf{v} = \mathbf{0}$). | $0.1	ext{ m/s}$ | **Small** ($\approx 10^{-4}	ext{ m/s}$) |
+| **Accel Bias** | **Weakly Observed** over a static window. | $0.1	ext{ m/s}^2$ | **Large** ($\approx 1.0	ext{ m/s}^2$) |
+
+By claiming that the unobservable yaw heading is known to $\pm5.73^\circ$ at $t = 0$, the isotropic seed injects false information into the EKF. Because the filter "thinks" its heading is highly accurate, it will reject visual measurements that deviate slightly due to camera rotation, leading directly to the **attitude-localized over-confidence** seen on the [Consistency Analysis](/pipeline/consistency-analysis/) page.
+
+---
+
+## S1 Contract Specs
+
+The mathematical contracts ensuring safe filter bootstrapping:
+
+| Element | Contract Specification |
+| :--- | :--- |
+| **Signature** | `init(imu_window, [vision_window]) → (R_GI, v, b_g, b_a, g, [scale])` + initial $\mathbf{P}_0$ |
+| **Pre-conditions** | Gyro/accel variance is below stationary noise threshold (static init); singular-value conditioning of SfM-IMU matrix is below 100 (dynamic init). |
+| **Post-conditions & Invariants** | **1. Gravity alignment**: Gravity vector aligns with measured mean specific force: $\|\mathbf{R}_I^W \bar{\mathbf{a}} - [0,0,g]^T\| < 10^{-4}	ext{ m/s}^2$.<br/>**2. Positive Scale**: Dynamically recovered scale $s$ is strictly positive ($s > 0$) and finite.<br/>**3. Realistic Yaw Prior**: Heading (yaw) covariance $\mathbf{P}_0(	heta_{yaw})$ is seeded with a large variance ($\ge 45^\circ$) to reflect its unobserved status. |
+
+---
+
+## Exploring the Next Stage
+
+Once the state and covariance are initialized, the filter transitions into high-rate inertial prediction. 
+*   Explore **[S2 — IMU Propagation](/pipeline/stages/s2-imu-propagation/)** to see how the EKF predicts the mean and covariance forward in time.

@@ -5,64 +5,111 @@ description: How visual-inertial odometry turns a camera + IMU into a metric pos
 
 import { Aside } from '@astrojs/starlight/components';
 
-Visual-Inertial Odometry (VIO) fuses a **camera** (rich geometry, slow,
-scale-ambiguous if monocular) and an **IMU** (fast, senses gravity, drifts when
-integrated alone) into a single *metric* estimate of where the platform is — and,
-just as importantly, **how uncertain that estimate is**.
+Visual-Inertial Odometry (VIO) fuses a **camera** (rich geometry, slow, scale-ambiguous if monocular) and an **IMU** (fast, senses gravity, drifts quadratically when integrated alone) into a single, high-rate *metric* estimate of where the platform is — and, just as importantly, **how uncertain that estimate is**.
 
-This section documents the pipeline cortex implements, **stage by stage**. Each
-stage is treated as a **contract**: a signature, pre-conditions it assumes,
-post-conditions/invariants it must guarantee, the native-unit metrics that prove
-it, and where the current implementation is known to fall short. The framing
-follows the OpenVINS error-state MSCKF — the de-facto reference filter. *Why*
-contracts-and-probes rather than editing-and-watching-ATE is the subject of
-[Diagnostic Methodology](/pipeline/diagnostic-methodology/).
+Despite its elegance, **VIO is notoriously difficult to implement**. In practice, Kalman filtering is extremely sensitive to minor misalignments, sign conventions, or coordinate-frame flips. A single 1-pixel projection error or a $10^{-6}$ Jacobian sign discrepancy can cause the filter's reported uncertainty to collapse (reporting $\pm10	ext{ cm}$ uncertainty while its true position is drifting by meters). This is the dreaded **over-confidence bug** (Issue #212).
 
-## The dataflow
+This section documents the VIO pipeline cortex implements, **stage by stage**. To isolate and conquer the bugs that plague VIO assistants, each stage is treated as a **rigorous mathematical contract**: specifying its why, what, and how, its pre-conditions, its post-conditions, and the diagnostics/unit probes used to prove its consistency.
 
-The IMU drives a high-rate **propagation** of the mean and covariance; each camera
-image triggers a **clone** of the current pose into a sliding window, the
-**frontend** tracks features, lost/marginalized features are **triangulated**, and
-the resulting reprojection residuals drive the **MSCKF update** that corrects the
-whole window. Old clones are **marginalized** out.
+---
 
-![VIO pipeline S0–S10 stage flow: a one-shot S1 initialization seeds the per-frame MSCKF cycle (S2 IMU propagation → S3 state augmentation → S4 visual frontend → S5 triangulation → S6 update → S9 marginalization), which loops every camera frame on the S0 sensor/calibration substrate; S7/S8/S10 are optional layers. Colour marks the measured #212 verdict — green stages are measured-consistent, amber stages (S1 initial covariance, S10 calibration) are the open input-side over-confidence candidates.](/figures/pipeline/vio_stage_flow.svg)
+## The Core Challenge: Fusing Two Worlds
 
-## The stages
+To understand why VIO is so sensitive, we must look at the physical nature of the two sensors we are trying to bind:
 
-| | Stage | What it does |
-|---|---|---|
-| **S0** | [Sensor & calibration models](/pipeline/stages/s0-sensor-models/) | the measurement functions every residual is built from |
-| **S1** | [Initialization](/pipeline/stages/s1-initialization/) | bootstrap attitude, biases, gravity, scale + the initial covariance |
-| **S2** | [IMU propagation](/pipeline/stages/s2-imu-propagation/) | predict the mean and covariance forward between images |
-| **S3** | [State augmentation / cloning](/pipeline/stages/s3-augmentation/) | add the new image's pose to the sliding window |
-| **S4** | [Visual frontend](/pipeline/stages/s4-frontend/) | KLT tracking + RANSAC → feature tracks |
-| **S5** | [Feature triangulation](/pipeline/stages/s5-triangulation/) | recover the 3-D point a track corresponds to |
-| **S6** | [MSCKF update](/pipeline/stages/s6-msckf-update/) | null-space → QR compress → χ² gate → EKF correction |
-| **S7** | [SLAM-feature update](/pipeline/stages/s7-slam-features/) | optional persistent landmarks |
-| **S8** | [Zero-velocity update](/pipeline/stages/s8-zero-velocity/) | optional stationarity robustness |
-| **S9** | [Marginalization](/pipeline/stages/s9-marginalization/) | drop the oldest clone, keep the window bounded |
-| **S10** | [Online calibration](/pipeline/stages/s10-online-calibration/) | extrinsics, intrinsics, time offset |
+| Metric | Camera (Visual) | IMU (Inertial) |
+| :--- | :--- | :--- |
+| **Observation Type** | High-dimensional pixel arrays (photometric). | Acceleration ($\mathbf{a}$) and angular velocity ($\boldsymbol{\omega}$). |
+| **Measurement Rate** | Low rate (usually $10 - 30	ext{ Hz}$). | High rate (usually $200 - 1000	ext{ Hz}$). |
+| **Drift Profile** | Drift-free under static conditions, but scale-ambiguous in monocular setups. | Quadratic drift in position ($t^2$) and linear drift in velocity ($t$). |
+| **Observability** | Excellent for relative rotation and bearing directions; cannot observe absolute scale from a single camera. | Directly observes absolute roll, pitch (via gravity), and physical scale (via acceleration). |
 
-*(All eleven stages S0–S10 are now written — data-backed where a probe is
-wired, contract pages for the optional/not-yet-implemented layers.)*
+Without the IMU, a monocular camera cannot tell the difference between moving $1	ext{ meter}$ in a small room or $100	ext{ meters}$ in a giant canyon. Without the camera, the IMU's double-integration of raw accelerometer noise would drift by kilometers in minutes. Fusing them requires **absolute mathematical synchrony**.
 
-## What "good" looks like
+---
 
-Two properties, measured separately:
+## The Coordinate Frame Glass House
 
-- **Accuracy** — the estimated trajectory is close to truth (ATE / RPE).
-- **Consistency** — the filter's reported uncertainty is *honest*: when it says
-  ±10 cm it is wrong by about 10 cm, not 1 m. This is the safety property, and the
-  one a single accuracy number cannot see. Start with
-  **[Reading the metrics](/pipeline/metrics/)**.
+The most common failure mode in VIO engineering is **coordinate frame misalignment**. A VIO pipeline is a "mathematical glass house"—if any of the coordinate relationships are defined inconsistently, the entire estimator collapses quadratically.
 
-<Aside type="caution" title="Status">
-  The cortex filter is currently **over-confident** on EuRoC — its covariance is
-  too small for its true error. The decomposition of *why*, stage by stage, and
-  the tracking-issue index are on the
-  [Engineering Status](/pipeline/engineering-status/) page.
-</Aside>
+```
+       [World Frame (W)] (Gravity aligned)
+               │
+               ▼  (T_wi: World-to-IMU pose, propagated via inertial integration)
+         [IMU Frame (I)]
+               │
+               ▼  (T_ic: Fixed/Estimated Camera-to-IMU extrinsic calibration)
+       [Camera Frame (C)]
+               │
+               ▼  (Normalized projection via camera intrinsic parameters)
+         [Pixel Plane]
+```
 
-For the end-to-end picture — additive noise in, trajectory out — see the
-**[noise→robustness demo](/vio/scene3d/)** and its interactive 3-D viewer.
+Cortex enforces a rigid, unified convention across all eleven stages:
+*   **World Frame ($W$)**: The global reference frame. Gravity is aligned with the global $z$-axis: $\mathbf{g}_W = [0, 0, -9.81]^T$. Yaw and global position are **unobservable** in this frame.
+*   **IMU Frame ($I$)**: The body frame of the vehicle. Raw acceleration $\mathbf{a}_{imu}$ and angular rate $\boldsymbol{\omega}_{imu}$ are sensed relative to this frame.
+*   **Camera Frame ($C$)**: The camera coordinate system. The optical axis points along the positive $z$-axis ($+z$ is forward/depth).
+*   **Extrinsics ($R_{ic}$, $\mathbf{p}_{ic}$)**: The rigid 6-DoF transform mapping the Camera origin to the IMU body center:
+    $$\mathbf{p}_{cam} = \mathbf{p}_{imu} + \mathbf{R}_{world\_imu} \cdot \mathbf{p}_{ic}$$
+    $$\mathbf{R}_{world\_cam} = \mathbf{R}_{world\_imu} \cdot \mathbf{R}_{ic}$$
+
+---
+
+## The MSCKF Paradigm: SLAM vs. Sliding Window
+
+In standard visual SLAM, 3D landmarks (features) are appended directly to the EKF state vector. If you track $N$ features, your covariance matrix grows to size $(15 + 3N) 	imes (15 + 3N)$. Computing the EKF update becomes a cubic $\mathcal{O}(N^3)$ operation, making it impossible to run in real-time on low-power drone hardware.
+
+The **Multi-State Constraint Kalman Filter (MSCKF)** solves this with a mathematical masterstroke:
+
+1.  **Pose Cloning**: Instead of tracking 3D landmarks in the state vector, we track a **sliding window of historic IMU poses** (called clones).
+2.  **Null-Space Projection**: When a feature track is lost or marginalized out of the window, we triangulate its 3D position $\mathbf{p}_f$ in the world frame. We write its measurement Jacobian:
+    $$\mathbf{r} \approx \mathbf{H}_x 	ilde{\mathbf{x}} + \mathbf{H}_f 	ilde{\mathbf{p}}_f + \mathbf{v}$$
+3.  We project the residual onto the **left null space** of the feature Jacobian $\mathbf{H}_f$ (multiplying by a matrix $\mathbf{V}^T$ such that $\mathbf{V}^T \mathbf{H}_f = \mathbf{0}$):
+    $$\mathbf{V}^T \mathbf{r} \approx \mathbf{V}^T \mathbf{H}_x 	ilde{\mathbf{x}} + \mathbf{V}^T \mathbf{v}$$
+    
+The landmark position $	ilde{\mathbf{p}}_f$ is **completely eliminated** from the EKF update! The update corrects the cloned IMU poses directly through cross-covariance, keeping the state size strictly bounded and real-time execution highly optimized.
+
+---
+
+## The Eleven Staged Contracts (S0–S10)
+
+To isolate bugs, Cortex slices the MSCKF pipeline into eleven distinct, self-contained stages. Each stage is governed by a strict **contract** of pre-conditions and post-conditions:
+
+| Stage | Contract Page | Responsibility | Core Invariant / Math |
+| :--- | :--- | :--- | :--- |
+| **S0** | [Sensor Models](/pipeline/stages/s0-sensor-models/) | Intrinsics & Extrinsics | Projects 3D points to 2D pixels; enforces distortion models (Radial, Equidistant). |
+| **S1** | [Initialization](/pipeline/stages/s1-initialization/) | State Seeding | Solves gravity alignment, gyro biases, and scale prior to launching the filter. |
+| **S2** | [IMU Propagation](/pipeline/stages/s2-imu-propagation/) | EKF Predict Step | Propagates state mean and covariance forward using the exact 3rd-order discrete transition matrix. |
+| **S3** | [Pose Augmentation](/pipeline/stages/s3-augmentation/) | State Cloning | Appends the current IMU pose to the covariance, maintaining exact Left-Invariant clones. |
+| **S4** | [Visual Frontend](/pipeline/stages/s4-frontend/) | Track Management | Detects corners, tracks them via KLT optical flow, and purges outliers via 2-point/5-point RANSAC. |
+| **S5** | [Triangulation](/pipeline/stages/s5-triangulation/) | Structure Recovery | Reconstructs 3D coordinates of a feature track from multi-view bearings using least-squares. |
+| **S6** | [MSCKF Update](/pipeline/stages/s6-msckf-update/) | EKF Measurement Update | Performs Left Null-Space projection, QR compression, $\chi^2$ gating, and EKF state correction. |
+| **S7** | [SLAM Features](/pipeline/stages/s7-slam-features/) | Persistent Landmarks | Integrates permanent 3D landmarks in the EKF state for long-term drift-free mapping. |
+| **S8** | [Zero-Velocity (ZUPT)](/pipeline/stages/s8-zero-velocity/) | Stationary Robustness | Applies zero-velocity pseudo-measurements to constrain drift when the drone is stationary. |
+| **S9** | [Marginalization](/pipeline/stages/s9-marginalization/) | Window Pruning | Drops the oldest clone, correctly transferring its cross-covariance block out of the window. |
+| **S10** | [Online Calibration](/pipeline/stages/s10-online-calibration/) | Self-Correction | Estimates 6-DoF camera-to-IMU extrinsics and time-offsets online within the filter state. |
+
+---
+
+## What "Good" Looks Like: Accuracy vs. Consistency
+
+In visual-inertial odometry, accuracy is not enough. You can have sub-meter drift but still have a borked filter that crashes your drone. A healthy VIO pipeline must satisfy two distinct properties:
+
+### 1. Accuracy (The Metric Drift)
+Measured using **Absolute Trajectory Error (ATE)** and **Relative Pose Error (RPE)**. Proves that your integration, camera projection, and triangulation are geometrically aligned.
+
+### 2. Consistency (The Safety Property)
+Consistency means the filter is **honest**. When the covariance matrix $P$ claims the drone's position is known to $\pm10	ext{ cm}$, the true position error must indeed be roughly within that $\pm10	ext{ cm}$ envelope. 
+*   **Over-Confidence**: If the error is $1.5	ext{ m}$ but the covariance claims $\pm5	ext{ cm}$, the filter is over-confident. The state estimator will discard new visual measurements because it "thinks" it knows its position perfectly, causing the filter to diverge completely under aggressive motion.
+*   Consistency is verified mathematically using the **Normalized Innovation Squared (NIS)** and **Normalized Estimation Error Squared (NEES)** metrics:
+    $$\epsilon_{NEES} = 	ilde{\mathbf{x}}^T \mathbf{P}^{-1} 	ilde{\mathbf{x}}$$
+    For a consistent $N$-DoF state estimator, the expectation of $\epsilon_{NEES}$ must match $N$.
+
+---
+
+## Exploring the Pipeline
+
+Dive into the individual stages using the sidebar navigation, or learn about our diagnostic methodology and how we measure consistency:
+*   Read **[Reading the metrics](/pipeline/metrics/)** to understand NIS, NEES, and chi-squared testing.
+*   Explore the **[Diagnostic Methodology](/pipeline/diagnostic-methodology/)** to see how we isolate stage-level bugs.
+*   Check out the **[Engineering Status](/pipeline/engineering-status/)** page to see the latest consistency sweeps across the EuRoC MAV datasets.
