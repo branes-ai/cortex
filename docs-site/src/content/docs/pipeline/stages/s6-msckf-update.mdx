@@ -116,6 +116,38 @@ NIS climbs above dof exactly as the *true* measurement noise outgrows the *model
 `R` — the **innovation-level image of the empirical "R×4"** that
 [S10](/pipeline/stages/s10-online-calibration/) attributes to unmodeled calibration.
 
+## Real-data inspector (`s6_inspect`)
+
+The measurements above come from the *synthetic* probe — a self-consistent `(P, R)`
+scene, run in CI. Its real-data companion, **`s6_inspect`**, **establishes the
+filter-internal renderer tier** (epic #371): it runs the **real estimator** over a
+real EuRoC sequence and taps **every** MSCKF camera update through a backend
+observer (the #380 decouple — `MsckfBackend::set_update_observer`, a no-op in
+production), recording the update the monolithic backend otherwise hides.
+
+```bash
+s6_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s6
+#   --camera-noise σ   --calib-rot-deg D   --min-parallax DEG   --dump-update K
+node docs-site/scripts/gen-update-figures.mjs build/s6   # → nis.svg, residuals.svg, covariance.svg
+```
+
+Per update it records the **NIS / dof**, the **χ²-gate decision** (accept / reject),
+the per-observation **reprojection residual**, and the **covariance trace
+before / after** (and whether Joseph kept `P` PSD). The figures draw the
+NIS-over-updates curve against its χ² consistency band — points coloured by the
+gate decision — the residual-RMS series, and the covariance **before/after
+heatmap** (log|P|, with the IMU/clone blocks marked). Because it reads the *live
+filter* covariance, this is where the #212 over-confidence shows up directly: a NIS
+curve riding above the band while the covariance keeps shrinking is the filter
+trusting vision more than the data supports.
+
+Unlike the synthetic probe (which proves the algebra is consistent on a matched
+`(P, R)`), `s6_inspect` measures the update on the **real** `P⁻`/`R` the pipeline
+actually produces — so over-confidence sourced upstream (S2 process noise, S0/S10
+calibration) becomes visible at the innovation. Sweeping `--camera-noise` /
+`--calib-rot-deg` moves the NIS curve into the band, the real-data analogue of the
+"R×4" compensation.
+
 ## Interactive
 
 The **NIS** readout in the [3-D viewer](/vio/scene3d/) is this stage's health,
