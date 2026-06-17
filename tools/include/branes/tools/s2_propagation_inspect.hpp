@@ -30,6 +30,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -93,11 +94,12 @@ struct S2Record {
         }
         steps.push_back(std::move(j));
     }
+    const bool any_gt = std::any_of(r.steps.begin(), r.steps.end(), [](const S2Step& s) { return s.have_gt; });
     return json{{"duration_s", r.duration_s},
                 {"n_imu", r.n_imu},
                 {"rate_hz", r.rate_hz},
                 {"dim", r.dim},
-                {"have_gt", !r.steps.empty() && r.steps.front().have_gt},
+                {"have_gt", any_gt},
                 {"steps", std::move(steps)}};
 }
 
@@ -137,11 +139,13 @@ public:
         const std::size_t stride = in.max_samples > 0 && n / in.max_samples > 0 ? n / in.max_samples : 1;
 
         rec.steps.reserve(n / stride + 2);
-        double prev_t = t0;
-        for (std::size_t k = 0; k < n; ++k) {
-            // dt from consecutive stamps (first sample advances by the nominal step).
-            const double dt = k == 0 ? (n > 1 ? in.imu[1].timestamp_s - t0 : 0.0) : in.imu[k].timestamp_s - prev_t;
-            prev_t = in.imu[k].timestamp_s;
+        // The prior is the state AT t0 (sample 0) — record it before any propagation
+        // so every snapshot's label is the elapsed time the mean/covariance actually
+        // represent. Then advance interval [k-1, k] by dt = stamp[k] − stamp[k-1],
+        // and the post-step snapshot is labeled stamp[k] − t0 (no off-by-one).
+        rec.steps.push_back(snapshot(s, 0.0));
+        for (std::size_t k = 1; k < n; ++k) {
+            const double dt = in.imu[k].timestamp_s - in.imu[k - 1].timestamp_s;
             if (dt > 0.0) {
                 // ImuMeasurement carries std::array fields; the propagator takes the
                 // lie Vec3 — lift them across.
@@ -149,7 +153,6 @@ public:
                 const auto& a = in.imu[k].linear_acceleration;
                 prop.propagate(s, Vec3{{g[0], g[1], g[2]}}, Vec3{{a[0], a[1], a[2]}}, dt);
             }
-
             if (k % stride == 0 || k + 1 == n)
                 rec.steps.push_back(snapshot(s, in.imu[k].timestamp_s - t0));
         }

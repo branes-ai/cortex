@@ -63,8 +63,10 @@ TEST_CASE("S2 inspector: covariance grows from the seed under process noise", "[
     const auto& first = rec.steps.front();
     const auto& last = rec.steps.back();
 
-    // P0 = sigma0²·I and block σ = √trace of the 3×3 block ⇒ √3·sigma0 (pos in mm).
-    REQUIRE_THAT(first.pos_sigma_mm, WithinRel(std::sqrt(3.0) * sigma0 * 1000.0, 0.2));
+    // The first recorded step is the prior at t=0 (no propagation yet): P0 = sigma0²·I,
+    // and block σ = √trace of the 3×3 block ⇒ exactly √3·sigma0 (pos in mm).
+    REQUIRE_THAT(first.t, WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(first.pos_sigma_mm, WithinRel(std::sqrt(3.0) * sigma0 * 1000.0, 1e-9));
     // Process noise strictly grows the attitude/velocity/position σ over the window.
     REQUIRE(last.att_sigma_deg > first.att_sigma_deg);
     REQUIRE(last.vel_sigma_mm_s > first.vel_sigma_mm_s);
@@ -77,6 +79,7 @@ TEST_CASE("S2 inspector: covariance grows from the seed under process noise", "[
         REQUIRE(s.min_diag > 0.0);
     // The still, level window integrates to ~no motion and a unit quaternion.
     REQUIRE_THAT(last.p[0], WithinAbs(0.0, 1e-6));
+    REQUIRE_THAT(last.p[1], WithinAbs(0.0, 1e-6));
     REQUIRE_THAT(last.p[2], WithinAbs(0.0, 1e-6));
     const double qn =
         std::sqrt(last.q[0] * last.q[0] + last.q[1] * last.q[1] + last.q[2] * last.q[2] + last.q[3] * last.q[3]);

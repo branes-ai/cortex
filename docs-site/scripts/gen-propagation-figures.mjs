@@ -120,8 +120,9 @@ function renderDrift() {
     for (let k = 0; k < n; k++) d += `${k ? 'L' : 'M'}${X(steps[k].t).toFixed(1)},${Y(steps[k][driftKey] ?? 0).toFixed(1)}`;
     g += `<path d="${d}" fill="none" stroke="#fd8d3c" stroke-width="1.6"/>`;
     for (let k = 0; k < n; k++) {
-      const out = (steps[k][driftKey] ?? 0) > 3 * (steps[k][sigmaKey] ?? 0);
-      if (out) g += `<circle cx="${X(steps[k].t).toFixed(1)}" cy="${Y(steps[k][driftKey]).toFixed(1)}" r="2" fill="#e6552d"/>`;
+      const dval = steps[k][driftKey] ?? 0;
+      if (dval > 3 * (steps[k][sigmaKey] ?? 0))
+        g += `<circle cx="${X(steps[k].t).toFixed(1)}" cy="${Y(dval).toFixed(1)}" r="2" fill="#e6552d"/>`;
     }
     g += `<text x="${M.l - 6}" y="${(oy + 10).toFixed(1)}" text-anchor="end" font-family="monospace" font-size="9" fill="#bbb">${num(ymax, 1)}</text>`;
     g += `<text x="${M.l - 6}" y="${(oy + panelH).toFixed(1)}" text-anchor="end" font-family="monospace" font-size="9" fill="#bbb">0</text>`;

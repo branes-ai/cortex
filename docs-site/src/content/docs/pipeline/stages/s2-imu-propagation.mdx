@@ -109,7 +109,7 @@ It writes `propagation.json` and renders two figures:
 
 - **the covariance-growth heatmap** — each of the 15 IMU error states' σ over the
   window (row-normalized), with the θ/p/v/b_g/b_a blocks marked. The position block
-  growing only via the velocity coupling (no direct position-Q term) is exactly the
+  growing only via the velocity coupling (no direct position-Q term) is the
   diagonal-`Q` simplification, now visible on real data.
 - **drift vs the ±3σ envelope** — the propagated pose's dead-reckoning drift from
   ground truth, plotted against the filter's *own* growing 3σ band. Drift that
