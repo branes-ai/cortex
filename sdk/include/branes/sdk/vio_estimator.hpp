@@ -144,6 +144,12 @@ public:
         return backend_;
     }
 
+    /// Mutable backend access — for installing inspection hooks (e.g. the S6
+    /// update observer, #380) before a replay. Not for use on the hot path.
+    [[nodiscard]] Backend& backend() noexcept {
+        return backend_;
+    }
+
     /// Number of features the front end is currently tracking (telemetry).
     [[nodiscard]] std::size_t num_tracked_features() const noexcept {
         return tracks_.size();

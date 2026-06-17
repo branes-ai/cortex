@@ -79,11 +79,13 @@ replays a stage and visualizes it.
 | `tools/src/s5_inspect.cpp` | **S5 triangulation inspector** (3-D tier) — real tracks + GT clone poses → real triangulator → 3-D landmark cloud + covariance + reprojection residuals |
 | `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays (image-domain tier) |
 | `docs-site/src/components/scene3d.js` | the **3-D tier** — renders the landmark cloud + per-landmark covariance ellipsoids (`scene.json`) |
+| `tools/src/s6_inspect.cpp` | **S6 MSCKF-update inspector** (filter-internal tier) — taps every real update (NIS, χ²-gate, residuals, covariance before/after) via the backend observer |
+| `docs-site/scripts/gen-update-figures.mjs` | the **filter-internal tier** — NIS-over-updates + χ² band, residuals, covariance before/after heatmap |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
-`tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`
-and `tests/tools/s5_triangulation_inspect.cpp`.
+`tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
+`tests/tools/s5_triangulation_inspect.cpp` and `tests/tools/s6_update_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -191,6 +193,34 @@ inter-view **parallax**, the system **condition number**, and per-observation
 The 3-D landmark cloud + covariance ellipsoids render in the
 [Scene3D](../docs-site/src/components/scene3d.js) viewer (load `scene.json` +
 `run.jsonl`); the reprojection residuals render image-domain via `gen-overlay.mjs`.
+
+### S6 MSCKF-update inspector (`s6_inspect`)
+
+**Establishes the filter-internal renderer tier.** Runs the **real estimator**
+(`VioEstimator` + `MsckfBackend`) over a real EuRoC sequence and taps **every**
+MSCKF camera update through the backend's update observer
+(`MsckfBackend::set_update_observer`, the #380 decouple — a no-op when unset, so
+production is untouched). The local image of the global #212 over-confidence,
+measured on real data.
+
+```bash
+./build/tools/s6_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s6
+#   --camera-noise σ   --calib-rot-deg D   --min-parallax DEG   --dump-update K   --max-frames N
+node docs-site/scripts/gen-update-figures.mjs build/s6   # → nis.svg, residuals.svg, covariance.svg
+```
+
+Outputs:
+
+| artifact | role |
+|---|---|
+| `updates.jsonl` | one record/update: `nis`, `dof`, `nis_over_dof`, `accepted`, `gated`, `chi2_threshold`, `innov_sum`, `cov_trace_before`/`after`, `psd_after`, `residual_rms_px`, per-obs `residuals` |
+| `covariance.json` | one update's full `P` `before`/`after` (+ `imu_dim`/`clone_dim` block sizes) for the heatmap |
+
+The figures (`gen-update-figures.mjs`, filter-internal tier) draw the
+**NIS-over-updates** curve against its χ² consistency band (points coloured by the
+gate decision), the **residual-RMS** series, and the covariance **before/after
+heatmap** (log|P|, IMU/clone blocks marked). Sweeping `--camera-noise` /
+`--calib-rot-deg` moves the NIS curve into the band — the real-data "R×4" analogue.
 
 ## Layout
 
