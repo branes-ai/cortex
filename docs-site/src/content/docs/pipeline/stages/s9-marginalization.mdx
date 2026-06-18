@@ -54,6 +54,29 @@ The kept-marginal residual is **identically zero** — `cov.marginalize(keep)` i
 exact principal-submatrix extraction, so dropping the oldest clone leaves every
 retained state's covariance untouched, and `P'` stays PSD.
 
+## Real-data inspector (`s9_inspect`)
+
+The measurements above come from the *synthetic* probe. Its real-data companion,
+**`s9_inspect`** (the inverse of [`s3_inspect`](/pipeline/stages/s3-augmentation/)),
+runs the real estimator over a real EuRoC sequence until the window holds several
+clones, then takes a **copy** of that keyframe state and runs the real
+`StateHelper::marginalize_clone` on it. No SDK change — the operator is standalone
+and `backend().state()` is exposed.
+
+```bash
+s9_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s9 --min-clones 5 --idx 0
+node docs-site/scripts/gen-marginalization-figures.mjs build/s9   # → marginalize_covariance.svg
+```
+
+It writes `marginalization.json` and renders the **before/after covariance heatmap
+with the dropped clone block outlined** in the "before" matrix — its row band and
+column band (the cross-covariance) are what's discarded. The HUD reports the
+invariant on real data: the kept-state marginal residual (the others' covariance
+must be untouched) and the information dropped (the clone's own σ and its
+cross-covariance with the kept states). On EuRoC the kept-marginal residual comes
+out **identically zero**, confirming the exact extraction holds on a real,
+fully-correlated filter covariance, not just the synthetic one.
+
 <Aside type="tip" title="Status — correct">
   S9 is **correct** and **not** a source of the #212 over-confidence. Combined with
   [S3](/pipeline/stages/s3-augmentation/), the clone-window bookkeeping is exact
