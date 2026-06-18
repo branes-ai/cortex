@@ -40,9 +40,11 @@ namespace branes::tools {
 
 /// Everything one clone marginalization produced — the inspector's record.
 struct S9MarginalizeRecord {
+    bool valid =
+        false;  ///< the marginalization ran and its postcondition held; residuals below are meaningful only if true
     std::size_t dim_before = 0, dim_after = 0;
-    std::size_t dropped_offset = 0;  ///< where the dropped 6×6 clone block sat in P_before
-    std::size_t clone_dim = 6;
+    std::size_t dropped_offset = 0;  ///< where the dropped clone block sat in P_before
+    std::size_t clone_dim = 0;       ///< == State::kCloneDim (set by run)
     std::size_t dropped_index = 0;   ///< which clone (by window index) was dropped
     double kept_marginal_err = 0.0;  ///< ‖P'[kept] − P[kept,kept]‖max (≈ 0: exact extraction)
     double dropped_sigma = 0.0;      ///< √trace of the dropped clone's 6×6 block (uncertainty no longer tracked)
@@ -56,7 +58,8 @@ struct S9MarginalizeRecord {
 
 [[nodiscard]] inline nlohmann::json to_json(const S9MarginalizeRecord& r) {
     using nlohmann::json;
-    return json{{"dim_before", r.dim_before},
+    return json{{"valid", r.valid},
+                {"dim_before", r.dim_before},
                 {"dim_after", r.dim_after},
                 {"dropped_offset", r.dropped_offset},
                 {"clone_dim", r.clone_dim},
@@ -88,6 +91,7 @@ public:
         namespace ms = branes::sdk::msckf;
         S9MarginalizeRecord r;
 
+        r.clone_dim = State::kCloneDim;  // bind the reported block size to the SDK constant
         const DynMat P = in.state.covariance();
         const std::size_t d = in.state.dim();
         r.dim_before = d;
@@ -95,7 +99,7 @@ public:
         r.n_clones_before = in.state.clones.size();
         r.cov_before = flatten(P);
         if (in.idx >= in.state.clones.size())
-            return r;  // nothing to drop — invalid index; residuals at defaults
+            return r;  // invalid index — valid stays false, residuals at defaults
 
         const std::size_t off = in.state.clone_offset(in.idx);
         r.dropped_offset = off;
@@ -116,9 +120,11 @@ public:
         r.psd = ms::is_positive_semidefinite(Pp);
 
         // Postcondition: exactly one clone block removed; marginalization compacts the
-        // kept states in order, so keep[i] in P maps to position i in P'.
+        // kept states in order, so keep[i] in P maps to position i in P'. If it ever
+        // doesn't hold, FAIL CLOSED (valid stays false) so a broken contract is never
+        // serialized/printed as a clean pass.
         if (r.dim_after != keep.size())
-            return r;  // unexpected — leave residuals at defaults (the ctest pins the contract)
+            return r;
 
         // Kept-state marginal must be UNCHANGED (exact principal-submatrix extraction).
         double kept = 0.0;
@@ -137,6 +143,7 @@ public:
             for (std::size_t k : keep)
                 cross = std::max(cross, std::abs(P(off + a, k)));
         r.max_cross_dropped = cross;
+        r.valid = true;  // ran end-to-end with the postcondition satisfied
         return r;
     }
 

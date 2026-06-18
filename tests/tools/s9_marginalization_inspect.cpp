@@ -49,6 +49,8 @@ TEST_CASE("S9 inspector: marginalization is exact principal-submatrix extraction
 
     const auto r = bt::S9MarginalizationInspector().run(in);
 
+    REQUIRE(r.valid);
+    REQUIRE(r.clone_dim == ms::State<double>::kCloneDim);  // reported block size bound to the SDK constant
     REQUIRE(r.dim_before == d);
     REQUIRE(r.dim_after == d - ms::State<double>::kCloneDim);  // shrank by exactly one 6-DoF clone
     REQUIRE(r.n_clones_after == clones0 - 1);
@@ -90,6 +92,7 @@ TEST_CASE("S9 inspector: run does not mutate the caller's state", "[tools][s9_in
 TEST_CASE("S9 inspector: an out-of-range clone index is a no-op", "[tools][s9_inspect]") {
     auto in = bt::S9MarginalizationInspector::S9Input{correlated_state(2), 99};
     const auto r = bt::S9MarginalizationInspector().run(in);
+    REQUIRE_FALSE(r.valid);     // fails closed — an out-of-range index is not a clean pass
     REQUIRE(r.dim_after == 0);  // signalled invalid — nothing dropped
     REQUIRE(r.kept_marginal_err == 0.0);
 }
@@ -97,6 +100,7 @@ TEST_CASE("S9 inspector: an out-of-range clone index is a no-op", "[tools][s9_in
 TEST_CASE("S9 inspector: record serializes to the figure schema", "[tools][s9_inspect]") {
     const auto r = bt::S9MarginalizationInspector().run({correlated_state(3), 0});
     const auto j = bt::to_json(r);
+    REQUIRE(j.at("valid") == true);
     REQUIRE(j.at("dim_after") == r.dim_after);
     REQUIRE(j.at("dropped_offset") == r.dropped_offset);
     REQUIRE(j.at("psd") == true);

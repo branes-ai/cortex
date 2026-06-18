@@ -176,11 +176,6 @@ int main(int argc, char** argv) {
         std::cerr << "s9_inspect: empty EuRoC streams (" << images.size() << " images, " << imu.size() << " IMU)\n";
         return 1;
     }
-    if (args.idx >= args.min_clones) {
-        std::cerr << "s9_inspect: --idx " << args.idx << " must be < --min-clones " << args.min_clones << "\n";
-        return 2;
-    }
-
     const auto cal = euroc_cam0();
     bs::VioConfig cfg;
     Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
@@ -221,6 +216,14 @@ int main(int argc, char** argv) {
     if (!captured) {
         std::cerr << "s9_inspect: did not reach " << args.min_clones << " clones within " << processed
                   << " frames (try a longer sequence or fewer --min-clones)\n";
+        return 1;
+    }
+    // --idx is validated against the ACTUAL captured clone count (min-clones is only
+    // the capture threshold; capture can land with more clones). The inspector fails
+    // closed on a bad index, so a non-valid record means the drop did not happen.
+    if (!record.valid) {
+        std::cerr << "s9_inspect: marginalization did not run — --idx " << args.idx << " is out of range for the "
+                  << record.n_clones_before << " clones captured, or the postcondition failed\n";
         return 1;
     }
 

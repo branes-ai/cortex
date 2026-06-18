@@ -43,8 +43,8 @@ function ramp(t) {
 
 const db = R.dim_before | 0, da = R.dim_after | 0;
 const A = R.cov_before, B = R.cov_after;
-if (!Array.isArray(A) || !Array.isArray(B) || A.length !== db * db || B.length !== da * da || db < 1) {
-  console.error(`marginalization.json: cov_before/after are not ${db}²/${da}² matrices`);
+if (!Array.isArray(A) || !Array.isArray(B) || A.length !== db * db || B.length !== da * da || db < 1 || da < 1) {
+  console.error(`marginalization.json: cov_before/after are not positive ${db}²/${da}² matrices`);
   process.exit(1);
 }
 const at = (M, dim, i, j) => M[i * dim + j];
