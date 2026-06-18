@@ -87,13 +87,15 @@ replays a stage and visualizes it.
 | `docs-site/scripts/gen-propagation-figures.mjs` | per-state σ-growth heatmap + drift-vs-3σ-envelope plot |
 | `tools/src/s3_inspect.cpp` | **S3 augmentation inspector** (filter-internal tier) — real keyframe state → real `augment_clone` → before/after covariance with the new clone block |
 | `docs-site/scripts/gen-augmentation-figures.mjs` | before/after covariance heatmap with the new clone block outlined |
+| `tools/src/s9_inspect.cpp` | **S9 marginalization inspector** (filter-internal tier) — real keyframe state → real `marginalize_clone` → before/after covariance, kept-marginal unchanged + info dropped |
+| `docs-site/scripts/gen-marginalization-figures.mjs` | before/after covariance heatmap with the dropped clone block outlined |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
 `tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`,
-`tests/tools/s1_init_inspect.cpp`, `tests/tools/s2_propagation_inspect.cpp` and
-`tests/tools/s3_augmentation_inspect.cpp`.
+`tests/tools/s1_init_inspect.cpp`, `tests/tools/s2_propagation_inspect.cpp`,
+`tests/tools/s3_augmentation_inspect.cpp` and `tests/tools/s9_marginalization_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -289,6 +291,26 @@ placement, and the stochastic-cloning residuals — the clone's marginal and its
 cross-covariance with every existing state must equal the cloned pose's (a clone
 is a deterministic copy), with a PSD check. The figure draws the before/after
 heatmap with the **new clone block outlined**, making the clone literally appear.
+
+### S9 marginalization inspector (`s9_inspect`)
+
+The inverse of `s3_inspect`. Runs the real estimator over EuRoC until the window
+holds several clones, then takes a **copy** of that keyframe state and runs the
+real `StateHelper::marginalize_clone` to drop a clone (default the oldest, as the
+backend does). No SDK change.
+
+```bash
+./build/tools/s9_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s9 --min-clones 5 --idx 0
+node docs-site/scripts/gen-marginalization-figures.mjs build/s9   # → marginalize_covariance.svg
+```
+
+Output `marginalization.json`: the before/after covariance, the dropped block's
+placement, and the marginalization invariant — dropping a variable is exact
+principal-submatrix extraction, so the **kept-state marginal must be unchanged**
+(reported as a ~0 residual) — plus the information discarded (the dropped clone's
+own σ and its cross-covariance with the kept states), with a PSD check. The figure
+draws the before/after heatmap with the **dropped clone block outlined** in the
+"before" matrix.
 
 ## Layout
 
