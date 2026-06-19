@@ -89,13 +89,16 @@ replays a stage and visualizes it.
 | `docs-site/scripts/gen-augmentation-figures.mjs` | before/after covariance heatmap with the new clone block outlined |
 | `tools/src/s9_inspect.cpp` | **S9 marginalization inspector** (filter-internal tier) — real keyframe state → real `marginalize_clone` → before/after covariance, kept-marginal unchanged + info dropped |
 | `docs-site/scripts/gen-marginalization-figures.mjs` | before/after covariance heatmap with the dropped clone block outlined |
+| `tools/src/s10_inspect.cpp` | **S10 online-calibration inspector** (filter-internal tier) — perturbed extrinsic + `estimate_extrinsics` → in-state extrinsic converging vs the dataset reference |
+| `docs-site/scripts/gen-calibration-figures.mjs` | extrinsic rot/trans error-vs-time convergence inside the ±3σ band |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
 `tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`,
 `tests/tools/s1_init_inspect.cpp`, `tests/tools/s2_propagation_inspect.cpp`,
-`tests/tools/s3_augmentation_inspect.cpp` and `tests/tools/s9_marginalization_inspect.cpp`.
+`tests/tools/s3_augmentation_inspect.cpp`, `tests/tools/s9_marginalization_inspect.cpp`
+and `tests/tools/s10_calibration_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -311,6 +314,25 @@ principal-submatrix extraction, so the **kept-state marginal must be unchanged**
 own σ and its cross-covariance with the kept states), with a PSD check. The figure
 draws the before/after heatmap with the **dropped clone block outlined** in the
 "before" matrix.
+
+### S10 online-calibration inspector (`s10_inspect`)
+
+Runs the real estimator over EuRoC with online extrinsic estimation on
+(`estimate_extrinsics`), seeded from a deliberately **perturbed** camera↔IMU
+extrinsic, and samples the in-state estimate converging toward the dataset's true
+extrinsic each frame. No SDK change — online calibration is a shipped config and
+`backend().state()` exposes the `CalibState` block.
+
+```bash
+./build/tools/s10_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s10 --perturb-rot-deg 2 --perturb-trans-mm 30
+node docs-site/scripts/gen-calibration-figures.mjs build/s10   # → calib_convergence.svg
+```
+
+Output `calibration.json`: the per-frame extrinsic-rotation error (deg) and
+translation error (mm) against the reference, plus the estimate's σ. The figure
+draws the error decaying toward the reference inside the filter's own (shrinking)
+±3σ band. (On a physically-consistent EuRoC run the error converges, as the
+`calib_recovery` unit test proves on consistent data.)
 
 ## Layout
 
