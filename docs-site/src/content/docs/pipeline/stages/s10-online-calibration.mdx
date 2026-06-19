@@ -90,6 +90,29 @@ The synthetic backend lands at **NEES ≈ 43 at R×1** — almost exactly the Eu
 MH_05 value (~43) — so this clean, ground-truthed setup is reproducing the real
 over-confidence, not a synthetic artifact.
 
+## Real-data inspector (`s10_inspect`)
+
+The probe above measures the *cost* of treating calibration as perfectly known.
+The real-data companion, **`s10_inspect`**, exercises the **other** S10 path — the
+shipped online extrinsic estimator (`estimate_extrinsics`) that carries the
+camera↔IMU extrinsic as state and refines it. It runs the real estimator over a
+real EuRoC sequence seeded from a **deliberately perturbed** extrinsic, and tracks
+the in-state estimate converging toward the dataset's true calibration. No SDK
+change — `backend().state()` exposes the `CalibState` block.
+
+```bash
+s10_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s10 --perturb-rot-deg 2 --perturb-trans-mm 30
+node docs-site/scripts/gen-calibration-figures.mjs build/s10   # → calib_convergence.svg
+```
+
+It writes `calibration.json` and renders the **convergence figure**: the
+extrinsic-rotation error (deg) and translation error (mm) over time, each inside
+the filter's own ±3σ band, decaying toward the reference (0 error). Seeded a couple
+of degrees / centimetres off, a healthy filter pulls the estimate back to truth
+while the band shrinks — the in-state remedy for the unmodeled-calibration
+over-confidence the probe quantifies. The per-frame error/σ read is unit-tested,
+and `calib_recovery` proves the operator converges on physically-consistent data.
+
 ## Interactive
 
 The covariance ellipsoid in the **[3-D viewer](/vio/scene3d/)** is this stage made
