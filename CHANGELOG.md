@@ -44,6 +44,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.63.0](https://github.com/branes-ai/cortex/compare/v0.62.0...v0.63.0) (2026-06-19)
+
+
+### Features
+
+* **tools:** s10 online-calibration inspector — real EuRoC → extrinsic convergence ([#419](https://github.com/branes-ai/cortex/issues/419)) ([e30e94b](https://github.com/branes-ai/cortex/commit/e30e94b1eeb78373165502b84f69083bf8e0de2d)), closes [#384](https://github.com/branes-ai/cortex/issues/384)
+
 ## [0.62.0](https://github.com/branes-ai/cortex/compare/v0.61.0...v0.62.0) (2026-06-18)
 
 
