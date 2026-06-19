@@ -63,6 +63,17 @@ distilled into the eleven staged contracts (S0–S10) of this section, each with
 `tools/` and a probe header under `sdk/eval/`. The consistency instrument itself
 (NEES/NIS/whiteness) is the always-on half.
 
+Alongside the synthetic probes (the CI gate, known ground truth), each implemented
+stage now also has a **real-data inspector** (epic <Issue id={371} />, complete):
+it re-runs the *shipped* stage operator on a real EuRoC sequence and renders the
+result across three tiers — image-domain SVG overlays (`gen-overlay.mjs`), the 3-D
+landmark/covariance viewer (`scene3d.js`), and filter-internal covariance / NIS /
+convergence figures (`gen-*-figures.mjs`). Built for every stage whose operator
+exists in the filter — **S0, S4** (image), **S5** (3-D), and **S6, S1, S2, S3, S9,
+S10** (filter-internal). The two not built, **S7** (persistent SLAM features) and
+**S8** (zero-velocity / ZUPT), are optional layers not present in the cortex filter
+and become buildable only once those subsystems are added.
+
 ## Tracking index
 
 | Area | Issue |
@@ -70,6 +81,7 @@ distilled into the eleven staged contracts (S0–S10) of this section, each with
 | Over-confidence (the umbrella) | <Issue id={212} /> |
 | Consistency instrument (NEES/NIS) | <Issue id={264} /> |
 | Diagnostic-instrumentation epic | <Issue id={261} /> |
+| Real-data stage inspectors (epic — complete) | <Issue id={371} /> |
 | Stream characterization (Allan → Q) | <Issue id={268} /> |
 | Dynamic init on real EuRoC | <Issue id={211} />, <Issue id={247} /> |
 
