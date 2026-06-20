@@ -255,8 +255,10 @@ int main(int argc, char** argv) {
 
     double frame_t = 0.0;
     std::uint64_t n_updates = 0, n_accepted = 0, n_gated = 0, n_psd_fail = 0;
-    double sum_nis_over_dof = 0.0;
+    double sum_nis_over_dof = 0.0;  // all valid updates (incl. χ²-gated outlier tail)
     std::size_t nis_count = 0;
+    double sum_nis_accepted = 0.0;  // accepted updates only — the honest per-update consistency
+    std::size_t nis_accepted_count = 0;
     bool dumped = false;
     json cov_dump;
 
@@ -281,6 +283,10 @@ int main(int argc, char** argv) {
         if (rec.valid && rec.dof > 0) {
             sum_nis_over_dof += rec.nis_over_dof;
             ++nis_count;
+            if (rec.accepted) {
+                sum_nis_accepted += rec.nis_over_dof;
+                ++nis_accepted_count;
+            }
         }
 
         // Dump one update's full covariance for the before/after heatmap.
@@ -341,13 +347,21 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Accepted-only NIS is the honest per-update consistency: the all-valid mean is
+    // dominated by the χ²-gated outlier tail (rejected, never applied), so it reads
+    // alarmingly high while the corrections the filter actually made are consistent.
+    // System-level over-confidence (#212) is a STATE-NEES-vs-ground-truth property and
+    // is measured end-to-end (vio_pipeline), not from these innovation residuals.
     const double mean_nod = nis_count ? sum_nis_over_dof / static_cast<double>(nis_count) : 0.0;
+    const double mean_nod_acc = nis_accepted_count ? sum_nis_accepted / static_cast<double>(nis_accepted_count) : 0.0;
     std::cout << "s6_inspect: processed " << processed << " frames";
     if (skipped)
         std::cout << " (" << skipped << " unreadable, skipped)";
     std::cout << "\n  updates:  " << n_updates << " (" << n_accepted << " accepted, " << n_gated << " χ²-gated)\n"
-              << "  NIS/dof:  mean " << mean_nod << " over " << nis_count << " valid updates"
-              << (mean_nod > 1.2 ? "  → over-confident (R under-modeled)" : "") << "\n";
+              << "  NIS/dof:  accepted " << mean_nod_acc << " over " << nis_accepted_count << " applied updates"
+              << (mean_nod_acc > 1.5 ? "  → applied updates over-confident" : "  → applied updates consistent")
+              << "\n            all-valid " << mean_nod << " over " << nis_count
+              << " (incl. gated outlier tail — not the consistency metric)\n";
     if (n_psd_fail)
         std::cout << "  WARNING:  " << n_psd_fail << " updates left P non-PSD\n";
     std::cout << "  records:  " << upd_path << "\n";

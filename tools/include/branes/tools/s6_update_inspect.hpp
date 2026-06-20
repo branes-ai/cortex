@@ -61,7 +61,8 @@ struct S6UpdateRecord {
     double cov_trace_before = 0.0;  ///< tr(P) before the update
     double cov_trace_after = 0.0;   ///< tr(P) after (== before if rejected)
     double cov_trace_ratio = 1.0;   ///< after / before (<1 ⇒ uncertainty shrank)
-    bool psd_after = true;          ///< P stayed positive-definite (Joseph guarantee)
+    bool psd_after = true;          ///< P stayed positive-SEMI-definite (Joseph guarantee; the
+                                    ///< MSCKF gauge + stochastic-clone copy make P legitimately rank-deficient)
     double residual_rms_px = 0.0;   ///< RMS reprojection residual at the landmark
     std::vector<S6ObsResidual> residuals;
 };
@@ -150,7 +151,13 @@ public:
         const DynMat cov_after = state_after.covariance();
         r.cov_trace_after = trace(cov_after);
         r.cov_trace_ratio = r.cov_trace_before > 0.0 ? r.cov_trace_after / r.cov_trace_before : 1.0;
-        r.psd_after = ms::is_positive_definite(cov_after);
+        // The MSCKF covariance is legitimately rank-deficient: the newest clone is a
+        // stochastic copy of the IMU pose (exact zero-covariance directions) and the
+        // 4-DoF gauge (yaw + global position) is unobservable. Those eigenvalues sit at
+        // 0 ± machine-eps, so a strict positive-DEFINITE (bare Cholesky) test reports
+        // false breakage on every partial-window update. Positive-SEMI-definite (small
+        // ridge) is the correct invariant the Joseph form actually guarantees.
+        r.psd_after = ms::is_positive_semidefinite(cov_after);
 
         // Per-observation reprojection residual at the triangulated landmark.
         branes::math::lie::detail::Vec<double, 3> p_f{};
