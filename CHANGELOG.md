@@ -44,6 +44,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.63.1](https://github.com/branes-ai/cortex/compare/v0.63.0...v0.63.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **tools:** correct s6_inspect PSD check and NIS headline ([#423](https://github.com/branes-ai/cortex/issues/423)) ([599143a](https://github.com/branes-ai/cortex/commit/599143a7293ab05da506f2b1d16f9d24e523ae77))
+
+
+### Documentation
+
+* **pipeline:** record the completed real-data inspector epic ([#371](https://github.com/branes-ai/cortex/issues/371)) ([#421](https://github.com/branes-ai/cortex/issues/421)) ([a01b3a2](https://github.com/branes-ai/cortex/commit/a01b3a2df2ab96fe96140581fda377ab7a2c85bd))
+
 ## [0.63.0](https://github.com/branes-ai/cortex/compare/v0.62.0...v0.63.0) (2026-06-19)
 
 
