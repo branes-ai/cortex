@@ -91,14 +91,15 @@ replays a stage and visualizes it.
 | `docs-site/scripts/gen-marginalization-figures.mjs` | before/after covariance heatmap with the dropped clone block outlined |
 | `tools/src/s10_inspect.cpp` | **S10 online-calibration inspector** (filter-internal tier) — perturbed extrinsic + `estimate_extrinsics` → in-state extrinsic converging vs the dataset reference |
 | `docs-site/scripts/gen-calibration-figures.mjs` | extrinsic rot/trans error-vs-time convergence inside the ±3σ band |
+| `tools/src/obs_inspect.cpp` | **observability / null-space-leak diagnostic** (#212/#337) — taps every real update, drives the shipped `projection_jacobians` over the live clone window → per-update yaw vs translation gauge leak ‖H·N‖ |
 
 EuRoC (~1.5 GB) is not vendored, so these are developer tools, **not CI gates**;
 the trace schema and the inspector logic are gated by `tests/tools/vio_trace*.cpp`,
 `tests/tools/s4_frontend_inspect.cpp`, `tests/tools/s0_sensor_model_inspect.cpp`,
 `tests/tools/s5_triangulation_inspect.cpp`, `tests/tools/s6_update_inspect.cpp`,
 `tests/tools/s1_init_inspect.cpp`, `tests/tools/s2_propagation_inspect.cpp`,
-`tests/tools/s3_augmentation_inspect.cpp`, `tests/tools/s9_marginalization_inspect.cpp`
-and `tests/tools/s10_calibration_inspect.cpp`.
+`tests/tools/s3_augmentation_inspect.cpp`, `tests/tools/s9_marginalization_inspect.cpp`,
+`tests/tools/s10_calibration_inspect.cpp` and `tests/tools/observability_inspect.cpp`.
 
 ### Trace tap (`asl_trace`)
 
@@ -333,6 +334,33 @@ translation error (mm) against the reference, plus the estimate's σ. The figure
 draws the error decaying toward the reference inside the filter's own (shrinking)
 ±3σ band. (On a physically-consistent EuRoC run the error converges, as the
 `calib_recovery` unit test proves on consistent data.)
+
+### Observability / null-space-leak diagnostic (`obs_inspect`)
+
+The real-data companion to the synthetic `observability_probe` (#337). A monocular
+VIO has a 4-DoF unobservable gauge — global translation (3) + rotation about
+gravity, *yaw* (1) — and a consistent filter must never gain information along it:
+the stacked camera Jacobian must annihilate the gauge, ‖H·N‖ ≈ 0. That holds only
+at a single consistent linearization; a standard EKF re-linearizes each clone at
+its own drifted estimate, so across a window the gauge leaks and the filter
+fabricates information → over-confidence. This tool **measures the leak on real
+data**: it taps every MSCKF update, drives the shipped `projection_jacobians` over
+the live clone window + triangulated feature, and reports two leaks per update —
+the *consistent* leak (H and N at the same estimate; the gauge-annihilation sanity
+check, must be ~machine-ε) and the *real* leak (H perturbed by the filter's own
+per-clone σ from P, N at the unperturbed gauge).
+
+```bash
+./build/tools/obs_inspect --dataset /path/to/V2_03_difficult/mav0 --out build/obs --max-frames 300
+```
+
+Output `observability.jsonl`: per-update window size, mean clone σ, and the
+consistent/real yaw & translation leaks. On V2_03 the consistent leak is ~1e-15
+(the shipped Jacobian is correct), the translation leak is **structurally 0**
+(the ±Hf cancellation protects it), and the **yaw leak is nonzero on 100% of
+updates and grows with the clone window's attitude drift** — localizing the #212
+over-confidence to the yaw gauge on real data. The fix is the right-invariant
+(R-IEKF) parameterization, whose gauge directions are estimate-independent.
 
 ## Layout
 
