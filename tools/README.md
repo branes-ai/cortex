@@ -355,12 +355,17 @@ per-clone σ from P, N at the unperturbed gauge).
 ```
 
 Output `observability.jsonl`: per-update window size, mean clone σ, and the
-consistent/real yaw & translation leaks. On V2_03 the consistent leak is ~1e-15
-(the shipped Jacobian is correct), the translation leak is **structurally 0**
-(the ±Hf cancellation protects it), and the **yaw leak is nonzero on 100% of
-updates and grows with the clone window's attitude drift** — localizing the #212
-over-confidence to the yaw gauge on real data. The fix is the right-invariant
-(R-IEKF) parameterization, whose gauge directions are estimate-independent.
+consistent/real/invariant yaw & translation leaks. On V2_03 the consistent leak is
+~1e-15 (the shipped Jacobian is correct), the translation leak is **structurally 0**
+(the ±Hf cancellation protects it), and the **standard yaw leak is nonzero on 100%
+of updates and grows with the clone window's attitude drift** — localizing the #212
+over-confidence to the yaw gauge on real data.
+
+It also measures the **right-invariant (R-IEKF) leak on the same perturbed clone
+windows** (driving the shipped `build_invariant_measurement`): because the
+invariant gauge directions are estimate-independent constants (ρ = e_k, φ = ĝ), the
+invariant yaw leak stays ~0 where the standard one rises — the real-data evidence
+that R-IEKF is observable-by-construction and is the fix the diagnosis points to.
 
 ## Layout
 

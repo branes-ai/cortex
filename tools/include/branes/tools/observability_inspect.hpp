@@ -29,6 +29,7 @@
 #include <branes/math/lie/so3.hpp>
 #include <branes/sdk/msckf/camera_updater.hpp>
 #include <branes/sdk/msckf/dense.hpp>
+#include <branes/sdk/msckf/invariant_update.hpp>
 #include <branes/sdk/msckf/state.hpp>
 
 #include <cmath>
@@ -103,6 +104,62 @@ template <math::Scalar T>
     const math::lie::detail::Vec<T, 3> dpf = gx * p_f;
     for (std::size_t k = 0; k < 3; ++k)
         N(6 * m + k, 3) = dpf[k];
+    return N;
+}
+
+/// The RIGHT-INVARIANT (R-IEKF) stacked Jacobian over the clone window, driving the
+/// SHIPPED build_invariant_measurement (invariant_update.hpp) — the world-frame
+/// twist parameterization ξ_c = (φ, ρ). Same column layout as obs_build_H so it
+/// composes with obs_build_N_invariant / obs_leak: [ per clone φ(3) ρ(3) | feature
+/// δp(3) ]. This is the candidate fix's Jacobian, measured on the same real geometry.
+template <math::Scalar T>
+[[nodiscard]] sdk::msckf::DynMat<T> obs_build_H_invariant(const std::vector<ObsPose<T>>& cl,
+                                                          const math::lie::detail::Vec<T, 3>& p_f,
+                                                          const sdk::msckf::CameraExtrinsics<T>& ext) {
+    const std::size_t m = cl.size();
+    std::vector<sdk::msckf::InvariantClone<T>> ic;
+    ic.reserve(m);
+    for (const auto& c : cl)
+        ic.push_back({c.R, c.p});
+    std::vector<sdk::msckf::InvariantObs<T>> obs;
+    obs.reserve(m);
+    for (std::size_t c = 0; c < m; ++c)
+        obs.push_back({c, 0, {}});  // xy only enters the residual, not H
+    const std::vector<sdk::msckf::InvariantCalib<T>> cal{{ext.R_imu_cam, ext.p_imu_cam}};
+    const auto M = sdk::msckf::build_invariant_measurement<T>(ic, obs, p_f, cal, /*estimate_calib=*/false);
+    sdk::msckf::DynMat<T> H(2 * m, 6 * m + 3);
+    if (!M.ok)
+        return H;               // degenerate window ⇒ zeros (leak 0)
+    const std::size_t n = M.n;  // 6*m (no calib columns)
+    for (std::size_t row = 0; row < 2 * m; ++row) {
+        for (std::size_t cc = 0; cc < 6 * m; ++cc)
+            H(row, cc) = M.H_x[row * n + cc];  // [φ_c ρ_c] per clone
+        for (std::size_t b = 0; b < 3; ++b)
+            H(row, 6 * m + b) = M.H_f[row * 3 + b];  // feature
+    }
+    return H;
+}
+
+/// The invariant 4-DoF gauge. Crucially the CLONE directions are CONSTANTS (no
+/// estimate): translation ρ = e_k, yaw φ = ĝ for EVERY clone — so a perturbed
+/// window cannot break the annihilation. Only the (marginalized) feature carries
+/// the estimate. Cols 0–2 translation, col 3 yaw.
+template <math::Scalar T>
+[[nodiscard]] sdk::msckf::DynMat<T> obs_build_N_invariant(const std::vector<ObsPose<T>>& cl,
+                                                          const math::lie::detail::Vec<T, 3>& p_f,
+                                                          const math::lie::detail::Vec<T, 3>& g) {
+    const std::size_t m = cl.size();
+    sdk::msckf::DynMat<T> N(6 * m + 3, 4);
+    for (std::size_t c = 0; c < m; ++c)
+        for (std::size_t k = 0; k < 3; ++k) {
+            N(6 * c + 3 + k, k) = T{1};  // translation: clone ρ = e_k (constant)
+            N(6 * c + k, 3) = g[k];      // yaw: clone φ = ĝ (constant, estimate-independent)
+        }
+    for (std::size_t k = 0; k < 3; ++k)
+        N(6 * m + k, k) = T{1};  // translation: feature δp
+    const math::lie::detail::Vec<T, 3> dpf = math::lie::detail::hat(g) * p_f;
+    for (std::size_t k = 0; k < 3; ++k)
+        N(6 * m + k, 3) = dpf[k];  // yaw: feature [g]× p_f
     return N;
 }
 
