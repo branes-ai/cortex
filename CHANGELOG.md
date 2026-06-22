@@ -44,6 +44,19 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.65.0](https://github.com/branes-ai/cortex/compare/v0.64.0...v0.65.0) (2026-06-22)
+
+
+### Features
+
+* **tools:** obs_inspect — R-IEKF vs standard yaw-leak comparison ([f05a5e7](https://github.com/branes-ai/cortex/commit/f05a5e762e457ec8d4ad317dc87608ecea155e95))
+* **tools:** obs_inspect R-IEKF vs standard yaw-leak comparison ([#426](https://github.com/branes-ai/cortex/issues/426)) ([f05a5e7](https://github.com/branes-ai/cortex/commit/f05a5e762e457ec8d4ad317dc87608ecea155e95))
+
+
+### Documentation
+
+* **pipeline:** record the yaw-leak localization and R-IEKF validation ([#427](https://github.com/branes-ai/cortex/issues/427)) ([e059079](https://github.com/branes-ai/cortex/commit/e0590794602321a358c065fcdf5d0b80b1f6e880))
+
 ## [0.64.0](https://github.com/branes-ai/cortex/compare/v0.63.1...v0.64.0) (2026-06-21)
 
 
