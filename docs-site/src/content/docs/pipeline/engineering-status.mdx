@@ -39,15 +39,15 @@ refuted FEJ experiment — is on
 
 | Candidate | Stage | Status |
 |---|---|---|
-| **Yaw null-space leak** (observability) | [S2](/pipeline/stages/s2-imu-propagation/)/[S6](/pipeline/stages/s6-msckf-update/) | **Leading, measured** — the `observability_probe` (#337) localizes the structural NEES over-confidence to the **yaw** gauge: the camera Jacobian annihilates the 4-DoF null space at one consistent linearization (‖H·N‖_yaw = 2e-16) but leaks (0.15 at σ=2 cm) at the evolving estimate. Matches the measured **attitude-NEES ≈ 993** on slow V1_01 (NIS a healthy 1.5) |
+| **Yaw null-space leak** (observability) | [S2](/pipeline/stages/s2-imu-propagation/)/[S6](/pipeline/stages/s6-msckf-update/) | **Confirmed on real data; R-IEKF validated as the fix.** The `observability_probe` (#337) localized this synthetically; `obs_inspect` (#212) now measures it **per-update on real EuRoC**, driving the *shipped* Jacobian over the live clone window. On both **V2_03** and **V1_01** the consistent leak is ~1e-15 (the production Jacobian is correct), **translation is structurally protected** (leak ≡ 0), and the **yaw leak is nonzero on 100% of updates and grows with the clone window's attitude drift** (σθ → 5.6°) — exactly the structural NEES over-confidence (attitude-NEES ≈ 993 on V1_01, NIS a healthy 1.5). At the filter's *own* claimed clone σ the standard yaw leak is mean 0.39 / max 619; the **right-invariant (R-IEKF) parameterization on the same perturbations leaks 2.3e-16** (estimate-independent gauge) — the real-data evidence that R-IEKF is the fix |
 | First-Estimates Jacobians (FEJ) | S2/S6 | **Both FEJ variants diverge — escalate to R-IEKF.** The earlier "refuted" was *unmeasured*; now gated by the #337 probe. Measurement-only FEJ regressed (MH_05 0.76→20.9 m); *full* FEJ (propagation-Φ + measurement) is **catastrophic** (V1_01 0.29→2281 m, attitude-NEES 993→134k; MH_05 →11 km) — a forever-propagated IMU first-estimate trajectory dead-reckons to garbage. Correct FEJ needs short-lived per-clone anchors, not a frozen IMU path. The robust cure is the **Right-Invariant EKF** (state-independent Jacobians → yaw observable-by-construction). `use_fej` default-off, never merged (parked `feat/fej-*`) |
 | Diagonal-only process noise `Q_d` | [S2](/pipeline/stages/s2-imu-propagation/) | **Cleared** — drops only 0.35% of Q; propagation-only NEES consistent at shipped Q |
 | **Unmodeled calibration uncertainty** (no `T_CI`/`t_d`/intrinsics states) | [S0](/pipeline/stages/s0-sensor-models/), [S10](/pipeline/stages/s10-online-calibration/) | **Spatial extrinsics cleared; time offset `t_d` is the remaining lever** — the blunt isotropic `R`-term (`calib_rot_sigma`) fixed V2_03 NIS (14.7 → 1.41) but regressed ATE/NEES, so `T_CI` was promoted to **online state** (`estimate_extrinsics`, FD-validated Jacobians, recovers a 2.9° error synthetically). On V2_03 it only *minorly* helps (NEES 140 → 110 at a 3° prior) and **leaves NIS unchanged (~14.6)** — the spatial extrinsics are accurate enough; the over-confidence is understated `R` + the unmodeled **`t_d`** (Tier-2). Both terms kept **default-off** |
 | Forward-backward outlier gate | [S4](/pipeline/stages/s4-frontend/) | **Gate added** (`fb_max_residual`), unit-tested, **default-off** pending end-to-end validation; RANSAC still future work |
 | Parallax gate on triangulation | [S5](/pipeline/stages/s5-triangulation/) | **Refuted as the fix** — gate (`min_parallax_deg`) validated end-to-end on V2_03: enabling it *regresses* ATE (0.27 → 1.99 m) and NEES (140 → 322) by starving the filter; the low-parallax admission is a real gap but not the driver. Kept **default-off** |
-| Isotropic initial covariance `P₀` | [S1](/pipeline/stages/s1-initialization/) | **Open** — measured: yaw seeded at 5.73° σ (same as leveled roll/pitch) despite being unobservable; first-frame over-confidence, resonates with attitude NEES |
-| Update algebra (null-space, Joseph, `S`) | [S6](/pipeline/stages/s6-msckf-update/) | **Cleared** — measured NIS/dof = 1.00 on a self-consistent `(P, R)` scene; null-space residual ~2e-16, Joseph PSD. The update faithfully propagates its inputs ⇒ over-confidence is **input-side** (`P⁻`/`R`), not the EKF math |
-| Measurement noise `R` understated (the lever) | [S6](/pipeline/stages/s6-msckf-update/) / [S10](/pipeline/stages/s10-online-calibration/) | **Leading** — S6 sweep shows NIS/dof rises 1 → 1.64 → 4.17 as true noise outgrows modeled `R`; the innovation-level image of the calibration `R×4` |
+| Isotropic initial covariance `P₀` / init scale | [S1](/pipeline/stages/s1-initialization/) | **Open as over-confidence seed; ruled out as the e2e lever.** Measured: yaw seeded at 5.73° σ (same as leveled roll/pitch) despite being unobservable. Also found: the dynamic-init path can misfire on a near-static start (MH_02: 93% scale error, isotropic P₀) while the static path gives a structured seed. But suppressing the bad dynamic init **does not move e2e accuracy** (MH_02 ATE 0.79 → 0.79 m, NIS 1.20 → 1.12; V2_03 unchanged) — the filter washes the init error out within seconds, so init is *not* the over-confidence driver |
+| Update algebra (null-space, Joseph, `S`) | [S6](/pipeline/stages/s6-msckf-update/) | **Cleared — synthetically and on real data.** Measured NIS/dof = 1.00 on a self-consistent `(P, R)` scene; null-space residual ~2e-16, Joseph PSD. `obs_inspect`'s consistent leak (~1e-15 on real V2_03/V1_01) confirms the shipped Jacobian annihilates the gauge on real geometry. (The S6 inspector's earlier "18% non-PSD" was an inspector-predicate artifact — `is_positive_definite` rejecting the legitimately rank-deficient gauge/clone-copy directions; fixed to `is_positive_semidefinite`.) Over-confidence is **input-side** (`P⁻`/`R`/parameterization), not the EKF math |
+| Measurement noise `R` understated | [S6](/pipeline/stages/s6-msckf-update/) / [S10](/pipeline/stages/s10-online-calibration/) | **Innovation-level only — not the state-level driver.** The S6 sweep shows NIS/dof rises 1 → 1.64 → 4.17 as true noise outgrows modeled `R`. But on real EuRoC the *accepted-update* NIS/dof is healthy (**0.28** on MH_02; the χ²-gate removes the outlier tail that inflated the all-valid mean to 4.0). The #212 over-confidence is a **state-NEES** property (measured end-to-end), invisible to innovation NIS — pointing back at the yaw-gauge leak, not a blunt `R` deficit |
 
 <Aside type="tip" title="What 'refuted' means here">
   A candidate is only crossed off when a *measurement* rules it out. FEJ was a
@@ -74,6 +74,13 @@ S10** (filter-internal). The two not built, **S7** (persistent SLAM features) an
 **S8** (zero-velocity / ZUPT), are optional layers not present in the cortex filter
 and become buildable only once those subsystems are added.
 
+A cross-stage diagnostic, **`obs_inspect`** (#212/#337), taps every real update and
+drives the shipped measurement Jacobian over the live clone window to measure the
+per-direction null-space leak ‖H·N‖ — the real-data instrument that localized the
+over-confidence to the **yaw** gauge (see the candidate table) and validated the
+**R-IEKF** parameterization as the fix (yaw leak 0.39 → 2.3e-16 on the same real
+V2_03 clone-window perturbations).
+
 ## Tracking index
 
 | Area | Issue |
@@ -82,6 +89,7 @@ and become buildable only once those subsystems are added.
 | Consistency instrument (NEES/NIS) | <Issue id={264} /> |
 | Diagnostic-instrumentation epic | <Issue id={261} /> |
 | Real-data stage inspectors (epic — complete) | <Issue id={371} /> |
+| Right-Invariant EKF (the yaw-leak fix) | <Issue id={347} />, <Issue id={348} /> |
 | Stream characterization (Allan → Q) | <Issue id={268} /> |
 | Dynamic init on real EuRoC | <Issue id={211} />, <Issue id={247} /> |
 
