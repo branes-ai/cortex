@@ -98,3 +98,34 @@ TEST_CASE("observability inspector: perturbing the window leaks yaw but not tran
     REQUIRE(yaw_small > 1e-6);
     REQUIRE(yaw_big > yaw_small);
 }
+
+TEST_CASE("observability inspector: the R-IEKF parameterization does not leak yaw under perturbation",
+          "[tools][obs_inspect]") {
+    const ms::CameraExtrinsics<T> ext{};  // identity extrinsic
+    const Vec3 g{{0.0, 0.0, 1.0}};
+    const Vec3 p_f{{0.2, -0.1, 6.0}};
+    const auto truth = window(5);
+    const auto Ninv = bt::obs_build_N_invariant<T>(truth, p_f, g);
+
+    // Consistent point: the shipped invariant Jacobian annihilates the invariant gauge.
+    const auto [tr0, yaw0] = bt::obs_leak<T>(bt::obs_build_H_invariant<T>(truth, p_f, ext), Ninv);
+    REQUIRE_THAT(tr0, WithinAbs(0.0, 1e-9));
+    REQUIRE_THAT(yaw0, WithinAbs(0.0, 1e-9));
+
+    // Same clone-window perturbation that makes the STANDARD yaw leak (previous
+    // test). The invariant gauge directions are constants (rho = e_k, phi = g), so
+    // the leak must STAY ~0 — yaw observable by construction. This is the fix.
+    std::mt19937_64 rng(0x0B5E11ull);
+    auto e = truth;
+    for (auto& c : e) {
+        c.R =
+            c.R *
+            SO3::exp(Vec3{{0.05 * bt::obs_urand<T>(rng), 0.05 * bt::obs_urand<T>(rng), 0.05 * bt::obs_urand<T>(rng)}});
+        c.p = Vec3{{c.p[0] + 0.05 * bt::obs_urand<T>(rng),
+                    c.p[1] + 0.05 * bt::obs_urand<T>(rng),
+                    c.p[2] + 0.05 * bt::obs_urand<T>(rng)}};
+    }
+    const auto [tr_p, yaw_p] = bt::obs_leak<T>(bt::obs_build_H_invariant<T>(e, p_f, ext), Ninv);
+    REQUIRE_THAT(tr_p, WithinAbs(0.0, 1e-9));
+    REQUIRE_THAT(yaw_p, WithinAbs(0.0, 1e-9));  // flat — unlike the standard filter
+}

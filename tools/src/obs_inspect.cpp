@@ -28,6 +28,11 @@
 //     uncertainty the filter actually reports on this window: given that
 //     uncertainty, how much yaw/translation information does the shipped H
 //     spuriously inject?
+//   * R-IEKF leak -- the SAME perturbed windows run through the shipped
+//     right-invariant Jacobian (build_invariant_measurement) + the invariant gauge,
+//     whose clone directions are estimate-independent constants. On V2_03 this is
+//     ~1e-16 where the standard leak is ~0.4 -- the candidate fix, validated on
+//     real data.
 //
 // Output: per-update JSONL (window size, mean clone sigma, consistent/real yaw &
 // translation leak, NIS) + a summary localizing the leak to yaw vs translation on
@@ -203,6 +208,7 @@ int main(int argc, char** argv) {
     std::uint64_t n_updates = 0, n_measured = 0;
     double sum_cons_yaw = 0.0, sum_cons_tr = 0.0;
     double sum_real_yaw = 0.0, sum_real_tr = 0.0, max_real_yaw = 0.0;
+    double sum_inv_yaw = 0.0, max_inv_yaw = 0.0;  // R-IEKF leak at the SAME perturbations
 
     est.backend().set_update_observer([&](const ms::State<T>& s,
                                           const ms::FeatureTrack<T>& track,
@@ -242,8 +248,12 @@ int main(int argc, char** argv) {
         const auto [cons_tr, cons_yaw] = bt::obs_leak<T>(bt::obs_build_H<T>(updater, cl, p_f), N);
 
         // (2) Real leak: perturb the clone window by the filter's OWN per-clone
-        // sigma, N at the unperturbed gauge, averaged over seeded draws.
-        double dyaw = 0.0, dtr = 0.0;
+        // sigma, N at the unperturbed gauge, averaged over seeded draws. For each
+        // perturbed window also measure the RIGHT-INVARIANT (R-IEKF) leak — the
+        // candidate fix — on the SAME geometry: its gauge directions are constants,
+        // so it should stay ~0 where the standard one leaks.
+        const ms::DynMat<T> Ninv = bt::obs_build_N_invariant<T>(cl, p_f, g);
+        double dyaw = 0.0, dtr = 0.0, dyaw_inv = 0.0;
         std::mt19937_64 rng(0x0B5E11ull ^ (n_updates * 0x9E3779B97F4A7C15ull));
         for (int d = 0; d < args.draws; ++d) {
             std::vector<ObsPose<T>> pe = cl;
@@ -258,9 +268,12 @@ int main(int argc, char** argv) {
             const auto [tr, yaw] = bt::obs_leak<T>(bt::obs_build_H<T>(updater, pe, p_f), N);
             dyaw += static_cast<double>(yaw);
             dtr += static_cast<double>(tr);
+            const auto inv = bt::obs_leak<T>(bt::obs_build_H_invariant<T>(pe, p_f, cal.extrinsics), Ninv);
+            dyaw_inv += static_cast<double>(inv.second);
         }
         dyaw /= args.draws;
         dtr /= args.draws;
+        dyaw_inv /= args.draws;
 
         T mean_sth = T{0}, mean_sp = T{0};
         for (std::size_t i = 0; i < m; ++i) {
@@ -275,8 +288,11 @@ int main(int argc, char** argv) {
         sum_cons_tr += static_cast<double>(cons_tr);
         sum_real_yaw += dyaw;
         sum_real_tr += dtr;
+        sum_inv_yaw += dyaw_inv;
         if (dyaw > max_real_yaw)
             max_real_yaw = dyaw;
+        if (dyaw_inv > max_inv_yaw)
+            max_inv_yaw = dyaw_inv;
 
         json j{{"index", n_updates - 1},
                {"t", frame_t},
@@ -288,7 +304,8 @@ int main(int argc, char** argv) {
                {"leak_yaw_consistent", static_cast<double>(cons_yaw)},
                {"leak_trans_consistent", static_cast<double>(cons_tr)},
                {"leak_yaw_real", dyaw},
-               {"leak_trans_real", dtr}};
+               {"leak_trans_real", dtr},
+               {"leak_yaw_invariant", dyaw_inv}};
         os << j.dump() << '\n';
     });
 
@@ -317,16 +334,18 @@ int main(int argc, char** argv) {
     os.flush();
 
     const double nm = n_measured ? static_cast<double>(n_measured) : 1.0;
-    const double ry = sum_real_yaw / nm, rt = sum_real_tr / nm;
+    const double ry = sum_real_yaw / nm, rt = sum_real_tr / nm, iy = sum_inv_yaw / nm;
     std::cout << "obs_inspect: processed " << processed << " frames, " << n_updates << " updates (" << n_measured
               << " measured)\n"
-              << "  consistent leak (sanity, want ~0):  yaw " << sum_cons_yaw / nm << "  trans " << sum_cons_tr / nm
+              << "  consistent leak (sanity, want ~0):     yaw " << sum_cons_yaw / nm << "  trans " << sum_cons_tr / nm
               << "\n"
-              << "  real leak @ filter's own clone sigma:  yaw " << ry << "  trans " << rt << "\n"
-              << "  max real yaw leak: " << max_real_yaw << "\n"
+              << "  STANDARD leak @ filter's own clone sigma:  yaw " << ry << "  trans " << rt << "  (max yaw "
+              << max_real_yaw << ")\n"
+              << "  R-IEKF leak @ the SAME perturbations:      yaw " << iy << "  (max yaw " << max_inv_yaw << ")\n"
               << "  -> "
-              << (ry > 4.0 * rt + 1e-12 ? "YAW dominates: over-confidence enters the yaw gauge"
-                                        : "no clear yaw dominance")
+              << (ry > 4.0 * rt + 1e-12 ? "YAW dominates the standard filter; " : "no clear standard yaw dominance; ")
+              << (iy < ry / 10.0 + 1e-12 ? "R-IEKF flattens it (observable by construction)"
+                                         : "R-IEKF does NOT flatten it")
               << "\n  records: " << args.out << "/observability.jsonl\n";
     return 0;
 }
