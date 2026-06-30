@@ -56,15 +56,14 @@ TEST_CASE("invariant adapter: bootstraps from a static IMU window", "[tools][inv
     a.initialize(cfg);
     REQUIRE_FALSE(a.initialized());
 
-    // A handful of samples is far short of the bootstrap window: init must NOT
-    // fire early (a regression that bootstraps on too little data would be caught
-    // here, not just by the final positive check below).
-    for (int i = 0; i < 10; ++i)
+    // Pin the bootstrap boundary exactly: one sample short of the window
+    // (kInitSamples = 150 in the adapter) it must still be down, and it must come
+    // up as soon as the window fills. Asserting at the off-by-one catches both an
+    // early bootstrap and a silently-lowered threshold.
+    for (int i = 0; i < 149; ++i)
         a.process_imu(stationary_sample(0.005 * i));
     REQUIRE_FALSE(a.initialized());
-
-    // Once a full static window accumulates, init fires.
-    for (int i = 10; i < 200; ++i)
+    for (int i = 149; i < 200; ++i)
         a.process_imu(stationary_sample(0.005 * i));
     REQUIRE(a.initialized());
 
