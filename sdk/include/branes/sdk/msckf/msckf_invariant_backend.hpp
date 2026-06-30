@@ -25,6 +25,7 @@
 #include <branes/sdk/msckf/invariant_update.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -238,7 +239,20 @@ public:
                 return false;
         }
         const std::vector<T> R_diag(proj.rows, r2);
+        // A filter must never apply a non-finite correction, nor let a pathological
+        // update poison the covariance. The χ² gate (cholesky) rejects a non-PD S,
+        // but on real data a barely-conditioned sqrt-form update can still emit a
+        // non-finite δx; snapshot, and on any non-finite component restore the
+        // covariance and reject the track (it never happened). Keeps the estimator
+        // alive on a degenerate measurement instead of aborting in SO3::normalize.
+        const Cov cov_snapshot = cov_;
         const std::vector<T> dx = cov_.update(H, std::span<const T>{proj.r}, std::span<const T>{R_diag});
+        for (const T v : dx) {
+            if (!std::isfinite(static_cast<double>(v))) {
+                cov_ = cov_snapshot;
+                return false;
+            }
+        }
 
         retract(dx);
         return true;
