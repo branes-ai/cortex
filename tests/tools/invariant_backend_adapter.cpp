@@ -56,8 +56,15 @@ TEST_CASE("invariant adapter: bootstraps from a static IMU window", "[tools][inv
     a.initialize(cfg);
     REQUIRE_FALSE(a.initialized());
 
-    // Feed a static window; init should fire once enough samples accumulate.
-    for (int i = 0; i < 200; ++i)
+    // A handful of samples is far short of the bootstrap window: init must NOT
+    // fire early (a regression that bootstraps on too little data would be caught
+    // here, not just by the final positive check below).
+    for (int i = 0; i < 10; ++i)
+        a.process_imu(stationary_sample(0.005 * i));
+    REQUIRE_FALSE(a.initialized());
+
+    // Once a full static window accumulates, init fires.
+    for (int i = 10; i < 200; ++i)
         a.process_imu(stationary_sample(0.005 * i));
     REQUIRE(a.initialized());
 
@@ -91,11 +98,14 @@ TEST_CASE("invariant adapter: satisfies the VioEstimator backend contract", "[to
         o.v = 240.0;
         obs.push_back(o);
     }
+    const auto before_t = a.current_state().timestamp_s;
     a.process_camera(1.0, std::span<const bs::FrontendObservation<T>>{obs});
 
-    // covariance() is a square PSD-sized matrix; current_state() stamp advances.
+    // covariance() is a square PSD-sized matrix; and process_camera must have
+    // advanced the state stamp (propagation to the frame time), not merely left
+    // the positive bootstrap stamp in place.
     const auto P = a.covariance();
     REQUIRE(P.rows == P.cols);
     REQUIRE(P.rows >= 15);
-    REQUIRE(a.current_state().timestamp_s > 0.0);
+    REQUIRE(a.current_state().timestamp_s > before_t);
 }

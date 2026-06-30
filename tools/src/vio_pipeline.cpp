@@ -63,6 +63,32 @@ using branes::sdk::ImuMeasurement;
 using branes::sdk::MsckfBackend;
 using branes::sdk::VioConfig;
 
+// EuRoC cam0 calibration (pinhole-radtan intrinsics + cam↔IMU extrinsic). Shared
+// by the standard (MSCKF) and right-invariant (R-IEKF) EuRoC runs so the two
+// backends are always driven from byte-identical calibration — any drift between
+// the paths would silently invalidate the MSCKF-vs-R-IEKF comparison.
+struct EurocCam0 {
+    branes::math::cameras::PinholeRadtanCamera<T> intrinsics;
+    branes::math::lie::SO3<T> R_imu_cam;
+    Vec3 p_imu_cam;
+};
+inline EurocCam0 euroc_cam0() {
+    branes::math::lie::detail::Mat<T, 3, 3> R{};
+    R(0, 0) = 0.0148655429818;
+    R(0, 1) = -0.999880929698;
+    R(0, 2) = 0.00414029679422;
+    R(1, 0) = 0.999557249008;
+    R(1, 1) = 0.0149672133247;
+    R(1, 2) = 0.025715529948;
+    R(2, 0) = -0.0257744366974;
+    R(2, 1) = 0.00375618835797;
+    R(2, 2) = 0.999660727178;
+    return EurocCam0{branes::math::cameras::PinholeRadtanCamera<T>(
+                         458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05),
+                     branes::sdk::sfm::so3_from_matrix<T>(R),
+                     Vec3{{-0.0216401454975, -0.064676986768, 0.00981073058949}}};
+}
+
 struct Args {
     std::string out;
     std::string source = "synthetic";
@@ -151,6 +177,8 @@ std::string mat3_json(const Mat& P, std::size_t off) {
 template <class Mat>
 double pos_sigma(const Mat& P, std::size_t off) {
     const double tr = P(off, off) + P(off + 1, off + 1) + P(off + 2, off + 2);
+    if (!std::isfinite(tr))
+        return tr;  // surface a poisoned covariance — this harness exists to expose it, not hide it as 0
     return std::sqrt((tr > 0.0 ? tr : 0.0) / 3.0);
 }
 std::string nums_json(const std::vector<T>& xs) {
@@ -462,7 +490,6 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
 bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofstream* stream, std::ofstream* frames) {
     using Backend = MsckfBackend<T>;
     using Estimator = branes::sdk::VioEstimator<T, Backend>;
-    using Mat3 = branes::math::lie::detail::Mat<T, 3, 3>;
 
     std::vector<ImuMeasurement<T>> imu;
     std::vector<euroc::ImageEntry> images;
@@ -482,21 +509,11 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
         return false;
     }
 
+    const auto cam0 = euroc_cam0();
     typename Backend::CameraCalibration cal;
-    cal.intrinsics = typename Backend::Camera(
-        458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
-    Mat3 R{};
-    R(0, 0) = 0.0148655429818;
-    R(0, 1) = -0.999880929698;
-    R(0, 2) = 0.00414029679422;
-    R(1, 0) = 0.999557249008;
-    R(1, 1) = 0.0149672133247;
-    R(1, 2) = 0.025715529948;
-    R(2, 0) = -0.0257744366974;
-    R(2, 1) = 0.00375618835797;
-    R(2, 2) = 0.999660727178;
-    cal.extrinsics.R_imu_cam = branes::sdk::sfm::so3_from_matrix<T>(R);
-    cal.extrinsics.p_imu_cam = Vec3{{-0.0216401454975, -0.064676986768, 0.00981073058949}};
+    cal.intrinsics = cam0.intrinsics;
+    cal.extrinsics.R_imu_cam = cam0.R_imu_cam;
+    cal.extrinsics.p_imu_cam = cam0.p_imu_cam;
 
     Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
     est.configure(cfg);
@@ -555,7 +572,12 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
     out.nis_normalized = safe_nis(est.backend().nis_consistency());
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
-    out.ate_rms_m = assoc.estimated.empty() ? 0 : ev::ate_rmse<T>(assoc.estimated, assoc.reference);
+    if (assoc.estimated.empty()) {
+        std::cerr << "  EuRoC pose association produced no matches (missing GT, timestamp drift, or no tracked "
+                     "trajectory); cannot compute ATE.\n";
+        return false;  // an empty association is a failure, not a perfect (ATE 0) run
+    }
+    out.ate_rms_m = ev::ate_rmse<T>(assoc.estimated, assoc.reference);
     return true;
 }
 
@@ -567,7 +589,6 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
 bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out, std::ofstream* stream) {
     using Adapter = branes::tools::InvariantBackendAdapter<T>;
     using Estimator = branes::sdk::VioEstimator<T, Adapter>;
-    using Mat3 = branes::math::lie::detail::Mat<T, 3, 3>;
     constexpr std::size_t kInvPos = 6;  // invariant nav error-state: δθ(0) δv(3) δp(6)
 
     std::vector<ImuMeasurement<T>> imu;
@@ -586,22 +607,8 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         return false;
     }
 
-    typename Adapter::Camera intr(
-        458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05);
-    Mat3 R{};
-    R(0, 0) = 0.0148655429818;
-    R(0, 1) = -0.999880929698;
-    R(0, 2) = 0.00414029679422;
-    R(1, 0) = 0.999557249008;
-    R(1, 1) = 0.0149672133247;
-    R(1, 2) = 0.025715529948;
-    R(2, 0) = -0.0257744366974;
-    R(2, 1) = 0.00375618835797;
-    R(2, 2) = 0.999660727178;
-    const auto R_imu_cam = branes::sdk::sfm::so3_from_matrix<T>(R);
-    const Vec3 p_imu_cam{{-0.0216401454975, -0.064676986768, 0.00981073058949}};
-
-    Estimator est(Adapter(intr, R_imu_cam, p_imu_cam));
+    const auto cam0 = euroc_cam0();
+    Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam));
     est.configure(cfg);
     est.activate();
 
@@ -643,7 +650,12 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
-    out.ate_rms_m = assoc.estimated.empty() ? 0 : ev::ate_rmse<T>(assoc.estimated, assoc.reference);
+    if (assoc.estimated.empty()) {
+        std::cerr << "  EuRoC pose association produced no matches (missing GT, timestamp drift, or no tracked "
+                     "trajectory); cannot compute ATE.\n";
+        return false;  // an empty association is a failure, not a perfect (ATE 0) run
+    }
+    out.ate_rms_m = ev::ate_rmse<T>(assoc.estimated, assoc.reference);
     return true;
 }
 
@@ -695,8 +707,10 @@ int main(int argc, char** argv) {
         const char* backend = args.invariant ? "euroc [R-IEKF]" : "euroc [MSCKF]";
         std::cout << "  source          : " << backend << "  " << args.dataset << "\n  frames tracked  : " << r.frames
                   << "\n  mean features   : " << r.mean_features << "\n  ATE (Horn)      : " << r.ate_rms_m
-                  << " m\n  mean pos sigma  : " << r.mean_pos_sigma_m << " m  (over-confidence: ATE/sigma = "
-                  << (r.mean_pos_sigma_m > 0 ? r.ate_rms_m / r.mean_pos_sigma_m : 0.0) << ")";
+                  << " m\n  mean pos sigma  : " << r.mean_pos_sigma_m
+                  << " m  (over-confidence: ATE/sigma = "
+                  // Divide whenever σ is usable; let a non-finite σ propagate (don't mask a poisoned covariance as 0).
+                  << (r.mean_pos_sigma_m != 0.0 ? r.ate_rms_m / r.mean_pos_sigma_m : 0.0) << ")";
         if (!args.invariant)
             std::cout << "\n  NIS (normalized): " << r.nis_normalized;
         std::cout << "\n";
