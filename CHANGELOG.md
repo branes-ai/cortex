@@ -14,6 +14,18 @@ generates entries automatically from Conventional Commits on `main`.
 
 ## Milestones
 
+- **2026-06-30 — End-to-end R-IEKF EuRoC harness; measured, and it underperforms
+  (main, post-v0.65.0).** Built the harness that drives the R-IEKF backend through the
+  validated `VioEstimator` front end on real EuRoC (adapter + `--invariant` path +
+  shared `euroc_cam0()` calibration + non-finite-δx update guard + gate test), so it
+  is directly comparable with the standard MSCKF. R-IEKF now runs **stably** (Joseph
+  `FullCovariance`; the square-root form copied from the synthetic path diverged to
+  6.24e+40 m) but **underperforms** the body-frame filter — ATE 1.3 m vs 0.27 m,
+  position ATE/σ 17–19 vs 2.1. The load-bearing finding: **position-norm ATE/σ does
+  not test the yaw-gauge thesis** (standard MSCKF is already ~calibrated at 2.1 on
+  position because the leak is rotational) — a gauge-anchored attitude-NEES is the
+  metric that can see the fix (the #365 follow-up). 1 PR (#429). See
+  [`docs/sessions/2026-06-30-riekf-euroc-harness.md`](docs/sessions/2026-06-30-riekf-euroc-harness.md).
 - **2026-06-13→15 — R-IEKF backend built; FEJ refuted; system verdict localized a
   bug (→ v0.50.3).** Built the Right-Invariant EKF backend end to end — `SE2(3)`
   state, invariant propagation, invariant camera update, `MsckfInvariantBackend` —
