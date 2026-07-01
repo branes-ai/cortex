@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.66.1](https://github.com/branes-ai/cortex/compare/v0.66.0...v0.66.1) (2026-07-01)
+
+
+### Documentation
+
+* **sessions:** record the end-to-end R-IEKF EuRoC harness day ([#431](https://github.com/branes-ai/cortex/issues/431)) ([2ba9a30](https://github.com/branes-ai/cortex/commit/2ba9a30f5c04d30f8444ebadd525757d22943025))
+
 ## [0.66.0](https://github.com/branes-ai/cortex/compare/v0.65.0...v0.66.0) (2026-07-01)
 
 
