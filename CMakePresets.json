@@ -32,6 +32,16 @@
       }
     },
     {
+      "name": "sitl-clang-debug",
+      "inherits": "sitl-debug",
+      "displayName": "SITL Debug, Clang (host x86)",
+      "description": "Host SITL debug build with Clang instead of the default GCC. The second compiler for dual-compiler validation; the CI clang job runs this preset.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
       "name": "kpu-cross",
       "inherits": "base",
       "displayName": "KPU Cross-Compile (aarch64)",
@@ -105,6 +115,7 @@
   "buildPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "displayName": "SITL Debug" },
     { "name": "sitl-release", "configurePreset": "sitl-release", "displayName": "SITL Release" },
+    { "name": "sitl-clang-debug", "configurePreset": "sitl-clang-debug", "displayName": "SITL Debug (Clang)" },
     { "name": "kpu-cross",    "configurePreset": "kpu-cross",    "displayName": "KPU Cross" },
     { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" },
     { "name": "msvc-debug",   "configurePreset": "msvc", "displayName": "MSVC Debug",   "configuration": "Debug" },
@@ -115,6 +126,7 @@
   "testPresets": [
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
     { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
+    { "name": "sitl-clang-debug", "configurePreset": "sitl-clang-debug", "output": { "outputOnFailure": true } },
     { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
     { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } },
     { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true } },
