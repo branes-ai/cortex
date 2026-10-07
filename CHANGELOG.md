@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.66.2](https://github.com/branes-ai/cortex/compare/v0.66.1...v0.66.2) (2026-10-07)
+
+
+### Build System
+
+* require cmake 4.0 as the minimum version ([#434](https://github.com/branes-ai/cortex/issues/434)) ([eefcabf](https://github.com/branes-ai/cortex/commit/eefcabf3460093e58ec37e97b3cab8401d655be3))
+
+
+### Documentation
+
+* flight controller analysis ([40d3453](https://github.com/branes-ai/cortex/commit/40d34539e86bb13ed10650747a27ba6e40816bec))
+
 ## [0.66.1](https://github.com/branes-ai/cortex/compare/v0.66.0...v0.66.1) (2026-07-01)
 
 
