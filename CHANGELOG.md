@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.66.4](https://github.com/branes-ai/cortex/compare/v0.66.3...v0.66.4) (2026-10-07)
+
+
+### Continuous Integration
+
+* harden runners against a stalled ubuntu mirror ([#443](https://github.com/branes-ai/cortex/issues/443)) ([14524a4](https://github.com/branes-ai/cortex/commit/14524a4bdbe57d7f08cdc452ad8ee81a087eaf95))
+
+
+### Documentation
+
+* complete epic e11 docs, adrs, contributing, and hello_vio ([#441](https://github.com/branes-ai/cortex/issues/441)) ([d788b23](https://github.com/branes-ai/cortex/commit/d788b2351ca5cf181bc090547f28e16e229f94b3))
+
 ## [0.66.3](https://github.com/branes-ai/cortex/compare/v0.66.2...v0.66.3) (2026-10-07)
 
 
