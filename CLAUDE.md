@@ -67,6 +67,8 @@ This has three consequences for any code in this repo:
 
 Use CMake `FetchContent` for C++ third-party deps (Zenoh C++, yaml-cpp, MTL5, Universal). Do *not* introduce vcpkg/Conan — the cross-compilation story for the custom SoC is built around having every dependency under the master CMake toolchain. The one exception is MLIR/LLVM: those must be installed as pre-built binaries, never `FetchContent`'d, because building LLVM from source destroys developer iteration time.
 
+MTL5 and Universal (header-only Stillwater sister projects) follow the pattern of the Stillwater mixed-precision repos: `find_package` first, else a header-only `FetchContent` (`SOURCE_SUBDIR _header_only_no_build`, so their own CMake projects are never added). Both paths expose `MTL5::mtl5` and `universal::universal`; link those, not bare names. Versions are pinned in `cmake/deps.cmake` (`BRANES_MTL5_VERSION`, `BRANES_UNIVERSAL_VERSION`). To co-develop against local checkouts: `-DFETCHCONTENT_SOURCE_DIR_MTL5=../mtl5 -DFETCHCONTENT_SOURCE_DIR_UNIVERSAL=../universal`. Their include dirs are deliberately not `SYSTEM` until stillwater-sc/universal#1265 closes.
+
 If a CI compile-time problem appears, the answer is `sccache`, not a package manager.
 
 ## Conventions worth knowing

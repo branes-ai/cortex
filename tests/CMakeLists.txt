@@ -23,8 +23,8 @@ add_library(branes::test_support ALIAS branes_test_support)
 # so `ctest -R math_type_smoke` (the issue #25 acceptance) selects it.
 file(GLOB MATH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/math/*.cpp)
 list(REMOVE_ITEM MATH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/math/arithmetic_types.cpp)
-compile_all(FOLDER "Tests/math" LIBS branes::math universal SOURCES ${MATH_SRC})
-compile_all(FOLDER "Tests/math" LIBS branes::math universal
+compile_all(FOLDER "Tests/math" LIBS branes::math universal::universal SOURCES ${MATH_SRC})
+compile_all(FOLDER "Tests/math" LIBS branes::math universal::universal
     TEST_PREFIX "math_type_smoke."
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/math/arithmetic_types.cpp)
 
@@ -63,7 +63,7 @@ endif()
 # party library; the bridge test links the Corrosion-generated cxx glue plus
 # the Rust staticlib), so they are listed explicitly rather than globbed.
 compile_all(FOLDER "Tests/integration"
-    LIBS MTL5::mtl5 universal branes::stb_image yaml-cpp::yaml-cpp
+    LIBS MTL5::mtl5 universal::universal branes::stb_image yaml-cpp::yaml-cpp
     SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/integration/deps_smoke.cpp)
 compile_all(FOLDER "Tests/integration"
     LIBS cortex_core_cxx cortex_core

@@ -13,27 +13,102 @@ include(FetchContent)
 # explicitly when they want new code.
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 
-# ── stillwater-sc/mtl5 — header-only matrix template library ────────
-set(MTL5_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(MTL5_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    mtl5
-    GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
-    GIT_TAG        v5.2.1
-    GIT_SHALLOW    TRUE
-)
+# ── stillwater-sc/mtl5 + stillwater-sc/universal ────────────────────
+# Both are header-only Stillwater sister projects, integrated with the
+# pattern from the Stillwater mixed-precision repos (mp-iterative, mp-blas):
+#
+#   1. find_package(<dep> CONFIG QUIET) first — an installed copy wins.
+#   2. Otherwise a header-only FetchContent: SOURCE_SUBDIR names a directory
+#      with no CMakeLists.txt, so FetchContent_MakeAvailable populates the
+#      sources but never add_subdirectory()s the dependency. Its own targets,
+#      tests, and configure logic stay out of our build, and no deprecated
+#      FetchContent_Populate (CMP0169) is needed.
+#   3. Either path yields the same namespaced targets, MTL5::mtl5 and
+#      universal::universal, so consumers never care which one ran.
+#
+# Co-develop against local sister checkouts (no network) with:
+#   -DFETCHCONTENT_SOURCE_DIR_MTL5=/path/to/mtl5
+#   -DFETCHCONTENT_SOURCE_DIR_UNIVERSAL=/path/to/universal
+#
+# Third-party warnings: the include dirs are plain INTERFACE, not SYSTEM, on
+# purpose. Universal and MTL5 are sister projects we can fix, and keeping
+# their warnings visible has surfaced real bugs (stillwater-sc/universal#1259,
+# #1262). Switch to SYSTEM INTERFACE once the warning-clean epic
+# stillwater-sc/universal#1265 closes.
+set(BRANES_MTL5_VERSION      5.12.0)
+set(BRANES_UNIVERSAL_VERSION 5.1.0)
 
-# ── stillwater-sc/universal — number systems (posits, cfloat, …) ────
-# Universal's CMakeLists.txt uses ${CMAKE_SOURCE_DIR} (which under
-# FetchContent resolves to the parent project, not Universal). Skipping
-# its add_subdirectory and exposing it as a manual INTERFACE target —
-# Universal is header-only, so we only need its include dir.
-FetchContent_Declare(
-    universal
-    GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
-    GIT_TAG        v4.7.0
-    GIT_SHALLOW    TRUE
-)
+find_package(MTL5 CONFIG QUIET)
+if(MTL5_FOUND)
+    message(STATUS "MTL5: using installed package ${MTL5_VERSION} (${MTL5_DIR})")
+else()
+    if(FETCHCONTENT_SOURCE_DIR_MTL5)
+        message(STATUS "MTL5: using local checkout ${FETCHCONTENT_SOURCE_DIR_MTL5} (pin v${BRANES_MTL5_VERSION} bypassed)")
+    else()
+        message(STATUS "MTL5: fetching v${BRANES_MTL5_VERSION} headers")
+    endif()
+    FetchContent_Declare(
+        mtl5
+        GIT_REPOSITORY https://github.com/stillwater-sc/mtl5.git
+        GIT_TAG        v${BRANES_MTL5_VERSION}
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  _header_only_no_build
+    )
+    FetchContent_MakeAvailable(mtl5)
+
+    # MTL5's configure step normally generates mtl/version.hpp, which the
+    # <mtl/mtl.hpp> umbrella includes. We skip that configure step, so
+    # generate it here from MTL5's own template. (build_info.hpp and
+    # testsuite_config.hpp, the other generated headers, are only used by
+    # MTL5's benchmark/test-matrix utilities, which cortex doesn't include.)
+    # With a local checkout the macros still carry the pinned version.
+    string(REPLACE "." ";" _mtl5_ver "${BRANES_MTL5_VERSION}")
+    list(GET _mtl5_ver 0 MTL5_VERSION_MAJOR)
+    list(GET _mtl5_ver 1 MTL5_VERSION_MINOR)
+    list(GET _mtl5_ver 2 MTL5_VERSION_PATCH)
+    set(MTL5_VERSION "${BRANES_MTL5_VERSION}")
+    configure_file(
+        ${mtl5_SOURCE_DIR}/include/mtl/version.hpp.in
+        ${mtl5_BINARY_DIR}/include/mtl/version.hpp
+        @ONLY)
+
+    add_library(mtl5 INTERFACE)
+    add_library(MTL5::mtl5 ALIAS mtl5)
+    target_include_directories(mtl5 INTERFACE
+        ${mtl5_SOURCE_DIR}/include
+        ${mtl5_BINARY_DIR}/include)
+    target_compile_features(mtl5 INTERFACE cxx_std_20)
+endif()
+
+find_package(universal CONFIG QUIET)
+if(universal_FOUND)
+    message(STATUS "Universal: using installed package ${universal_VERSION} (${universal_DIR})")
+else()
+    if(FETCHCONTENT_SOURCE_DIR_UNIVERSAL)
+        message(STATUS "Universal: using local checkout ${FETCHCONTENT_SOURCE_DIR_UNIVERSAL} (pin v${BRANES_UNIVERSAL_VERSION} bypassed)")
+    else()
+        message(STATUS "Universal: fetching v${BRANES_UNIVERSAL_VERSION} headers")
+    endif()
+    FetchContent_Declare(
+        universal
+        GIT_REPOSITORY https://github.com/stillwater-sc/universal.git
+        GIT_TAG        v${BRANES_UNIVERSAL_VERSION}
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  _header_only_no_build
+    )
+    FetchContent_MakeAvailable(universal)
+
+    # Universal headers use two include conventions:
+    #   - external: #include <sw/universal/...>  (needs include/)
+    #   - internal: #include <universal/...>     (needs include/sw/)
+    # cortex uses the internal form; expose both.
+    add_library(universal INTERFACE)
+    add_library(universal::universal ALIAS universal)
+    target_include_directories(universal INTERFACE
+        ${universal_SOURCE_DIR}/include
+        ${universal_SOURCE_DIR}/include/sw)
+    target_compile_features(universal INTERFACE cxx_std_20)
+endif()
 
 # ── jbeder/yaml-cpp ─────────────────────────────────────────────────
 set(YAML_CPP_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
@@ -87,30 +162,7 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(mtl5 yaml-cpp Catch2 Tracy stb nlohmann_json)
-
-# Universal: populate without adding the subdirectory (its CMakeLists
-# uses CMAKE_SOURCE_DIR which is wrong under FetchContent). CMake 3.30+
-# warns about FetchContent_Populate; there is no non-deprecated way to
-# fetch-without-add_subdirectory yet, so we opt into the OLD policy
-# locally. Track upstream Universal fix to remove this hack.
-FetchContent_GetProperties(universal)
-if(NOT universal_POPULATED)
-    if(POLICY CMP0169)
-        cmake_policy(PUSH)
-        cmake_policy(SET CMP0169 OLD)
-    endif()
-    FetchContent_Populate(universal)
-    if(POLICY CMP0169)
-        cmake_policy(POP)
-    endif()
-endif()
-if(NOT TARGET universal)
-    add_library(universal INTERFACE)
-    target_include_directories(universal INTERFACE ${universal_SOURCE_DIR}/include/sw)
-    target_compile_features(universal INTERFACE cxx_std_20)
-    add_library(Universal::universal ALIAS universal)
-endif()
+FetchContent_MakeAvailable(yaml-cpp Catch2 Tracy stb nlohmann_json)
 
 # stb has no CMakeLists, so wrap stb_image as an INTERFACE target
 # rooted at the repo dir.
