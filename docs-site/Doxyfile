@@ -26,6 +26,13 @@ WARN_IF_UNDOCUMENTED   = NO
 GENERATE_TREEVIEW      = YES
 DISABLE_INDEX          = NO
 FULL_SIDEBAR           = NO
+# doxygen-awesome-css theme, sidebar-only variant (vendored; see
+# doxygen-awesome/README.md). The theme requires GENERATE_TREEVIEW = YES,
+# FULL_SIDEBAR = NO, and HTML_COLORSTYLE = LIGHT on Doxygen >= 1.9.5; it
+# provides its own dark mode.
+HTML_EXTRA_STYLESHEET  = doxygen-awesome/doxygen-awesome.css \
+                         doxygen-awesome/doxygen-awesome-sidebar-only.css
+HTML_COLORSTYLE        = LIGHT
 SOURCE_BROWSER         = YES
 ALPHABETICAL_INDEX     = YES
 SORT_MEMBER_DOCS       = YES

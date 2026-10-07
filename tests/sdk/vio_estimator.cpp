@@ -88,6 +88,12 @@ TEST_CASE("the estimator gates measurements on its lifecycle", "[sdk][vio]") {
     est.feed_image(0.02, frame.view());
     REQUIRE(est.num_tracked_features() > 0);
 
+    // No reconfiguration while Active (ADR-0005): ignored, state kept.
+    const auto tracked = est.num_tracked_features();
+    est.configure(cfg);
+    REQUIRE(est.lifecycle() == Estimator::Lifecycle::Active);
+    REQUIRE(est.num_tracked_features() == tracked);
+
     est.deactivate();
     REQUIRE(est.lifecycle() == Estimator::Lifecycle::Inactive);
 

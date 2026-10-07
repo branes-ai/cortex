@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-21
 **Issue:** #12
+**Related:** [ADR-0002](0002-no-gpl-clean-room-policy.md), [ADR-0011](0011-dependencies-via-fetchcontent.md)
 
 ## Context
 
@@ -21,7 +22,7 @@
 | Zenoh-cpp / -c    | Apache-2.0 **or** EPL-2.0 (dual)| Yes (Apache-2.0 branch)     | **Preserve upstream `NOTICE` file** in distribution (Apache-2.0 §4 requirement). |
 | `cxx` (Rust crate)| MIT **or** Apache-2.0 (dual)    | Yes                         | Bundle MIT notice with the Rust component. |
 
-No GPL / LGPL / MPL / SSPL dependencies are accepted in this stack — see [[cortex-no-gpl]] memory record and bootstrap plan judgment call #3.
+No GPL / LGPL / MPL / SSPL dependencies are accepted in this stack. The broader no-GPL-contact policy (which also rules out GPL code as a reference or test oracle) is [ADR-0002](0002-no-gpl-clean-room-policy.md), from bootstrap plan judgment call #3.
 
 ## Decisions
 
