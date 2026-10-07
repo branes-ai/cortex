@@ -32,6 +32,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -46,7 +47,23 @@ jobs:
           cache-dependency-path: docs-site/package-lock.json
 
       - name: Install Doxygen
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends doxygen
+        # Hardened against a stalled Ubuntu mirror (2026-10-07: azure.archive.ubuntu.com
+        # failed on some runners and the archive.ubuntu.com fallback hung apt for
+        # 90+ min). Per-request timeouts and retries, a hard cap per attempt, and
+        # up to 3 attempts, all inside a step timeout.
+        timeout-minutes: 10
+        run: |
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            sudo dpkg --configure -a || true
+            if timeout 180 sudo apt-get $APT_OPTS update && \
+               timeout 300 sudo apt-get $APT_OPTS install -y --no-install-recommends doxygen; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt failed; retrying in 15 s"
+            sleep 15
+          done
+          exit 1
 
       - name: Setup Pages
         id: pages
@@ -81,6 +98,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
