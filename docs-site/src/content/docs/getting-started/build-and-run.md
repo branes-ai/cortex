@@ -25,6 +25,23 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=cross-toolchain.cmake -DBUILD_TARGET_KPU=O
 cmake --build build -j$(nproc)
 ```
 
+## Building against local MTL5 / Universal checkouts
+
+MTL5 and Universal are header-only Stillwater sister projects. CMake uses an
+installed copy if `find_package` finds one; otherwise it fetches only their
+headers at the versions pinned in `cmake/deps.cmake`. To co-develop against a
+local branch of either, point FetchContent at the checkout (no network needed):
+
+```bash
+cmake --preset sitl-debug \
+  -DFETCHCONTENT_SOURCE_DIR_MTL5=$HOME/dev/stillwater/clones/mtl5 \
+  -DFETCHCONTENT_SOURCE_DIR_UNIVERSAL=$HOME/dev/stillwater/clones/universal
+```
+
+The configure log states which source each dependency came from
+(`fetching v… headers`, `using local checkout …`, or `using installed package …`).
+A local checkout bypasses the pin, so its version is whatever that branch is at.
+
 ## The `BUILD_TARGET_KPU` flag
 
 This one flag controls **both sides of the FFI**:
