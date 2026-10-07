@@ -69,10 +69,11 @@ public:
     explicit VioEstimator(Backend backend, const FrontendParams& fe = {}) : backend_(std::move(backend)), fe_(fe) {}
 
     /// Unconfigured/Inactive → Inactive. Fixes parameters and initializes
-    /// the backend. Allowed from any non-teardown state (acts as a
-    /// reconfigure, which also clears runtime state).
+    /// the backend. From Inactive it acts as a reconfigure, which also clears
+    /// runtime state. Ignored while Active (parameters are immutable while
+    /// processing — deactivate() first; ADR-0005) and after Teardown.
     void configure(const VioConfig& config) {
-        if (state_ == Lifecycle::Teardown)
+        if (state_ == Lifecycle::Teardown || state_ == Lifecycle::Active)
             return;
         config_ = config;
         backend_.initialize(config);
