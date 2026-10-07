@@ -48,7 +48,7 @@ require() {
 # ── System tools ────────────────────────────────────────────────────
 step "System tools"
 require git
-require cmake "needs >= 3.25; install via 'apt install cmake' or kitware-cmake"
+require cmake "needs >= 4.0; install from kitware (apt.kitware.com) or 'pip install cmake'"
 require ninja "install via 'apt install ninja-build'"
 require cc    "C compiler; 'apt install build-essential'"
 require c++   "C++ compiler; 'apt install build-essential'"
@@ -58,10 +58,9 @@ require clang-format "for formatting checks; 'apt install clang-format'"
 if command -v cmake >/dev/null 2>&1; then
     cmake_ver=$(cmake --version | head -1 | awk '{print $3}')
     cmake_major=$(echo "$cmake_ver" | cut -d. -f1)
-    cmake_minor=$(echo "$cmake_ver" | cut -d. -f2)
-    if [ "$cmake_major" -lt 3 ] || { [ "$cmake_major" -eq 3 ] && [ "$cmake_minor" -lt 25 ]; }; then
-        err "cmake $cmake_ver is too old (CMakePresets.json v6 needs >= 3.25)"
-        MISSING+=("cmake>=3.25")
+    if [ "$cmake_major" -lt 4 ]; then
+        err "cmake $cmake_ver is too old (the project needs >= 4.0)"
+        MISSING+=("cmake>=4.0")
     fi
 fi
 
