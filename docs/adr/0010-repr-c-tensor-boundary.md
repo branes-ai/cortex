@@ -17,9 +17,12 @@ register boundaries.
 
 Pass tensors as a **plain `repr(C)` metadata struct** through the `cxx`
 bridge (`#[cxx::bridge(namespace = "branes::core")]` in
-`core/src/bridge.rs`). It carries a raw pointer, size, shape, stride, and dtype,
-and nothing else: no Arrow-style schema and no ownership semantics. It is a lightweight
-tensor descriptor in the spirit of DLPack.
+`core/src/bridge.rs`). It carries a raw pointer, byte size, shape (rows,
+cols), stride, and dtype, plus an opaque `handle` that identifies the RM
+buffer allocation (the client passes it back to `release_buffer`). Nothing
+else: no Arrow-style schema, and no ownership semantics in the descriptor
+itself; the buffer's lifetime is managed through the handle. It is a
+lightweight tensor descriptor in the spirit of DLPack.
 
 The C++ side wraps the pointer in a `std::span<T>` immediately and hands
 it to MTL5 views. **It never copies.**

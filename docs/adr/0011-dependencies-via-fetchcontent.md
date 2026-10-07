@@ -22,11 +22,14 @@ development often needs to patch or co-develop dependencies.
 - **Exception: MLIR/LLVM** is never FetchContent'd. Building LLVM from
   source destroys iteration time; it is installed as prebuilt binaries.
 - **Amendment (#436):** the header-only Stillwater sister projects (MTL5,
-  Universal) use the pattern from the Stillwater mixed-precision repos:
-  `find_package` first, else a header-only fetch (`SOURCE_SUBDIR` with no
-  `CMakeLists.txt`) so their own CMake projects are never added. Both
-  paths expose `MTL5::mtl5` / `universal::universal`, and
-  `FETCHCONTENT_SOURCE_DIR_*` points at local checkouts for co-development.
+  Universal) use the pattern from the Stillwater mixed-precision repos.
+  `find_package` runs first **with no version constraint**, so any installed
+  package wins. If none is found, a header-only fetch (`SOURCE_SUBDIR` with
+  no `CMakeLists.txt`) pulls the release tag pinned in `cmake/deps.cmake`,
+  so their own CMake projects are never added.
+  `FETCHCONTENT_SOURCE_DIR_*` is an explicit local-checkout override that
+  bypasses the pin, for co-development. All paths expose `MTL5::mtl5` /
+  `universal::universal`.
 - **Amendment (#434):** CMake **4.0** is the minimum version. CI installs a
   pinned CMake 4.0.x rather than trusting runner images.
 

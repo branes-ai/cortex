@@ -183,8 +183,9 @@ Work is tracked as GitHub issues in this repo, grouped into epics and phases.
   `chore` / `build` / `ci` / `test` / `docs` → *Task*. Epics are untyped.
 - **Phase label → milestone:** each issue carries one `phase-N-…` label
   (`phase-0-foundation` through `phase-11-docs`) and sits in the matching
-  milestone (`Phase N: …`). Silicon-dependent work that is not on the MVP path
-  goes under `phase-soc-deferred` / *SoC (deferred)*, which wins if both apply.
+  milestone (`Phase N: …`). KPU-silicon-dependent work that is not on the MVP
+  path carries the `phase-soc-deferred` label and goes in the milestone named
+  `SoC (deferred)`, which wins if both apply.
 - **Cross-cutting labels:** `epic`, `mvp-blocker`, `clean-room`, `no-gpl`,
   `cv-stack`, `decision-needed` (needs a maintainer call before work starts).
 - Issues are tracked on the *Branes CORTEX* project board with an estimate.

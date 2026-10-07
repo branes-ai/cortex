@@ -93,9 +93,16 @@ vio.teardown();          // release everything
 
 `VioEstimator<T, Backend>` is templated on the scalar type `T` (here `double`)
 and on the backend (here the MSCKF; a sliding-window backend implements the
-same interface). Parameters are fixed at `configure`. To change them, tear down
-and reconfigure; there is no live parameter mutation (see
-[ADR-0005](../../docs/adr/0005-managed-lifecycle-no-dynamic-reconfiguration.md)).
+same interface). Parameters are fixed at `configure`. There is no live
+parameter mutation; to change them, stop processing first:
+
+- **Reconfigure the same estimator:** `deactivate()`, then `configure(new)`.
+  This applies the new parameters and clears the runtime state, leaving it
+  `Inactive`; call `activate()` to resume.
+- **After `teardown()`:** teardown is terminal (`configure()` is ignored from
+  there), so construct a new estimator.
+
+See [ADR-0005](../../docs/adr/0005-managed-lifecycle-no-dynamic-reconfiguration.md).
 
 ### 3. Feed time-ordered measurements
 

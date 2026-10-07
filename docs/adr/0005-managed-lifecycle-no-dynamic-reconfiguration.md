@@ -39,8 +39,11 @@ and back to `Inactive` with the new parameters.
   ([ADR-0014](0014-middleware-agnostic-core-zenoh-daemons.md)), passed at
   `configure` time.
 - **Current state:** implemented by the Rust RM (`core/src/lifecycle.rs`,
-  typed errors on invalid transitions) and mirrored by
-  `branes::sdk::VioEstimator` (`configure` / `activate` / `deactivate` /
-  `teardown`). The daemons adopt it when they land (epic #75). Sister repos
+  typed errors on invalid transitions; `Teardown` returns to `Unconfigured`
+  via `reset`) and mirrored by `branes::sdk::VioEstimator`. In the
+  estimator, a new configuration is applied by `deactivate()` → `configure()`
+  (back in `Inactive`, runtime state cleared, never while `Active`);
+  `teardown()` is terminal, so a restart after it is a new estimator
+  instance. The daemons adopt it when they land (epic #75). Sister repos
   follow the same rule (e.g. `branes::reflex::Pid` fixes its gains at
   construction).
