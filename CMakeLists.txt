@@ -1,17 +1,12 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 4.0)
 
-# Opt into CMP0141 *before* project(), so MSVC debug-info format is governed by
-# CMAKE_MSVC_DEBUG_INFORMATION_FORMAT instead of a hardcoded /Zi. CMake bakes
-# the debug-info flag into CMAKE_CXX_FLAGS_DEBUG during project()'s language
-# init under the policy in effect *then*; set after project() it is too late —
-# /Zi is already baked in and inherited by every target, including the
-# FetchContent deps (Catch2, yaml-cpp), which then fail the msvc-ninja /Z7 Debug
+# MSVC debug-info format is governed by CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+# (CMP0141, NEW at our cmake_minimum_required) instead of a hardcoded /Zi.
+# CMAKE_POLICY_DEFAULT_CMP0141 carries the NEW default into the FetchContent
+# deps' own project() calls (Catch2, yaml-cpp), whose older minimums would
+# otherwise bake /Zi into their targets and fail the msvc-ninja /Z7 Debug
 # build with C1041 (many cl.exe contending on one shared .pdb under Ninja).
-# CMAKE_POLICY_DEFAULT_CMP0141 carries the NEW default into the deps' own
-# project() calls. No-op pre-3.25 / on non-MSVC.
-if(POLICY CMP0141)
-    cmake_policy(SET CMP0141 NEW)
-endif()
+# No-op on non-MSVC.
 set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
 
 project(branes_cortex LANGUAGES CXX)

@@ -58,10 +58,10 @@ Require-Command -name 'cmake' -hint 'install via VS Installer or kitware.com/cma
 if (Get-Command cmake -ErrorAction SilentlyContinue) {
     $cmakeLine = (& cmake --version | Select-Object -First 1)
     if ($cmakeLine -match 'cmake version (\d+)\.(\d+)\.(\d+)') {
-        $major = [int]$Matches[1]; $minor = [int]$Matches[2]
-        if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 25)) {
-            Write-Err "cmake $($Matches[0]) is too old (CMakePresets.json v6 needs >= 3.25)"
-            $script:Missing += 'cmake>=3.25'
+        $major = [int]$Matches[1]
+        if ($major -lt 4) {
+            Write-Err "cmake $($Matches[0]) is too old (the project needs >= 4.0)"
+            $script:Missing += 'cmake>=4.0'
         } else {
             Write-Ok "$cmakeLine"
         }
