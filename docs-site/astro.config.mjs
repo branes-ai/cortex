@@ -85,6 +85,11 @@ export default defineConfig({
             { label: 'Layering Invariants', slug: 'architecture/layering' },
             { label: 'The KPU Spacetime Constraint', slug: 'architecture/kpu-spacetime' },
             { label: 'Resource Manager (Rust)', slug: 'architecture/resource-manager' },
+            {
+              label: 'Decision Records (ADRs)',
+              link: 'https://github.com/branes-ai/cortex/tree/main/docs/adr',
+              attrs: { target: '_blank' },
+            },
           ],
         },
         {

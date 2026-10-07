@@ -100,6 +100,8 @@ add_subdirectory(daemons)
 # VIO stage-probe study utilities (host-only developer tools — see tools/).
 if(NOT BUILD_TARGET_KPU)
     add_subdirectory(tools)
+    # Reference SDK consumers (host-only — see examples/).
+    add_subdirectory(examples)
 endif()
 
 if(BUILD_TESTING)

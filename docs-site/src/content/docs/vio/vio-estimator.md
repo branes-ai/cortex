@@ -37,7 +37,9 @@ Unconfigured ──configure──▶ Inactive ──activate──▶ Active
 
 Measurements are consumed **only while `Active`** — `feed_imu`/`feed_image` are no-ops
 otherwise. This honors the "no dynamic reconfiguration on the hot path" rule:
-parameters are fixed at `configure`.
+parameters are fixed at `configure`, and `configure` is ignored while `Active`. To
+change them, `deactivate()` then `configure()` (which also clears runtime state) and
+`activate()` again. After `teardown()` the estimator is spent; construct a new one.
 
 ## What `feed_image` does
 
