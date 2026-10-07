@@ -1,6 +1,16 @@
 name: Cortex CI
 
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to a PR supersedes its in-flight run; runs on main are never
+# cancelled (each main commit gets a complete result).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Top-level least-privilege default. Per-job overrides only when a job
 # genuinely needs more.
@@ -22,6 +32,7 @@ jobs:
     # Use 24.04 to get a recent clang-format (18.x) that supports the
     # IncludeBlocks/Regroup options we configure in .clang-format.
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -31,8 +42,10 @@ jobs:
         with:
           toolchain: 1.83.0
           components: rustfmt, clippy
-      - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: clang-format version
+        # Preinstalled on ubuntu-24.04 (runner-images: clang 18 default, with the
+        # clang-format alternative). No apt step, so no mirror dependency.
+        run: clang-format --version
       - name: Run sccache-action
         # Needed because the workflow-level RUSTC_WRAPPER=sccache would
         # otherwise fail clippy on a fresh runner without sccache.
@@ -57,6 +70,7 @@ jobs:
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -66,8 +80,6 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential
       - name: Install CMake 4.x + Ninja
         # The project requires CMake >= 4.0; runner images and distro apt
         # packages can lag, so pin the toolchain explicitly.
@@ -91,6 +103,7 @@ jobs:
   build-and-test-sitl-clang:
     name: Build and Test (SITL - x86, Clang)
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -99,8 +112,6 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9  # master @ 2026-05-23
         with:
           toolchain: 1.83.0
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang
       - name: Install CMake 4.x + Ninja
         # The project requires CMake >= 4.0; runner images and distro apt
         # packages can lag, so pin the toolchain explicitly.
@@ -110,6 +121,7 @@ jobs:
       - name: Run sccache-action
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
       - name: Configure
+        # clang/clang++ 18 are preinstalled on ubuntu-24.04 (image default).
         run: |
           clang++ --version
           cmake --preset sitl-clang-debug
@@ -133,6 +145,7 @@ jobs:
   build-and-test-windows:
     name: Build and Test (Windows - MSVC ${{ matrix.label }})
     runs-on: windows-2022
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -185,6 +198,7 @@ jobs:
   coverage:
     name: Coverage (cargo-llvm-cov, gated >= 85%)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -227,6 +241,7 @@ jobs:
   build-kpu-cross:
     name: Cross-Compile (KPU Target - aarch64)
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -236,8 +251,24 @@ jobs:
         with:
           toolchain: 1.83.0
           targets: aarch64-unknown-linux-gnu
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Install aarch64 cross toolchain
+        # Hardened against a stalled Ubuntu mirror (2026-10-07: azure.archive.ubuntu.com
+        # failed on some runners and the archive.ubuntu.com fallback hung apt for
+        # 90+ min). Per-request timeouts and retries, a hard cap per attempt, and
+        # up to 3 attempts, all inside a step timeout.
+        timeout-minutes: 10
+        run: |
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            sudo dpkg --configure -a || true
+            if timeout 180 sudo apt-get $APT_OPTS update && \
+               timeout 300 sudo apt-get $APT_OPTS install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $attempt failed; retrying in 15 s"
+            sleep 15
+          done
+          exit 1
       - name: Install CMake 4.x + Ninja
         # The project requires CMake >= 4.0; runner images and distro apt
         # packages can lag, so pin the toolchain explicitly.
