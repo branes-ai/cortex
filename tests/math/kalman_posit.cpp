@@ -178,7 +178,8 @@ Result run_kalman(const Scenario& s) {
         // multi-measurement form, and also the only one that works for
         // Universal types here. MTL5's scalar*matrix operators require
         // std::is_arithmetic_v<S>, so `PHt * s_inv` does not compile for a
-        // posit scalar even though posits model MTL5's Scalar concept.
+        // posit scalar even though posits model MTL5's Scalar concept
+        // (stillwater-sc/mtl5#538). Revert to `PHt * s_inv` once that lands.
         dense2D<T> S_inv(1, 1);
         S_inv(0, 0) = T(1) / S(0, 0);
         dense2D<T> K(2, 1);
