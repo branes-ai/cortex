@@ -18,4 +18,15 @@ if(BUILD_TESTING)
     set_tests_properties(hello_vio.smoke PROPERTIES
         PASS_REGULAR_EXPRESSION "replayed 0 frames"
         FAIL_REGULAR_EXPRESSION "hello_vio: ")
+
+    # Replay test: a tiny synthetic sequence (5 frames, static IMU; see
+    # testdata/README.md) that runs main.cpp's own loop end to end: CSV
+    # parsing, IMU/frame ordering, PNG loading, feed_imu/feed_image,
+    # current_pose. It checks the loop, not accuracy (the estimator is still
+    # initializing after 5 frames); accuracy lives in tests/sdk/vio_euroc.cpp.
+    add_test(NAME hello_vio.frames
+             COMMAND hello_vio ${CMAKE_CURRENT_SOURCE_DIR}/testdata/frames/mav0)
+    set_tests_properties(hello_vio.frames PROPERTIES
+        PASS_REGULAR_EXPRESSION "replayed 5 frames"
+        FAIL_REGULAR_EXPRESSION "hello_vio: |nan|inf")
 endif()
