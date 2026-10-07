@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.66.3](https://github.com/branes-ai/cortex/compare/v0.66.2...v0.66.3) (2026-10-07)
+
+
+### Build System
+
+* **deps:** adopt the stillwater header-only fetch pattern for mtl5 and universal ([#436](https://github.com/branes-ai/cortex/issues/436)) ([18372dc](https://github.com/branes-ai/cortex/commit/18372dc71b8ba003a6d53e4c7c8454af786a0a86)), closes [#435](https://github.com/branes-ai/cortex/issues/435)
+
+
+### Continuous Integration
+
+* add a clang sitl build-and-test job ([#438](https://github.com/branes-ai/cortex/issues/438)) ([6bc96c4](https://github.com/branes-ai/cortex/commit/6bc96c4b0d6500fdb8e5093b82e7f0a528effc9e))
+
 ## [0.66.2](https://github.com/branes-ai/cortex/compare/v0.66.1...v0.66.2) (2026-10-07)
 
 
