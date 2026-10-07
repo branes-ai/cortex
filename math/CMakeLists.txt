@@ -14,7 +14,7 @@ target_compile_features(branes_math INTERFACE cxx_std_20)
 
 # MTL5 + Universal are part of the math layer's public surface: callers
 # instantiate solvers against Universal arithmetic types and MTL5 views.
-target_link_libraries(branes_math INTERFACE MTL5::mtl5 universal)
+target_link_libraries(branes_math INTERFACE MTL5::mtl5 universal::universal)
 
 # Header-only guard: fail configuration if a .cpp ever lands in math/.
 # Math-layer tests live under the top-level tests/ tree precisely so
