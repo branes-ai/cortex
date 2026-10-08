@@ -241,7 +241,9 @@ inline const StageInfo kS10{
      {"R-scale that restores NEES≈dof", "×", "the empirical measurement-noise deficit; R is the lever"},
      {"calibration-state NEES (if estimated online)", "—", "the principled fix — OpenVINS/MINS-style online calib"}},
     {"calib_budget.csv", "calib_r_sweep.csv"},
-    "(no calibration states / no calib term in R in cortex — the S10 gap)",
+    "default: no calibration states, optional extrinsic-rotation term in R (calib_rot_sigma); "
+    "optional: camera↔IMU extrinsic states, 6/camera (VioConfig::estimate_extrinsics, #332); "
+    "intrinsics and time offset are not estimated",
     "implemented",
     "stages::s10_online_calibration::apply(state, extrinsics, σ_rot, σ_trans) → state′  "
     "[sdk/msckf/stages/s10_online_calibration.hpp]"};

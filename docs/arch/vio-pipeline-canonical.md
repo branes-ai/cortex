@@ -110,8 +110,10 @@ right-`SO(3)` perturbation (`R ← R·Exp(δθ)`) — a legitimate alternative c
 choice must be **globally consistent** across propagation, augmentation, update, and the
 measurement Jacobians. A mixed convention is a classic silent inconsistency.
 
-> **First load-bearing observation (cortex vs canonical):** the cortex state is
+> **First load-bearing observation (cortex vs canonical):** by default the cortex state is
 > `[IMU(15) | clones(6n)]` only — **no camera intrinsics, extrinsics, or time-offset states**.
+> (Since #332, camera↔IMU **extrinsic** states, 6 per camera, can be enabled with
+> `VioConfig::estimate_extrinsics`; intrinsics and time offset are still not estimated.)
 > OpenVINS either estimates these online *or* at minimum its measurement model and noise account
 > for their uncertainty. Treating calibration as perfectly known removes real uncertainty from
 > the filter — which is structurally indistinguishable from over-confidence, and is *exactly*
@@ -136,7 +138,7 @@ sequence, and a stage bench calls one in isolation. The stage names carry the tr
 | S5_triangulation | track → feature position | `s5_triangulation.hpp` |
 | S6a_jacobians … S6e_ekf_update | track → updated state, one entry point per sub-step | `s6_msckf_update.hpp` |
 | S9_marginalization | state → state − clone | `s9_marginalization.hpp` |
-| S10_online_calibration | state → state + calibration states | `s10_online_calibration.hpp` |
+| S10_online_calibration | state → state + camera↔IMU extrinsic states (6/camera, optional) | `s10_online_calibration.hpp` |
 
 S6c_compression is the identity in cortex today (one feature per update leaves 2m − 3 rows), kept
 as an explicit slot for a compressing variant. S7 and S8 are not implemented in cortex.
