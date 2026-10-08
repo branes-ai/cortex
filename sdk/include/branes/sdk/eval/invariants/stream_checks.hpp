@@ -45,13 +45,18 @@ namespace branes::sdk::eval::inv {
 [[nodiscard]] inline std::vector<InvariantResult>
 check_dt_bounds(std::span<const double> t, double dt_min, double dt_max, Stage stage = Stage::Inputs) {
     double lo = detail::kInf, hi = -detail::kInf;
+    bool finite = true;
     for (std::size_t i = 1; i < t.size(); ++i) {
         const double dt = t[i] - t[i - 1];
+        finite = finite && std::isfinite(dt);
         lo = std::min(lo, dt);
         hi = std::max(hi, dt);
     }
     if (t.size() < 2)
         lo = hi = 0.5 * (dt_min + dt_max);  // no interval to violate
+    else if (!finite)                       // std::min/max drop NaN; a non-finite interval fails both bounds
+        return {detail::nonfinite_violation("timestamps.dt_min", stage, Bound::Lower),
+                detail::nonfinite_violation("timestamps.dt_max", stage)};
     return {detail::make("timestamps.dt_min", "s", stage, Bound::Lower, lo, dt_min),
             detail::make("timestamps.dt_max", "s", stage, Bound::Upper, hi, dt_max)};
 }

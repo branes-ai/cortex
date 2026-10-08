@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace branes::sdk::eval::inv::la {
@@ -50,6 +51,8 @@ template <math::Scalar T>
 
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> sub(const DynMat<T>& a, const DynMat<T>& b) {
+    if (a.rows != b.rows || a.cols != b.cols)
+        throw std::invalid_argument("inv::la::sub: shape mismatch");
     DynMat<T> r(a.rows, a.cols);
     for (std::size_t i = 0; i < a.d.size(); ++i)
         r.d[i] = a.d[i] - b.d[i];

@@ -25,6 +25,7 @@
 #include <initializer_list>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -510,4 +511,84 @@ TEMPLATE_TEST_CASE("invariant verdict on a small asymmetry follows the type's ep
         REQUIRE(r.pass);
     else
         REQUIRE_FALSE(r.pass);
+}
+
+// ── Non-finite inputs never pass (PR #459 review) ───────────────────────────
+// std::max / std::min drop a NaN operand and the eigen sweeps can hide one, so
+// every check rejects non-finite inputs up front; a failed NaN residual ranks
+// as the worst margin.
+
+TEMPLATE_TEST_CASE("invariant checks reject non-finite inputs", "[sdk][invariants]", INV_TYPES) {
+    using T = TestType;
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    auto p = spd4<T>();
+    p(2, 3) = nan;
+    p(3, 2) = nan;
+    REQUIRE_FALSE(inv::check_symmetric(p, Stage::S2_propagation).pass);
+    REQUIRE_FALSE(inv::check_psd(p, Stage::S2_propagation).pass);
+    REQUIRE_FALSE(inv::check_spd(p, Stage::S6d_gating).pass);
+    REQUIRE_FALSE(inv::check_loewner_le(p, spd4<T>(), Stage::S6e_ekf_update).pass);
+    REQUIRE_FALSE(inv::report_condition_number(p, Stage::S5_triangulation).pass);
+    REQUIRE_FALSE(inv::check_rank(p, 4, Stage::S6b_nullspace_projection).pass);
+
+    const auto x = vec<T>({0.1, -0.2, 0.0});
+    auto xn = x;
+    xn[2] = nan;
+    REQUIRE_FALSE(inv::check_bounded<T>(xn, T(1), Stage::S1_initialization, "bias", "rad/s").pass);
+    REQUIRE_FALSE(inv::check_at_least<T>(xn, T(-1), Stage::S5_triangulation, "depth", "m").pass);
+    REQUIRE_FALSE(inv::check_round_trip<T>(x, xn, Stage::S0_sensor_model, "rt", "px").pass);
+
+    auto r = inv::Mat3<T>::identity();
+    r(0, 1) = nan;
+    for (const auto& res : inv::check_so3<T>(r, Stage::S2_propagation))
+        REQUIRE_FALSE(res.pass);
+}
+
+TEMPLATE_TEST_CASE("invariant check_intrinsics rejects non-finite intrinsics", "[sdk][invariants]", INV_TYPES) {
+    using T = TestType;
+    const T nan = T(std::numeric_limits<double>::quiet_NaN());
+    // fy NaN: std::min(fx, fy) would return the finite fx and pass.
+    const auto r = inv::check_intrinsics<T>(T(458), nan, T(367), T(248), T(752), T(480));
+    REQUIRE_FALSE(r[0].pass);
+    REQUIRE_FALSE(r[1].pass);
+    // cx NaN: the out-of-image offsets would compare false and report 0.
+    const auto c = inv::check_intrinsics<T>(T(458), T(457), nan, T(248), T(752), T(480));
+    REQUIRE_FALSE(c[0].pass);
+    REQUIRE_FALSE(c[1].pass);
+}
+
+TEST_CASE("invariant check_compression reports all three results on a shape mismatch", "[sdk][invariants]") {
+    const auto h = mat<double>(3, 2, {1, 0, 0, 1, 1, 1});
+    const std::vector<double> r{1, 2, 3};
+    const auto hc = mat<double>(2, 3, {1, 0, 0, 0, 1, 0});  // wrong column count
+    const std::vector<double> rc{1, 2};
+    const auto out = inv::check_compression<double>(h, r, hc, rc);
+    REQUIRE(out.size() == 3);
+    REQUIRE(out[0].name == "compression.normal_matrix");
+    REQUIRE(out[1].name == "compression.normal_rhs");
+    REQUIRE(out[2].name == "compression.residual_norm_nonincreasing");
+    for (const auto& res : out)
+        REQUIRE_FALSE(res.pass);
+}
+
+TEST_CASE("invariant check_dt_bounds fails both bounds on a NaN timestamp", "[sdk][invariants]") {
+    const std::vector<double> t{0.000, 0.005, std::numeric_limits<double>::quiet_NaN(), 0.015};
+    const auto dt = inv::check_dt_bounds(t, 0.004, 0.006);
+    REQUIRE_FALSE(dt[0].pass);
+    REQUIRE_FALSE(dt[1].pass);
+    REQUIRE_FALSE(inv::check_timestamps_increasing(t).pass);
+}
+
+TEST_CASE("invariant margin ranks a failed NaN residual as the worst", "[sdk][invariants]") {
+    inv::InvariantReport rep;
+    rep.add(inv::check_scalar(2.0, 1.0, inv::Bound::Upper, Stage::S2_propagation, "finite_fail", "m"));
+    rep.add(inv::check_scalar(
+        std::numeric_limits<double>::quiet_NaN(), 1.0, inv::Bound::Upper, Stage::S6e_ekf_update, "nan_fail", "m"));
+    REQUIRE(std::isinf(rep.results()[1].margin()));
+    REQUIRE(rep.tightest()->name == "nan_fail");
+}
+
+TEST_CASE("invariant la::sub rejects a shape mismatch", "[sdk][invariants]") {
+    const ms::DynMat<double> a(2, 2), b(2, 3);
+    REQUIRE_THROWS_AS(inv::la::sub(a, b), std::invalid_argument);
 }

@@ -37,6 +37,12 @@ namespace detail {
 [[nodiscard]] inline InvariantResult shape_violation(std::string_view name, Stage stage) {
     return make(name, "shape", stage, Bound::Upper, kInf, 0.0);
 }
+
+/// DynMat overload of core.hpp's all_finite.
+template <math::Scalar T>
+[[nodiscard]] bool all_finite(const DynMat<T>& a) {
+    return all_finite<T>(std::span<const T>(a.d));
+}
 }  // namespace detail
 
 // ── Element-wise ─────────────────────────────────────────────────────────────
@@ -65,6 +71,8 @@ template <math::Scalar T>
 check_symmetric(const DynMat<T>& a, Stage stage, std::string_view name = "symmetric", double safety = kDefaultSafety) {
     if (a.rows != a.cols)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(a)))
+        return detail::nonfinite_violation(name, stage);
     T worst{0};
     for (std::size_t i = 0; i < a.rows; ++i)
         for (std::size_t j = i + 1; j < a.cols; ++j)
@@ -83,6 +91,8 @@ check_psd(const DynMat<T>& a, Stage stage, std::string_view name = "psd", double
         return detail::shape_violation(name, stage);
     if (a.rows == 0)
         return detail::make(name, "matrix units", stage, Bound::Upper, 0.0, 0.0);
+    if (!(detail::all_finite(a)))
+        return detail::nonfinite_violation(name, stage);
     const auto ev = la::symmetric_eigenvalues(a);
     const double neg = std::max(0.0, -detail::to_double(ev.front()));
     const double tol = arithmetic_tolerance<T>(a.rows, detail::to_double(la::frobenius(a)), safety);
@@ -97,6 +107,8 @@ template <math::Scalar T>
 check_spd(const DynMat<T>& a, Stage stage, std::string_view name = "spd", double safety = kDefaultSafety) {
     if (a.rows != a.cols || a.rows == 0)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(a)))
+        return detail::nonfinite_violation(name, stage, Bound::Lower);
     const auto ev = la::symmetric_eigenvalues(a);
     const double tol = arithmetic_tolerance<T>(a.rows, detail::to_double(la::frobenius(a)), safety);
     return detail::make(name, "matrix units", stage, Bound::Lower, detail::to_double(ev.front()), tol);
@@ -114,6 +126,8 @@ template <math::Scalar T>
         return detail::shape_violation(name, stage);
     if (a.rows == 0)
         return detail::make(name, "matrix units", stage, Bound::Upper, 0.0, 0.0);
+    if (!(detail::all_finite(a) && detail::all_finite(b)))
+        return detail::nonfinite_violation(name, stage);
     const auto ev = la::symmetric_eigenvalues(la::sub(a, b));
     const double over = std::max(0.0, detail::to_double(ev.back()));
     const double scale = std::max(detail::to_double(la::frobenius(a)), detail::to_double(la::frobenius(b)));
@@ -129,6 +143,8 @@ template <math::Scalar T>
 report_condition_number(const DynMat<T>& a, Stage stage, std::string_view name = "condition_number") {
     if (a.rows != a.cols || a.rows == 0)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(a)))
+        return detail::nonfinite_violation(name, stage, Bound::Report);
     const auto ev = la::symmetric_eigenvalues(a);
     const double lmin = detail::to_double(ev.front()), lmax = detail::to_double(ev.back());
     const double kappa = lmin > 0.0 ? lmax / lmin : detail::kInf;
@@ -145,6 +161,8 @@ template <math::Scalar T>
                                                      Stage stage,
                                                      std::string_view name = "orthonormal_rows",
                                                      double safety = kDefaultSafety) {
+    if (!(detail::all_finite(m)))
+        return detail::nonfinite_violation(name, stage);
     const DynMat<T> g = msckf::mul(m, msckf::transpose(m));
     T worst{0};
     for (std::size_t i = 0; i < g.rows; ++i)
@@ -169,6 +187,8 @@ template <math::Scalar T>
                                                 double safety = kDefaultSafety) {
     if (l.cols != r.rows)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(l) && detail::all_finite(r)))
+        return detail::nonfinite_violation(name, stage);
     const double v = detail::to_double(la::max_abs(msckf::mul(l, r)));
     const double scale = detail::to_double(la::frobenius(l)) * detail::to_double(la::frobenius(r));
     return detail::make(name, "product units", stage, Bound::Upper, v, arithmetic_tolerance<T>(l.cols, scale, safety));
@@ -182,6 +202,8 @@ template <math::Scalar T>
                                          Stage stage,
                                          std::string_view name = "rank",
                                          double safety = kDefaultSafety) {
+    if (!(detail::all_finite(a)))
+        return detail::nonfinite_violation(name, stage, Bound::Band);
     const double r = static_cast<double>(la::numerical_rank(a, safety));
     const double e = static_cast<double>(expected);
     return detail::make(name, "count", stage, Bound::Band, r, e, e);
@@ -211,6 +233,8 @@ template <math::Scalar T>
                                                    double safety = kDefaultSafety) {
     if (k.cols != s.rows || s.rows != s.cols || b.rows != k.rows || b.cols != s.cols)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(k) && detail::all_finite(s) && detail::all_finite(b)))
+        return detail::nonfinite_violation(name, stage);
     const T num = la::frobenius(la::sub(msckf::mul(k, s), b));
     const T den = la::frobenius(k) * la::frobenius(s) + la::frobenius(b);
     const double v = den > T{0} ? detail::to_double(num / den) : detail::to_double(num);
@@ -232,6 +256,8 @@ template <math::Scalar T>
     const std::size_t n = p.rows;
     if (p.cols != n || phi.rows != n || phi.cols != n || !la::same_shape(qd, p) || !la::same_shape(p_next, p))
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(p) && detail::all_finite(phi) && detail::all_finite(qd) && detail::all_finite(p_next)))
+        return detail::nonfinite_violation(name, stage);
     const DynMat<T> pred = msckf::add(msckf::mul(msckf::mul(phi, p), msckf::transpose(phi)), qd);
     const T fphi = la::frobenius(phi);
     const T den = fphi * fphi * la::frobenius(p) + la::frobenius(qd);
@@ -255,6 +281,10 @@ template <math::Scalar T>
     out.push_back(check_dimension(p_aug.rows, n + c, stage, "augmentation.dimension"));
     if (p.cols != n || j.cols != n || p_aug.rows != n + c || p_aug.cols != n + c) {
         out.push_back(detail::shape_violation("augmentation.blocks", stage));
+        return out;
+    }
+    if (!(detail::all_finite(p) && detail::all_finite(j) && detail::all_finite(p_aug))) {
+        out.push_back(detail::nonfinite_violation("augmentation.blocks", stage));
         return out;
     }
     const DynMat<T> jp = msckf::mul(j, p);
@@ -300,6 +330,10 @@ template <math::Scalar T>
         out.push_back(detail::shape_violation("marginalization.principal_submatrix", stage));
         return out;
     }
+    if (!(detail::all_finite(p_before) && detail::all_finite(p_after))) {
+        out.push_back(detail::nonfinite_violation("marginalization.principal_submatrix", stage));
+        return out;
+    }
     T num{0};
     for (std::size_t a = 0; a < k; ++a)
         for (std::size_t b = 0; b < k; ++b) {
@@ -332,8 +366,16 @@ template <math::Scalar T>
                                                              Stage stage = Stage::S6c_compression,
                                                              double safety = kDefaultSafety) {
     std::vector<InvariantResult> out;
+    constexpr std::string_view kNames[] = {
+        "compression.normal_matrix", "compression.normal_rhs", "compression.residual_norm_nonincreasing"};
     if (h.cols != h_c.cols || r.size() != h.rows || r_c.size() != h_c.rows) {
-        out.push_back(detail::shape_violation("compression.normal_matrix", stage));
+        for (const auto nm : kNames)
+            out.push_back(detail::shape_violation(nm, stage));
+        return out;
+    }
+    if (!(detail::all_finite(h) && detail::all_finite(h_c) && detail::all_finite(r) && detail::all_finite(r_c))) {
+        for (const auto nm : kNames)
+            out.push_back(detail::nonfinite_violation(nm, stage));
         return out;
     }
     auto as_col = [](std::span<const T> v) {
@@ -349,18 +391,17 @@ template <math::Scalar T>
     const T fh = la::frobenius(h), fr = la::frobenius(rv);
     const T d_hth = la::frobenius(la::sub(msckf::mul(ht, h), msckf::mul(hct, h_c)));
     const double v_hth = fh > T{0} ? detail::to_double(d_hth / (fh * fh)) : detail::to_double(d_hth);
-    out.push_back(detail::make("compression.normal_matrix", "dimensionless", stage, Bound::Upper, v_hth, tol));
+    out.push_back(detail::make(kNames[0], "dimensionless", stage, Bound::Upper, v_hth, tol));
 
     const T d_htr = la::frobenius(la::sub(msckf::mul(ht, rv), msckf::mul(hct, rcv)));
     const T den_htr = fh * fr;
     const double v_htr = den_htr > T{0} ? detail::to_double(d_htr / den_htr) : detail::to_double(d_htr);
-    out.push_back(detail::make("compression.normal_rhs", "dimensionless", stage, Bound::Upper, v_htr, tol));
+    out.push_back(detail::make(kNames[1], "dimensionless", stage, Bound::Upper, v_htr, tol));
 
     const T grow = la::frobenius(rcv) - fr;  // ≤ 0 when compression is correct
     const double v_grow =
         fr > T{0} ? std::max(0.0, detail::to_double(grow / fr)) : std::max(0.0, detail::to_double(grow));
-    out.push_back(
-        detail::make("compression.residual_norm_nonincreasing", "dimensionless", stage, Bound::Upper, v_grow, tol));
+    out.push_back(detail::make(kNames[2], "dimensionless", stage, Bound::Upper, v_grow, tol));
     return out;
 }
 
@@ -380,6 +421,8 @@ template <math::Scalar T>
                                                        double safety = kDefaultSafety) {
     if (phi.cols != n_k.rows || phi.rows != n_next.rows)
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(phi) && detail::all_finite(n_k) && detail::all_finite(n_next)))
+        return detail::nonfinite_violation(name, stage);
     const DynMat<T> pn = msckf::mul(phi, n_k);
     const DynMat<T> q = la::orthonormal_columns(n_next, safety);
     const DynMat<T> proj = msckf::mul(q, msckf::mul(msckf::transpose(q), pn));
@@ -401,6 +444,8 @@ template <math::Scalar T>
                                                     double safety = kDefaultSafety) {
     if (n.rows != dx.size())
         return detail::shape_violation(name, stage);
+    if (!(detail::all_finite(dx) && detail::all_finite(n)))
+        return detail::nonfinite_violation(name, stage);
     const DynMat<T> q = la::orthonormal_columns(n, safety);
     T along2{0}, dx2{0};
     for (std::size_t j = 0; j < q.cols; ++j) {

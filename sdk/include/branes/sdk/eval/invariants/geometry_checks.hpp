@@ -46,6 +46,8 @@ template <math::Scalar T>
                                                      std::string_view orth_name = "so3.orthogonality",
                                                      std::string_view det_name = "so3.determinant",
                                                      double safety = kDefaultSafety) {
+    if (!detail::all_finite<T>(std::span<const T>(r.e)))
+        return {detail::nonfinite_violation(orth_name, stage), detail::nonfinite_violation(det_name, stage)};
     T worst{0};
     for (std::size_t i = 0; i < 3; ++i)
         for (std::size_t j = 0; j < 3; ++j) {
@@ -96,6 +98,9 @@ template <math::Scalar T>
 template <math::Scalar T>
 [[nodiscard]] std::vector<InvariantResult>
 check_intrinsics(T fx, T fy, T cx, T cy, T width, T height, Stage stage = Stage::Inputs) {
+    if (!detail::all_finite<T>(std::array<T, 6>{fx, fy, cx, cy, width, height}))
+        return {detail::nonfinite_violation("intrinsics.focal_positive", stage, Bound::Lower),
+                detail::nonfinite_violation("intrinsics.principal_point_in_image", stage)};
     const T fmin = std::min(fx, fy);
     const T ox = cx < T{0} ? -cx : (cx > width ? cx - width : T{0});
     const T oy = cy < T{0} ? -cy : (cy > height ? cy - height : T{0});
@@ -139,6 +144,8 @@ template <math::Scalar T>
 template <math::Scalar T>
 [[nodiscard]] InvariantResult
 check_bounded(std::span<const T> x, T bound, Stage stage, std::string_view name, std::string_view unit) {
+    if (!detail::all_finite(x))
+        return detail::nonfinite_violation(name, stage);
     T worst{0};
     for (const T& v : x)
         worst = std::max(worst, la::abs_(v));
@@ -152,6 +159,8 @@ template <math::Scalar T>
 check_at_least(std::span<const T> x, T floor, Stage stage, std::string_view name, std::string_view unit) {
     if (x.empty())
         return detail::make(name, unit, stage, Bound::Lower, detail::to_double(floor), detail::to_double(floor));
+    if (!detail::all_finite(x))
+        return detail::nonfinite_violation(name, stage, Bound::Lower);
     T lo = x[0];
     for (const T& v : x)
         lo = std::min(lo, v);
@@ -209,6 +218,8 @@ template <math::Scalar T>
                                                double safety = kDefaultSafety) {
     if (a.size() != b.size())
         return detail::make(name, "shape", stage, Bound::Upper, detail::kInf, 0.0);
+    if (!detail::all_finite(a) || !detail::all_finite(b))
+        return detail::nonfinite_violation(name, stage);
     T worst{0}, scale{1};
     for (std::size_t i = 0; i < a.size(); ++i) {
         worst = std::max(worst, la::abs_(a[i] - b[i]));
@@ -238,6 +249,8 @@ template <math::Scalar T, class F>
     const std::size_t m = f0.size(), n = x.size();
     if (j_analytic.size() != m * n)
         return detail::make(name, "shape", stage, Bound::Upper, detail::kInf, 0.0);
+    if (!detail::all_finite(x) || !detail::all_finite(j_analytic) || !detail::all_finite<T>(f0))
+        return detail::nonfinite_violation(name, stage);
     const double eps = detail::to_double(epsilon<T>());
     const T cbrt_eps = T(std::cbrt(eps));
     std::vector<T> xp(x.begin(), x.end());
@@ -254,6 +267,8 @@ template <math::Scalar T, class F>
         xp[c] = x0 - h;
         const std::vector<T> fm = f(std::span<const T>(xp));
         xp[c] = x0;
+        if (!detail::all_finite<T>(fp) || !detail::all_finite<T>(fm))
+            return detail::nonfinite_violation(name, stage);
         const T two_h = (x0 + h) - (x0 - h);  // the step actually taken
         for (std::size_t r = 0; r < m; ++r) {
             const T fd = (fp[r] - fm[r]) / two_h;

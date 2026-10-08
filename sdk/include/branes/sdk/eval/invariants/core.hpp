@@ -47,6 +47,7 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -137,6 +138,8 @@ struct InvariantResult {
     [[nodiscard]] double margin() const noexcept {
         if (bound != Bound::Upper || !(threshold > 0.0))
             return pass ? 0.0 : std::numeric_limits<double>::infinity();
+        if (std::isnan(value))  // a failed NaN residual ranks as the worst, not unordered
+            return std::numeric_limits<double>::infinity();
         return value / threshold;
     }
 };
@@ -181,6 +184,26 @@ inline constexpr double kInf = std::numeric_limits<double>::infinity();
 template <math::Scalar T>
 [[nodiscard]] double to_double(const T& x) {
     return static_cast<double>(x);
+}
+
+/// True iff every element is finite (no NaN / Inf / NaR).
+template <math::Scalar T>
+[[nodiscard]] bool all_finite(std::span<const T> x) {
+    using std::isfinite;
+    for (const T& v : x)
+        if (!isfinite(v))
+            return false;
+    return true;
+}
+/// A non-finite input is a hard violation of every bound, Report included: the
+/// residual is NaN (margin() ranks it +∞). Checked up front because the max/min
+/// reductions and eigen sweeps would otherwise drop or hide a NaN and pass.
+[[nodiscard]] inline InvariantResult
+nonfinite_violation(std::string_view name, Stage stage, Bound bound = Bound::Upper) {
+    InvariantResult r =
+        make(name, "non-finite input", stage, bound, std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0);
+    r.pass = false;
+    return r;
 }
 
 }  // namespace detail
