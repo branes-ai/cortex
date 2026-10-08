@@ -52,6 +52,7 @@ struct StageInfo {
     std::vector<std::string> artifacts;   ///< CSV files written (rendered by the figure gen)
     std::string cortex_file;              ///< the code this stage exercises
     std::string status;                   ///< "implemented" | "scaffold"
+    std::string transformation;           ///< the stage as a callable (msckf/stages/, #452); "" if none
 };
 
 // ── CLI ──────────────────────────────────────────────────────────────────
@@ -99,7 +100,10 @@ inline void print_contract(const StageInfo& s) {
     std::cout << '\n';
     rule('=');
     std::cout << "  signature : " << s.signature << '\n';
-    std::cout << "  exercises : " << s.cortex_file << "\n\n";
+    std::cout << "  exercises : " << s.cortex_file << "\n";
+    if (!s.transformation.empty())
+        std::cout << "  transform : " << s.transformation << "\n";
+    std::cout << "\n";
 
     std::cout << "  PRE-CONDITIONS (must hold on the inputs):\n";
     for (const auto& p : s.pre)

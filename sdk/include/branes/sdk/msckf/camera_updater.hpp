@@ -117,6 +117,34 @@ struct CameraUpdaterOptions {
     T calib_rot_sigma = T{0};
 };
 
+/// S6a output: one feature track's stacked measurement system — the feature
+/// Jacobian H_f (2m×3), the state Jacobian H_x (2m×n) and the residual r (2m),
+/// all row-major, in normalized image coordinates.
+template <math::Scalar T>
+struct MeasurementSystem {
+    std::vector<T> Hf;
+    std::vector<T> Hx;
+    std::vector<T> r;
+    std::size_t rows = 0;  ///< 2m
+    std::size_t cols = 0;  ///< n = state dimension
+};
+
+/// S6b / S6c output: the feature-free system the gate and the EKF update consume,
+/// H (k×n) and r (k), with k = 2m − 3 after the null-space projection.
+template <math::Scalar T>
+struct ProjectedMeasurement {
+    DynMat<T> H;
+    std::vector<T> r;
+};
+
+/// S6d output: the χ² gate decision and the innovation NIS it was taken on.
+/// `nis` is filled only when it was requested (or gating needed it).
+template <math::Scalar T>
+struct GateDecision {
+    bool accepted = false;
+    NisSample<T> nis{};
+};
+
 template <math::Scalar T>
 class CameraUpdater {
 public:
@@ -141,32 +169,69 @@ public:
             throw std::invalid_argument("CameraUpdater: calib_rot_sigma must be non-negative");
     }
 
-    /// Triangulate, marginalize, gate, and (if accepted) apply the EKF
-    /// update for one feature track. Returns true iff the state was
-    /// updated. Tracks that are too short, triangulate behind a camera, or
-    /// fail the Mahalanobis gate are skipped (the filter is unchanged).
+    /// Triangulate (S5), stack the Jacobians (S6a), marginalize the feature (S6b),
+    /// gate (S6d), and — if accepted — apply the EKF update (S6e) for one feature
+    /// track. Returns true iff the state was updated. Tracks that are too short,
+    /// triangulate behind a camera, or fail the Mahalanobis gate are skipped (the
+    /// filter is unchanged). The same sequence, step by step, is
+    /// msckf/stages/s6_msckf_update.hpp.
     template <class Cov>
     bool update(State<T, Cov>& s, const FeatureTrack<T>& track, NisSample<T>* nis_out = nullptr) const {
+        if (!validate_track(s, track))
+            return false;
+        Vec3 p_f;
+        if (!triangulate(s, track.observations, p_f))
+            return false;
+        MeasurementSystem<T> sys;
+        if (!measurement_system(s, track.observations, p_f, sys))
+            return false;
+        ProjectedMeasurement<T> pm;
+        if (!nullspace_project(sys, pm))
+            return false;
+        const GateDecision<T> gd = gate(s, pm, nis_out != nullptr);
+        if (nis_out != nullptr)
+            *nis_out = gd.nis;
+        if (!gd.accepted)
+            return false;  // ill-conditioned innovation or gated out
+        (void)apply_update(s, pm);
+        return true;
+    }
+
+    // ── The update's steps, each callable in isolation (#452) ──────────
+
+    /// S5 precondition: ≥ 2 observations (2m > 3, so the feature can be
+    /// marginalized), every clone and camera index in range.
+    template <class Cov>
+    [[nodiscard]] bool validate_track(const State<T, Cov>& s, const FeatureTrack<T>& track) const {
         const auto& obs = track.observations;
-        const std::size_t m = obs.size();
-        if (m < 2)
+        if (obs.size() < 2)
             return false;
         for (const auto& o : obs)
             if (o.clone_index >= s.clones.size() || o.camera_index >= cameras_.size())
                 return false;
+        return true;
+    }
 
-        Vec3 p_f;
-        if (!triangulate(s, obs, p_f))
-            return false;
-
-        // Stacked feature Jacobian H_f (2m×3), state Jacobian H_x (2m×N),
-        // and residual r (2m). H_x is zero except in each observation's
-        // clone columns. Rows are in normalized image coordinates.
+    /// S6a: the stacked feature Jacobian H_f (2m×3), state Jacobian H_x (2m×N),
+    /// and residual r (2m) at the triangulated `p_f`. H_x is zero except in each
+    /// observation's clone columns (and, with online calibration, its camera's
+    /// calibration columns). False if the feature is behind any observing camera.
+    template <class Cov>
+    [[nodiscard]] bool measurement_system(const State<T, Cov>& s,
+                                          const std::vector<CameraObservation<T>>& obs,
+                                          const Vec3& p_f,
+                                          MeasurementSystem<T>& out) const {
+        const std::size_t m = obs.size();
         const std::size_t n = s.dim();
         const std::size_t rows2 = 2 * m;
-        std::vector<T> Hf(rows2 * 3, T{0});
-        std::vector<T> Hx(rows2 * n, T{0});
-        std::vector<T> r(rows2, T{0});
+        out.rows = rows2;
+        out.cols = n;
+        out.Hf.assign(rows2 * 3, T{0});
+        out.Hx.assign(rows2 * n, T{0});
+        out.r.assign(rows2, T{0});
+        std::vector<T>& Hf = out.Hf;
+        std::vector<T>& Hx = out.Hx;
+        std::vector<T>& r = out.r;
 
         for (std::size_t i = 0; i < m; ++i) {
             Jacobians J;
@@ -197,44 +262,67 @@ public:
                     }
             }
         }
+        return true;
+    }
 
-        // Marginalize the feature: left-null-space projection. The
-        // reflectors are orthonormal, so the projected measurement noise
-        // stays σ²·I on the surviving rows.
-        const auto proj = features::msckf_left_nullspace_project<T>(Hf, Hx, r, rows2, n);
+    /// S6b: marginalize the feature by left-null-space projection. The
+    /// reflectors are orthonormal, so the projected measurement noise stays σ²·I
+    /// on the surviving rows. False if nothing survives (2m ≤ 3).
+    [[nodiscard]] static bool nullspace_project(const MeasurementSystem<T>& sys, ProjectedMeasurement<T>& out) {
+        const std::size_t n = sys.cols;
+        const auto proj = features::msckf_left_nullspace_project<T>(sys.Hf, sys.Hx, sys.r, sys.rows, n);
         if (proj.rows == 0)
             return false;
-
-        DynMat<T> H(proj.rows, n);
+        out.H = DynMat<T>(proj.rows, n);
         for (std::size_t i = 0; i < proj.rows; ++i)
             for (std::size_t j = 0; j < n; ++j)
-                H(i, j) = proj.H_x[i * n + j];
-        // Effective per-measurement variance: the assumed image noise plus the
-        // S10 calibration-uncertainty term (isotropic, so the projected noise
-        // stays σ²·I on the surviving rows — the S6 invariant holds).
-        const T r2 = opts_.normalized_sigma * opts_.normalized_sigma + opts_.calib_rot_sigma * opts_.calib_rot_sigma;
-        const T meas_sigma = std::sqrt(r2);
-        std::vector<T> R_diag(proj.rows, r2);
+                out.H(i, j) = proj.H_x[i * n + j];
+        out.r = proj.r;
+        return true;
+    }
 
-        // Innovation NIS (γ = rᵀ S⁻¹ r, dof = proj.rows), computed once (only
-        // when needed) and used for both the optional consistency telemetry and
-        // the Mahalanobis gate.
+    /// Effective per-measurement variance: the assumed image noise plus the S10
+    /// calibration-uncertainty term (isotropic, so the projected noise stays σ²·I
+    /// on the surviving rows — the S6 invariant holds).
+    [[nodiscard]] T measurement_variance() const {
+        return opts_.normalized_sigma * opts_.normalized_sigma + opts_.calib_rot_sigma * opts_.calib_rot_sigma;
+    }
+
+    /// S6d: innovation NIS (γ = rᵀ S⁻¹ r, dof = rows) and the Mahalanobis gate.
+    /// γ is computed once — only when `want_nis` or gating needs it — and serves
+    /// both the consistency telemetry and the gate.
+    template <class Cov>
+    [[nodiscard]] GateDecision<T> gate(const State<T, Cov>& s, const ProjectedMeasurement<T>& pm, bool want_nis) const {
+        GateDecision<T> out;
+        const std::size_t k = pm.H.rows;
+        const T r2 = measurement_variance();
+        const T meas_sigma = std::sqrt(r2);
         T gamma = T{0};
         bool nis_valid = false;
-        if (nis_out != nullptr || opts_.enable_gating) {
-            nis_valid = s.cov.mahalanobis(H, std::span<const T>{proj.r}, r2, gamma);
-            if (nis_out != nullptr) {
+        if (want_nis || opts_.enable_gating) {
+            nis_valid = s.cov.mahalanobis(pm.H, std::span<const T>{pm.r}, r2, gamma);
+            if (want_nis) {
                 T isum{0};
-                for (std::size_t k = 0; k < proj.rows; ++k)
-                    isum += proj.r[k];
-                *nis_out = NisSample<T>{gamma, proj.rows, nis_valid, isum / meas_sigma};
+                for (std::size_t i = 0; i < k; ++i)
+                    isum += pm.r[i];
+                out.nis = NisSample<T>{gamma, k, nis_valid, isum / meas_sigma};
             }
         }
-        if (opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(proj.rows)))
-            return false;  // ill-conditioned innovation or gated out
+        out.accepted = !(opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(k)));
+        return out;
+    }
 
-        StateHelper<T>::ekf_update(s, H, std::span<const T>{proj.r}, std::span<const T>{R_diag});
-        return true;
+    /// S6e: the EKF update with R = measurement_variance()·I; the covariance
+    /// policy updates P and the correction δx is box-plussed onto the mean.
+    /// Returns δx.
+    template <class Cov>
+    std::vector<T> apply_update(State<T, Cov>& s, const ProjectedMeasurement<T>& pm) const {
+        const std::vector<T> R_diag(pm.H.rows, measurement_variance());
+        return StateHelper<T>::ekf_update(s, pm.H, std::span<const T>{pm.r}, std::span<const T>{R_diag});
+    }
+
+    [[nodiscard]] const Options& options() const noexcept {
+        return opts_;
     }
 
     /// Update with a batch of tracks, returning how many were applied.

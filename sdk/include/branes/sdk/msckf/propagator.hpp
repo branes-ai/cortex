@@ -45,7 +45,7 @@ public:
     /// hands both to the covariance policy (which applies F P Fᵀ + Q in
     /// whichever representation it carries).
     template <class Cov>
-    void propagate(State<T, Cov>& s, const Vec3& gyro, const Vec3& accel, T dt) {
+    void propagate(State<T, Cov>& s, const Vec3& gyro, const Vec3& accel, T dt) const {
         if (!(dt > T{0}))
             return;
         const Vec3 w = gyro - s.bg;

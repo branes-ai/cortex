@@ -14,6 +14,7 @@
 #include <cassert>
 #include <cstddef>
 #include <span>
+#include <vector>
 
 namespace branes::sdk::msckf {
 
@@ -62,9 +63,11 @@ struct StateHelper {
     /// EKF update with measurement Jacobian `H` (k×dim), residual `r` (k),
     /// and diagonal measurement noise `R_diag` (k). The covariance policy
     /// performs the update and returns the error-state correction δx, which
-    /// is then applied to the mean via the manifold box-plus.
+    /// is then applied to the mean via the manifold box-plus. Returns δx, so a
+    /// caller (the S6e stage, a bench) can inspect the correction.
     template <class Cov>
-    static void ekf_update(State<T, Cov>& s, const DynMat<T>& H, std::span<const T> r, std::span<const T> R_diag) {
+    static std::vector<T>
+    ekf_update(State<T, Cov>& s, const DynMat<T>& H, std::span<const T> r, std::span<const T> R_diag) {
         const std::size_t d = s.dim();
         const std::size_t k = H.rows;
         assert(H.cols == d && "ekf_update: H must be k×dim");
@@ -94,6 +97,7 @@ struct StateHelper {
             s.clones[c].R = s.clones[c].R * SO3::exp(slice3(dx, off));
             s.clones[c].p = s.clones[c].p + slice3(dx, off + 3);
         }
+        return dx;
     }
 
 private:
