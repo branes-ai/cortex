@@ -52,58 +52,62 @@
 
 namespace branes::sdk::eval::inv {
 
-/// The pipeline stage an invariant belongs to (docs/arch/vio-pipeline-canonical.md,
-/// with S6 split into S6a–S6e as in #444/#452).
+/// The pipeline stage an invariant belongs to. Each enumerator names the
+/// TRANSFORMATION the stage performs, not just its position, so a stage, its
+/// bench and its invariants read in isolation from the rest of the pipeline.
+/// The names match the stage tools (tools/src/s<N>_<transformation>.cpp) and
+/// docs/arch/vio-pipeline-canonical.md; S6 is split into S6a–S6e (#444/#452).
+/// `Inputs` and `EndToEnd` are not transformations: they bracket the pipeline.
 enum class Stage {
-    Inputs,
-    S0,
-    S1,
-    S2,
-    S3,
-    S4,
-    S5,
-    S6a,
-    S6b,
-    S6c,
-    S6d,
-    S6e,
-    S9,
-    S10,
-    EndToEnd,
+    Inputs,                    ///< sensor streams and calibration as delivered
+    S0_sensor_model,           ///< project / unproject, distort / undistort: the camera and IMU models
+    S1_initialization,         ///< bootstrap attitude, gravity, biases, P0
+    S2_propagation,            ///< IMU mean and covariance propagation, P <- Phi P Phi^T + Q_d
+    S3_augmentation,           ///< clone the IMU pose into the window, P grows by 6
+    S4_frontend,               ///< track generation (KLT), pixels -> tracks
+    S5_triangulation,          ///< tracks + clone poses -> 3D feature
+    S6a_jacobians,             ///< measurement Jacobians H_x, H_f and residual r
+    S6b_nullspace_projection,  ///< left null-space projection that marginalizes the feature
+    S6c_compression,           ///< QR compression of the stacked measurement
+    S6d_gating,                ///< chi-square (Mahalanobis) gate
+    S6e_ekf_update,            ///< gain, correction delta-x, Joseph covariance update
+    S9_marginalization,        ///< drop clones: P -> principal submatrix
+    S10_online_calibration,    ///< refine extrinsics / intrinsics / time offset
+    EndToEnd,                  ///< whole-run statistics (NEES/NIS windows, ATE/RPE)
 };
 
 [[nodiscard]] constexpr std::string_view to_string(Stage s) noexcept {
     switch (s) {
     case Stage::Inputs:
         return "inputs";
-    case Stage::S0:
-        return "S0";
-    case Stage::S1:
-        return "S1";
-    case Stage::S2:
-        return "S2";
-    case Stage::S3:
-        return "S3";
-    case Stage::S4:
-        return "S4";
-    case Stage::S5:
-        return "S5";
-    case Stage::S6a:
-        return "S6a";
-    case Stage::S6b:
-        return "S6b";
-    case Stage::S6c:
-        return "S6c";
-    case Stage::S6d:
-        return "S6d";
-    case Stage::S6e:
-        return "S6e";
-    case Stage::S9:
-        return "S9";
-    case Stage::S10:
-        return "S10";
+    case Stage::S0_sensor_model:
+        return "S0_sensor_model";
+    case Stage::S1_initialization:
+        return "S1_initialization";
+    case Stage::S2_propagation:
+        return "S2_propagation";
+    case Stage::S3_augmentation:
+        return "S3_augmentation";
+    case Stage::S4_frontend:
+        return "S4_frontend";
+    case Stage::S5_triangulation:
+        return "S5_triangulation";
+    case Stage::S6a_jacobians:
+        return "S6a_jacobians";
+    case Stage::S6b_nullspace_projection:
+        return "S6b_nullspace_projection";
+    case Stage::S6c_compression:
+        return "S6c_compression";
+    case Stage::S6d_gating:
+        return "S6d_gating";
+    case Stage::S6e_ekf_update:
+        return "S6e_ekf_update";
+    case Stage::S9_marginalization:
+        return "S9_marginalization";
+    case Stage::S10_online_calibration:
+        return "S10_online_calibration";
     case Stage::EndToEnd:
-        return "end-to-end";
+        return "end_to_end";
     }
     return "?";
 }

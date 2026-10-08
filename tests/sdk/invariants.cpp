@@ -72,10 +72,10 @@ std::vector<T> vec(std::initializer_list<double> v) {
 TEMPLATE_TEST_CASE("invariant check_finite flags NaN", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto ok = vec<T>({1.0, -2.0, 0.5});
-    REQUIRE(inv::check_finite<T>(std::span<const T>(ok), Stage::S6e).pass);
+    REQUIRE(inv::check_finite<T>(std::span<const T>(ok), Stage::S6e_ekf_update).pass);
     auto bad = ok;
     bad[1] = T(std::numeric_limits<double>::quiet_NaN());
-    const auto r = inv::check_finite<T>(std::span<const T>(bad), Stage::S6e, "dx.finite");
+    const auto r = inv::check_finite<T>(std::span<const T>(bad), Stage::S6e_ekf_update, "dx.finite");
     REQUIRE_FALSE(r.pass);
     REQUIRE(r.value == 1.0);
     REQUIRE(r.name == "dx.finite");
@@ -84,9 +84,9 @@ TEMPLATE_TEST_CASE("invariant check_finite flags NaN", "[sdk][invariants]", INV_
 TEMPLATE_TEST_CASE("invariant check_symmetric", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     auto p = spd4<T>();
-    REQUIRE(inv::check_symmetric(p, Stage::S2).pass);
+    REQUIRE(inv::check_symmetric(p, Stage::S2_propagation).pass);
     p(0, 1) += T(0.1);
-    const auto r = inv::check_symmetric(p, Stage::S2);
+    const auto r = inv::check_symmetric(p, Stage::S2_propagation);
     REQUIRE_FALSE(r.pass);
     REQUIRE(r.value > 0.09);
     REQUIRE(r.value < 0.11);
@@ -100,11 +100,11 @@ TEMPLATE_TEST_CASE("invariant check_psd accepts a rank-deficient PSD matrix and 
     // the clone-augmentation situation where PSD (not PD) is the invariant.
     const auto b = mat<T>(4, 2, {1.0, 0.5, 0.2, 1.0, -0.4, 0.1, 0.3, -0.2});
     const auto p = ms::mul(b, ms::transpose(b));
-    REQUIRE(inv::check_psd(p, Stage::S3).pass);
-    REQUIRE_FALSE(inv::check_spd(p, Stage::S3).pass);  // singular is not SPD
+    REQUIRE(inv::check_psd(p, Stage::S3_augmentation).pass);
+    REQUIRE_FALSE(inv::check_spd(p, Stage::S3_augmentation).pass);  // singular is not SPD
 
     const auto indef = mat<T>(3, 3, {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -0.1});
-    const auto r = inv::check_psd(indef, Stage::S6e);
+    const auto r = inv::check_psd(indef, Stage::S6e_ekf_update);
     REQUIRE_FALSE(r.pass);
     REQUIRE(r.value > 0.099);  // λ_min = −0.1, reported in matrix units
     REQUIRE(r.value < 0.101);
@@ -112,7 +112,7 @@ TEMPLATE_TEST_CASE("invariant check_psd accepts a rank-deficient PSD matrix and 
 
 TEMPLATE_TEST_CASE("invariant check_spd", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
-    const auto r = inv::check_spd(spd4<T>(), Stage::S6d);
+    const auto r = inv::check_spd(spd4<T>(), Stage::S6d_gating);
     REQUIRE(r.pass);
     REQUIRE(r.bound == inv::Bound::Lower);
     REQUIRE(r.value > 0.5);  // λ_min ≥ 1 by construction (B Bᵀ + I)
@@ -124,11 +124,11 @@ TEMPLATE_TEST_CASE("invariant check_loewner_le: an update never adds uncertainty
     // P⁺ = P⁻ − c c ᵀ for a small c: P⁺ ⪯ P⁻.
     const auto c = mat<T>(4, 1, {0.3, -0.2, 0.1, 0.4});
     const auto pp = inv::la::sub(pm, ms::mul(c, ms::transpose(c)));
-    REQUIRE(inv::check_loewner_le(pp, pm, Stage::S6e).pass);
-    REQUIRE(inv::check_loewner_le(pm, pm, Stage::S6e).pass);  // equality is allowed
+    REQUIRE(inv::check_loewner_le(pp, pm, Stage::S6e_ekf_update).pass);
+    REQUIRE(inv::check_loewner_le(pm, pm, Stage::S6e_ekf_update).pass);  // equality is allowed
     // P⁺ = P⁻ + c cᵀ: the "update" grew the covariance — violation of size ‖c‖².
     const auto grown = ms::add(pm, ms::mul(c, ms::transpose(c)));
-    const auto r = inv::check_loewner_le(grown, pm, Stage::S6e);
+    const auto r = inv::check_loewner_le(grown, pm, Stage::S6e_ekf_update);
     REQUIRE_FALSE(r.pass);
     REQUIRE(r.value > 0.29);  // ‖c‖² = 0.30
     REQUIRE(r.value < 0.31);
@@ -137,15 +137,15 @@ TEMPLATE_TEST_CASE("invariant check_loewner_le: an update never adds uncertainty
 TEMPLATE_TEST_CASE("invariant report_condition_number never fails", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto d = mat<T>(2, 2, {100.0, 0.0, 0.0, 1.0});
-    const auto r = inv::report_condition_number(d, Stage::S5, "triangulation.normal_kappa");
+    const auto r = inv::report_condition_number(d, Stage::S5_triangulation, "triangulation.normal_kappa");
     REQUIRE(r.pass);
     REQUIRE(r.value > 99.9);
     REQUIRE(r.value < 100.1);
 }
 
-// ── S6b null space ───────────────────────────────────────────────────────────
+// ── S6b_nullspace_projection ───────────────────────────────────────────────────────────
 
-TEMPLATE_TEST_CASE("invariant S6b null-space checks: annihilation, orthonormality, rank",
+TEMPLATE_TEST_CASE("invariant S6b_nullspace_projection: annihilation, orthonormality, rank",
                    "[sdk][invariants]",
                    INV_TYPES) {
     using T = TestType;
@@ -167,32 +167,32 @@ TEMPLATE_TEST_CASE("invariant S6b null-space checks: annihilation, orthonormalit
     ms::DynMat<T> hfm(rows, 3);
     hfm.d = hf;
 
-    REQUIRE(inv::check_annihilates(nt, hfm, Stage::S6b, "nullspace.NtHf").pass);
-    REQUIRE(inv::check_orthonormal_rows(nt, Stage::S6b, "nullspace.NtN").pass);
-    REQUIRE(inv::check_rank(nt, 2 * m - 3, Stage::S6b).pass);
-    REQUIRE(inv::check_dimension(proj.rows, 2 * m - 3, Stage::S6b).pass);
+    REQUIRE(inv::check_annihilates(nt, hfm, Stage::S6b_nullspace_projection, "nullspace.NtHf").pass);
+    REQUIRE(inv::check_orthonormal_rows(nt, Stage::S6b_nullspace_projection, "nullspace.NtN").pass);
+    REQUIRE(inv::check_rank(nt, 2 * m - 3, Stage::S6b_nullspace_projection).pass);
+    REQUIRE(inv::check_dimension(proj.rows, 2 * m - 3, Stage::S6b_nullspace_projection).pass);
 
     // Violations: a scaled reflector breaks NᵀN = I; replacing a row with an H_f
     // column breaks NᵀH_f = 0; a duplicated row drops the rank.
     auto scaled = nt;
     for (std::size_t j = 0; j < rows; ++j)
         scaled(0, j) *= T(1.1);
-    REQUIRE_FALSE(inv::check_orthonormal_rows(scaled, Stage::S6b).pass);
+    REQUIRE_FALSE(inv::check_orthonormal_rows(scaled, Stage::S6b_nullspace_projection).pass);
     auto leaky = nt;
     for (std::size_t j = 0; j < rows; ++j)
         leaky(0, j) = hfm(j, 0);
-    REQUIRE_FALSE(inv::check_annihilates(leaky, hfm, Stage::S6b).pass);
+    REQUIRE_FALSE(inv::check_annihilates(leaky, hfm, Stage::S6b_nullspace_projection).pass);
     auto dup = nt;
     for (std::size_t j = 0; j < rows; ++j)
         dup(1, j) = dup(0, j);
-    const auto rk = inv::check_rank(dup, 2 * m - 3, Stage::S6b);
+    const auto rk = inv::check_rank(dup, 2 * m - 3, Stage::S6b_nullspace_projection);
     REQUIRE_FALSE(rk.pass);
     REQUIRE(rk.value == static_cast<double>(2 * m - 4));
 }
 
-// ── S6c compression, S6e gain solve ─────────────────────────────────────────
+// ── S6c_compression, S6e_ekf_update gain solve ─────────────────────────────────────────
 
-TEMPLATE_TEST_CASE("invariant S6c QR compression preserves the normal equations", "[sdk][invariants]", INV_TYPES) {
+TEMPLATE_TEST_CASE("invariant S6c_compression preserves the normal equations", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     constexpr std::size_t rows = 8, n = 4;
     ms::DynMat<T> hr(rows, n + 1);  // [H | r]
@@ -229,34 +229,34 @@ TEMPLATE_TEST_CASE("invariant S6c QR compression preserves the normal equations"
     REQUIRE_FALSE(bad[2].pass);
 }
 
-TEMPLATE_TEST_CASE("invariant S6e gain solve residual K S = P Ht", "[sdk][invariants]", INV_TYPES) {
+TEMPLATE_TEST_CASE("invariant S6e_ekf_update gain solve residual K S = P Ht", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto s = spd4<T>();
     const auto b = mat<T>(3, 4, {0.5, -0.2, 0.1, 0.3, 0.0, 0.4, -0.6, 0.2, 1.0, 0.1, 0.2, -0.3});
     // K = B S⁻¹  ⇔  Kᵀ = S⁻¹ Bᵀ (S symmetric).
     const auto k = ms::transpose(ms::spd_solve(s, ms::transpose(b)));
-    REQUIRE(inv::check_solve_residual(k, s, b, Stage::S6e).pass);
+    REQUIRE(inv::check_solve_residual(k, s, b, Stage::S6e_ekf_update).pass);
     auto k_bad = k;
     k_bad(1, 2) += T(0.05);
-    REQUIRE_FALSE(inv::check_solve_residual(k_bad, s, b, Stage::S6e).pass);
+    REQUIRE_FALSE(inv::check_solve_residual(k_bad, s, b, Stage::S6e_ekf_update).pass);
 }
 
-// ── S2 / S3 / S9 covariance identities ──────────────────────────────────────
+// ── S2_propagation / S3_augmentation / S9_marginalization identities ──────────────────────────────────────
 
-TEMPLATE_TEST_CASE("invariant S2 propagation identity P' = Phi P Phit + Qd", "[sdk][invariants]", INV_TYPES) {
+TEMPLATE_TEST_CASE("invariant S2_propagation identity P' = Phi P Phit + Qd", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto p = spd4<T>();
     const auto phi = mat<T>(4, 4, {1.0, 0.1, 0.0, 0.0, 0.0, 1.0, 0.1, 0.0, 0.0, 0.0, 1.0, 0.1, 0.0, 0.0, 0.0, 1.0});
     const auto qd = mat<T>(4, 4, {0.01, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 0.02});
     const auto pn = ms::add(ms::mul(ms::mul(phi, p), ms::transpose(phi)), qd);
     REQUIRE(inv::check_covariance_propagation(p, phi, qd, pn).pass);
-    REQUIRE(inv::check_psd(qd, Stage::S2, "Qd.psd").pass);
+    REQUIRE(inv::check_psd(qd, Stage::S2_propagation, "Qd.psd").pass);
     // Dropping Q_d (a propagation that forgets process noise) is caught.
     const auto no_q = ms::mul(ms::mul(phi, p), ms::transpose(phi));
     REQUIRE_FALSE(inv::check_covariance_propagation(p, phi, qd, no_q).pass);
 }
 
-TEMPLATE_TEST_CASE("invariant S3 augmentation blocks and +6 dimension", "[sdk][invariants]", INV_TYPES) {
+TEMPLATE_TEST_CASE("invariant S3_augmentation blocks and +6 dimension", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto p = spd4<T>();
     // A 2×4 "clone" Jacobian (the pose clone is 6×n; the block identity is the same).
@@ -277,7 +277,7 @@ TEMPLATE_TEST_CASE("invariant S3 augmentation blocks and +6 dimension", "[sdk][i
     REQUIRE(ok.size() == 2);
     REQUIRE(ok[0].pass);
     REQUIRE(ok[1].pass);
-    REQUIRE(inv::check_psd(pa, Stage::S3).pass);  // singular (exact copy), still PSD
+    REQUIRE(inv::check_psd(pa, Stage::S3_augmentation).pass);  // singular (exact copy), still PSD
 
     // Augmenting without the cross-covariance (a clone that forgets it is
     // correlated with the IMU state) is caught.
@@ -292,7 +292,7 @@ TEMPLATE_TEST_CASE("invariant S3 augmentation blocks and +6 dimension", "[sdk][i
     REQUIRE_FALSE(bad_dim[1].pass);
 }
 
-TEMPLATE_TEST_CASE("invariant S9 marginalization equals the principal submatrix", "[sdk][invariants]", INV_TYPES) {
+TEMPLATE_TEST_CASE("invariant S9_marginalization equals the principal submatrix", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto p = spd4<T>();
     const std::array<std::size_t, 3> keep{0, 2, 3};
@@ -340,7 +340,7 @@ TEMPLATE_TEST_CASE("invariant check_so3 and unit quaternion", "[sdk][invariants]
     using T = TestType;
     using SO3 = branes::math::lie::SO3<T>;
     const auto rot = SO3::exp({{T(0.3), T(-0.2), T(0.7)}});
-    for (const auto& r : inv::check_so3(rot, Stage::S2))
+    for (const auto& r : inv::check_so3(rot, Stage::S2_propagation))
         REQUIRE(r.pass);
 
     auto refl = inv::Mat3<T>::identity();
@@ -351,12 +351,12 @@ TEMPLATE_TEST_CASE("invariant check_so3 and unit quaternion", "[sdk][invariants]
     REQUIRE(rr[1].value > 1.99);
 
     const auto drift = rot.matrix() * T(1.01);
-    REQUIRE_FALSE(inv::check_so3<T>(drift, Stage::S2)[0].pass);
+    REQUIRE_FALSE(inv::check_so3<T>(drift, Stage::S2_propagation)[0].pass);
 
     const std::array<T, 4> q = rot.quaternion().e;
-    REQUIRE(inv::check_unit_quaternion<T>(std::span<const T, 4>(q), Stage::S2).pass);
+    REQUIRE(inv::check_unit_quaternion<T>(std::span<const T, 4>(q), Stage::S2_propagation).pass);
     const std::array<T, 4> q_bad{T(1), T(0.1), T(0), T(0)};
-    REQUIRE_FALSE(inv::check_unit_quaternion<T>(std::span<const T, 4>(q_bad), Stage::S2).pass);
+    REQUIRE_FALSE(inv::check_unit_quaternion<T>(std::span<const T, 4>(q_bad), Stage::S2_propagation).pass);
 }
 
 TEMPLATE_TEST_CASE("invariant intrinsics and gravity contract", "[sdk][invariants]", INV_TYPES) {
@@ -383,13 +383,13 @@ TEMPLATE_TEST_CASE("invariant intrinsics and gravity contract", "[sdk][invariant
 TEMPLATE_TEST_CASE("invariant bounds, depths, image bounds, track bookkeeping", "[sdk][invariants]", INV_TYPES) {
     using T = TestType;
     const auto bias = vec<T>({0.01, -0.02, 0.005});
-    REQUIRE(inv::check_bounded<T>(bias, T(0.1), Stage::S1, "bias.gyro", "rad/s").pass);
-    REQUIRE_FALSE(inv::check_bounded<T>(bias, T(0.015), Stage::S1, "bias.gyro", "rad/s").pass);
+    REQUIRE(inv::check_bounded<T>(bias, T(0.1), Stage::S1_initialization, "bias.gyro", "rad/s").pass);
+    REQUIRE_FALSE(inv::check_bounded<T>(bias, T(0.015), Stage::S1_initialization, "bias.gyro", "rad/s").pass);
 
     const auto depth = vec<T>({4.0, 5.5, 3.2});
-    REQUIRE(inv::check_at_least<T>(depth, T(0.1), Stage::S5, "depth.positive", "m").pass);
+    REQUIRE(inv::check_at_least<T>(depth, T(0.1), Stage::S5_triangulation, "depth.positive", "m").pass);
     const auto behind = vec<T>({4.0, -0.5, 3.2});
-    REQUIRE_FALSE(inv::check_at_least<T>(behind, T(0.1), Stage::S5, "depth.positive", "m").pass);
+    REQUIRE_FALSE(inv::check_at_least<T>(behind, T(0.1), Stage::S5_triangulation, "depth.positive", "m").pass);
 
     const std::vector<std::array<T, 2>> pts{{T(10), T(10)}, {T(700), T(400)}};
     REQUIRE(inv::check_points_in_image<T>(pts, T(752), T(480)).pass);
@@ -406,9 +406,9 @@ TEMPLATE_TEST_CASE("invariant round trip and Jacobian vs finite differences", "[
     using T = TestType;
     const auto a = vec<T>({0.25, -0.5, 1.0});
     auto b = a;
-    REQUIRE(inv::check_round_trip<T>(a, b, Stage::S0, "undistort.round_trip", "normalized").pass);
+    REQUIRE(inv::check_round_trip<T>(a, b, Stage::S0_sensor_model, "undistort.round_trip", "normalized").pass);
     b[2] += T(1e-2);
-    REQUIRE_FALSE(inv::check_round_trip<T>(a, b, Stage::S0, "undistort.round_trip", "normalized").pass);
+    REQUIRE_FALSE(inv::check_round_trip<T>(a, b, Stage::S0_sensor_model, "undistort.round_trip", "normalized").pass);
 
     // f(x) = [x0·x1 + x2³, x0² − x1·x2]
     auto f = [](std::span<const T> x) {
@@ -417,9 +417,9 @@ TEMPLATE_TEST_CASE("invariant round trip and Jacobian vs finite differences", "[
     const auto x = vec<T>({0.7, -1.2, 0.4});
     // J = [[x1, x0, 3x2²], [2x0, −x2, −x1]]
     auto j = vec<T>({-1.2, 0.7, 3.0 * 0.16, 1.4, -0.4, 1.2});
-    REQUIRE(inv::check_jacobian_fd<T>(f, x, j, Stage::S6a, "H_x.fd").pass);
+    REQUIRE(inv::check_jacobian_fd<T>(f, x, j, Stage::S6a_jacobians, "H_x.fd").pass);
     j[3] = T(-1.4);  // a sign error in one entry
-    const auto r = inv::check_jacobian_fd<T>(f, x, j, Stage::S6a, "H_x.fd");
+    const auto r = inv::check_jacobian_fd<T>(f, x, j, Stage::S6a_jacobians, "H_x.fd");
     REQUIRE_FALSE(r.pass);
     REQUIRE(r.value > 2.7);
 }
@@ -455,10 +455,10 @@ TEST_CASE("invariant chi2 window: NIS approx dof passes, 3x dof fails", "[sdk][i
         good.add(5.0, 5);   // statistic at its expectation
         over.add(15.0, 5);  // the over-confident filter
     }
-    const auto g = inv::check_chi2_window(good, Stage::S6d, "nis.window");
+    const auto g = inv::check_chi2_window(good, Stage::S6d_gating, "nis.window");
     REQUIRE(g.pass);
     REQUIRE(g.bound == inv::Bound::Band);
-    const auto o = inv::check_chi2_window(over, Stage::S6d, "nis.window");
+    const auto o = inv::check_chi2_window(over, Stage::S6d_gating, "nis.window");
     REQUIRE_FALSE(o.pass);
     REQUIRE(o.value == 3.0);
     REQUIRE_FALSE(inv::check_chi2_window(branes::sdk::eval::ConsistencyAccumulator{}, Stage::EndToEnd, "nees").pass);
@@ -469,18 +469,18 @@ TEST_CASE("invariant chi2 window: NIS approx dof passes, 3x dof fails", "[sdk][i
 TEST_CASE("invariant report: first failure in pipeline order, tightest margin, per stage", "[sdk][invariants]") {
     inv::InvariantReport rep;
     const auto p = spd4<double>();
-    rep.add(inv::check_symmetric(p, Stage::S2, "P.symmetric"));
-    rep.add(inv::check_psd(p, Stage::S2, "P.psd"));
-    rep.add(inv::check_scalar(0.4, 0.5, inv::Bound::Upper, Stage::S5, "reproj.max", "px"));
-    rep.add(inv::check_scalar(2.0, 1.0, inv::Bound::Upper, Stage::S6e, "dx.along_N", "rad"));
-    rep.add(inv::check_scalar(9.0, 1.0, inv::Bound::Upper, Stage::S9, "late", "count"));
+    rep.add(inv::check_symmetric(p, Stage::S2_propagation, "P.symmetric"));
+    rep.add(inv::check_psd(p, Stage::S2_propagation, "P.psd"));
+    rep.add(inv::check_scalar(0.4, 0.5, inv::Bound::Upper, Stage::S5_triangulation, "reproj.max", "px"));
+    rep.add(inv::check_scalar(2.0, 1.0, inv::Bound::Upper, Stage::S6e_ekf_update, "dx.along_N", "rad"));
+    rep.add(inv::check_scalar(9.0, 1.0, inv::Bound::Upper, Stage::S9_marginalization, "late", "count"));
     REQUIRE_FALSE(rep.all_pass());
     REQUIRE(rep.failures() == 2);
     REQUIRE(rep.first_failure()->name == "dx.along_N");
-    REQUIRE(rep.first_failure()->stage == Stage::S6e);
+    REQUIRE(rep.first_failure()->stage == Stage::S6e_ekf_update);
     REQUIRE(rep.tightest()->name == "late");
-    REQUIRE(rep.for_stage(Stage::S2).size() == 2);
-    REQUIRE(inv::to_string(Stage::S6e) == "S6e");
+    REQUIRE(rep.for_stage(Stage::S2_propagation).size() == 2);
+    REQUIRE(inv::to_string(Stage::S6e_ekf_update) == "S6e_ekf_update");
 }
 
 // ── Tolerance scaling with the arithmetic type ──────────────────────────────
@@ -505,7 +505,7 @@ TEMPLATE_TEST_CASE("invariant verdict on a small asymmetry follows the type's ep
     auto p = spd4<T>();
     const double scale = static_cast<double>(inv::la::max_abs(p));
     p(0, 1) += T(2e-6 * scale);
-    const auto r = inv::check_symmetric(p, Stage::S2);
+    const auto r = inv::check_symmetric(p, Stage::S2_propagation);
     if constexpr (std::is_same_v<T, float>)
         REQUIRE(r.pass);
     else

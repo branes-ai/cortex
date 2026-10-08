@@ -114,8 +114,8 @@ check_intrinsics(T fx, T fy, T cx, T cy, T width, T height, Stage stage = Stage:
 /// | ‖g‖ − g₀ | ≤ `magnitude_tol` (m/s²) and the angle between g and −ẑ ≤
 /// `direction_tol` (rad). A sign error (+ẑ) shows as an angle of π.
 template <math::Scalar T>
-[[nodiscard]] std::vector<InvariantResult>
-check_gravity(const Vec3<T>& g_world, T g_nominal, T magnitude_tol, T direction_tol, Stage stage = Stage::S1) {
+[[nodiscard]] std::vector<InvariantResult> check_gravity(
+    const Vec3<T>& g_world, T g_nominal, T magnitude_tol, T direction_tol, Stage stage = Stage::S1_initialization) {
     const T n = la::sqrt_(g_world[0] * g_world[0] + g_world[1] * g_world[1] + g_world[2] * g_world[2]);
     double angle = 3.141592653589793;
     if (n > T{0}) {
@@ -165,7 +165,7 @@ template <math::Scalar T>
                                                     T width,
                                                     T height,
                                                     T margin = T{0},
-                                                    Stage stage = Stage::S4,
+                                                    Stage stage = Stage::S4_frontend,
                                                     std::string_view name = "tracks.in_image") {
     std::size_t out = 0;
     for (const auto& p : pts) {
@@ -180,7 +180,7 @@ template <math::Scalar T>
 /// inconsistent tracks; threshold 0.
 [[nodiscard]] inline InvariantResult check_track_lengths(std::span<const std::size_t> lengths,
                                                          std::size_t window_clones,
-                                                         Stage stage = Stage::S4,
+                                                         Stage stage = Stage::S4_frontend,
                                                          std::string_view name = "tracks.length_vs_clones") {
     std::size_t bad = 0;
     for (const std::size_t l : lengths)

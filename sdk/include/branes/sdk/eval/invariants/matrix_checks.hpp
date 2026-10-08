@@ -226,7 +226,7 @@ template <math::Scalar T>
                                                            const DynMat<T>& phi,
                                                            const DynMat<T>& qd,
                                                            const DynMat<T>& p_next,
-                                                           Stage stage = Stage::S2,
+                                                           Stage stage = Stage::S2_propagation,
                                                            std::string_view name = "propagation_identity",
                                                            double safety = kDefaultSafety) {
     const std::size_t n = p.rows;
@@ -248,7 +248,7 @@ template <math::Scalar T>
 [[nodiscard]] std::vector<InvariantResult> check_augmentation(const DynMat<T>& p,
                                                               const DynMat<T>& j,
                                                               const DynMat<T>& p_aug,
-                                                              Stage stage = Stage::S3,
+                                                              Stage stage = Stage::S3_augmentation,
                                                               double safety = kDefaultSafety) {
     const std::size_t n = p.rows, c = j.rows;
     std::vector<InvariantResult> out;
@@ -288,7 +288,7 @@ template <math::Scalar T>
 [[nodiscard]] std::vector<InvariantResult> check_principal_submatrix(const DynMat<T>& p_before,
                                                                      std::span<const std::size_t> keep,
                                                                      const DynMat<T>& p_after,
-                                                                     Stage stage = Stage::S9,
+                                                                     Stage stage = Stage::S9_marginalization,
                                                                      double safety = kDefaultSafety) {
     std::vector<InvariantResult> out;
     const std::size_t k = keep.size();
@@ -329,7 +329,7 @@ template <math::Scalar T>
                                                              std::span<const T> r,
                                                              const DynMat<T>& h_c,
                                                              std::span<const T> r_c,
-                                                             Stage stage = Stage::S6c,
+                                                             Stage stage = Stage::S6c_compression,
                                                              double safety = kDefaultSafety) {
     std::vector<InvariantResult> out;
     if (h.cols != h_c.cols || r.size() != h.rows || r_c.size() != h_c.rows) {
@@ -375,7 +375,7 @@ template <math::Scalar T>
 [[nodiscard]] InvariantResult check_subspace_preserved(const DynMat<T>& phi,
                                                        const DynMat<T>& n_k,
                                                        const DynMat<T>& n_next,
-                                                       Stage stage = Stage::S2,
+                                                       Stage stage = Stage::S2_propagation,
                                                        std::string_view name = "unobservable_subspace_preserved",
                                                        double safety = kDefaultSafety) {
     if (phi.cols != n_k.rows || phi.rows != n_next.rows)
@@ -396,7 +396,7 @@ template <math::Scalar T>
 template <math::Scalar T>
 [[nodiscard]] InvariantResult check_no_update_along(std::span<const T> dx,
                                                     const DynMat<T>& n,
-                                                    Stage stage = Stage::S6e,
+                                                    Stage stage = Stage::S6e_ekf_update,
                                                     std::string_view name = "no_update_along_unobservable",
                                                     double safety = kDefaultSafety) {
     if (n.rows != dx.size())
