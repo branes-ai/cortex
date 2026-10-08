@@ -119,6 +119,28 @@ measurement Jacobians. A mixed convention is a classic silent inconsistency.
 > Inflating `R` is a crude proxy for the unmodeled calibration/extrinsic/time-offset uncertainty.
 > This is a **candidate contract to test** (see S0, S10), not a declared fix.
 
+### The stages as code (#452)
+
+Each stage below is an explicit transformation in `sdk/include/branes/sdk/msckf/stages/`, of the
+shape *(state, inputs, params) → (state, diagnostics)*: the state passed in is the only thing
+mutated, and what happened is returned rather than logged. `MsckfBackendT` is their call
+sequence, and a stage bench calls one in isolation. The stage names carry the transformation.
+
+| Stage | Transformation | Header |
+|---|---|---|
+| S0_sensor_model | pixel → normalized image point | `s0_sensor_model.hpp` |
+| S1_initialization | init result → seeded state | `s1_initialization.hpp` |
+| S2_propagation | IMU sample → propagated mean + covariance | `s2_propagation.hpp` |
+| S3_augmentation | state → state + clone | `s3_augmentation.hpp` |
+| S4_frontend | frame observations → tracks, ended tracks | `s4_frontend.hpp` |
+| S5_triangulation | track → feature position | `s5_triangulation.hpp` |
+| S6a_jacobians … S6e_ekf_update | track → updated state, one entry point per sub-step | `s6_msckf_update.hpp` |
+| S9_marginalization | state → state − clone | `s9_marginalization.hpp` |
+| S10_online_calibration | state → state + calibration states | `s10_online_calibration.hpp` |
+
+S6c_compression is the identity in cortex today (one feature per update leaves 2m − 3 rows), kept
+as an explicit slot for a compressing variant. S7 and S8 are not implemented in cortex.
+
 ---
 
 ## S0 — Sensor & calibration models (the substrate every stage trusts)

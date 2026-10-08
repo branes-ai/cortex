@@ -15,6 +15,12 @@
 // world-frame mirror of the body-frame State + StateHelper + CameraUpdater stack;
 // it is built alongside (not replacing) that stack until the EuRoC verdict clears.
 //
+// Its operations follow the same stage shape as msckf/stages/ (#452):
+// propagate = S2_propagation, augment_clone = S3_augmentation,
+// marginalize_clone = S9_marginalization, enable_calibration =
+// S10_online_calibration, and update = S5_triangulation → S6a_jacobians →
+// S6b_nullspace_projection → S6c_compression → S6d_gating → S6e_ekf_update.
+//
 // Header-only, C++20, type-generic.
 
 #ifndef BRANES_SDK_MSCKF_MSCKF_INVARIANT_BACKEND_HPP
@@ -101,7 +107,8 @@ public:
         nav_.timestamp = t;
     }
 
-    /// Turn on online extrinsic calibration: append a calibration block.
+    /// S10_online_calibration: turn on online extrinsic calibration — append a
+    /// calibration block.
     void enable_calibration(std::vector<Calib> init, T rot_sigma, T trans_sigma) {
         if (!clones_.empty())
             throw std::logic_error("enable_calibration must precede any clone");
@@ -135,7 +142,8 @@ public:
     }
 
     // ── filter operations ────────────────────────────────────────────
-    /// Propagate the live nav state and the joint covariance over one IMU sample.
+    /// S2_propagation: propagate the live nav state and the joint covariance over
+    /// one IMU sample.
     /// The clone block is static under propagation (cross-covariance via the joint
     /// Φ = blkdiag(Φ_nav, I)); only the nav rows/cols evolve.
     void propagate(const Vec3& gyro, const Vec3& accel, T dt) {
@@ -154,7 +162,8 @@ public:
         nav_.timestamp += static_cast<double>(dt);
     }
 
-    /// Append a clone of the current nav pose to the window. The clone shares the
+    /// S3_augmentation: append a clone of the current nav pose to the window (then
+    /// S9 if the window overflows). The clone shares the
     /// nav error at clone time: δθ_c = δθ_nav, δρ_c = δp_nav.
     void augment_clone() {
         const std::size_t d = dim();
@@ -171,7 +180,7 @@ public:
             marginalize_clone(0);  // drop the oldest
     }
 
-    /// Drop clone `idx`: delete its 6 joint rows/cols and erase it.
+    /// S9_marginalization: drop clone `idx` — delete its 6 joint rows/cols and erase it.
     void marginalize_clone(std::size_t idx) {
         if (idx >= clones_.size())
             return;
@@ -186,11 +195,12 @@ public:
         clones_.erase(clones_.begin() + static_cast<std::ptrdiff_t>(idx));
     }
 
-    /// Process one feature track over the current window: triangulate, build the
-    /// invariant measurement on the joint state (nav columns zero — the feature
-    /// constrains only the clones; the nav is corrected through cross-covariance),
-    /// marginalize the feature, EKF-update, and retract nav + clones in the
-    /// right-invariant box-plus. Returns true iff the state was updated.
+    /// Process one feature track over the current window: triangulate (S5), build
+    /// the invariant measurement on the joint state (S6a; nav columns zero — the
+    /// feature constrains only the clones; the nav is corrected through
+    /// cross-covariance), marginalize the feature (S6b), gate (S6d), EKF-update
+    /// (S6e), and retract nav + clones in the right-invariant box-plus. Returns
+    /// true iff the state was updated.
     bool update(const InvariantTrack<T>& obs) {
         if (obs.size() < 2 || clones_.empty())
             return false;
@@ -199,15 +209,42 @@ public:
         const auto& active_cal = calib_.empty() ? std::vector<Calib>{{cfg_.R_imu_cam, cfg_.p_imu_cam}} : calib_;
         const bool estimate_cal = !calib_.empty();
 
+        // S5_triangulation
         const auto tri = triangulate_invariant<T>(clones_, obs, active_cal);
         if (!tri.ok)
             return false;
+        // S6a_jacobians
         const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f, active_cal, estimate_cal);
         if (!M.ok)
             return false;
+        const std::vector<T> Hj = joint_jacobian(M);
+        // S6b_nullspace_projection
+        const std::size_t d = dim();
+        const auto proj = features::msckf_left_nullspace_project<T>(M.H_f, Hj, M.r, M.rows2, d);
+        if (proj.rows == 0)
+            return false;
+        DynMat<T> H(proj.rows, d);
+        for (std::size_t i = 0; i < proj.rows; ++i)
+            for (std::size_t j = 0; j < d; ++j)
+                H(i, j) = proj.H_x[i * d + j];
+        // S6c_compression: the identity — one feature per update leaves 2m − 3
+        // rows, fewer than the joint dimension.
+        // S6d_gating
+        const T r2 = cfg_.normalized_sigma * cfg_.normalized_sigma;
+        if (!gate(H, proj.r, r2))
+            return false;
+        // S6e_ekf_update
+        return ekf_update(H, proj.r, r2);
+    }
 
-        // Scatter the clone-only H_x (2m × nc_calib) into the joint H (2m × dim),
-        // placing each clone/calib block at its joint offset; nav columns stay zero.
+    static constexpr std::size_t kCloneDim = 6;
+    static constexpr std::size_t kCalibBlock = 6;
+
+private:
+    /// S6a: scatter the clone-only H_x (2m × nc_calib) into the joint H (2m × dim),
+    /// placing each clone/calib block at its joint offset; nav columns stay zero.
+    template <class Measurement>
+    [[nodiscard]] std::vector<T> joint_jacobian(const Measurement& M) const {
         const std::size_t d = dim();
         const std::size_t nc6 = kCloneDim * clones_.size();
         const std::size_t n_calib = kCalibBlock * calib_.size();
@@ -221,32 +258,31 @@ public:
                 for (std::size_t k = 0; k < kCalibBlock; ++k)
                     Hj[row * d + calib_offset(j) + k] = M.H_x[row * nc_calib + nc6 + kCalibBlock * j + k];
         }
+        return Hj;
+    }
 
-        const auto proj = features::msckf_left_nullspace_project<T>(M.H_f, Hj, M.r, M.rows2, d);
-        if (proj.rows == 0)
-            return false;
-        DynMat<T> H(proj.rows, d);
-        for (std::size_t i = 0; i < proj.rows; ++i)
-            for (std::size_t j = 0; j < d; ++j)
-                H(i, j) = proj.H_x[i * d + j];
-        const T r2 = cfg_.normalized_sigma * cfg_.normalized_sigma;
-        // χ² innovation gate: a single bad/low-parallax track can otherwise drive a
-        // large wrong correction. γ = rᵀS⁻¹r; reject if ill-conditioned or too large.
-        if (cfg_.enable_gating) {
-            T gamma = T{0};
-            const bool ok = cov_.mahalanobis(H, std::span<const T>{proj.r}, r2, gamma);
-            if (!ok || gamma > cfg_.chi2_per_dof * static_cast<T>(proj.rows))
-                return false;
-        }
-        const std::vector<T> R_diag(proj.rows, r2);
-        // A filter must never apply a non-finite correction, nor let a pathological
-        // update poison the covariance. The χ² gate (cholesky) rejects a non-PD S,
-        // but on real data a barely-conditioned sqrt-form update can still emit a
-        // non-finite δx; snapshot, and on any non-finite component restore the
-        // covariance and reject the track (it never happened). Keeps the estimator
-        // alive on a degenerate measurement instead of aborting in SO3::normalize.
+    /// S6d: χ² innovation gate. A single bad/low-parallax track can otherwise
+    /// drive a large wrong correction. γ = rᵀS⁻¹r; reject if ill-conditioned or
+    /// too large. Always passes when gating is disabled.
+    [[nodiscard]] bool gate(const DynMat<T>& H, const std::vector<T>& r, T r2) const {
+        if (!cfg_.enable_gating)
+            return true;
+        T gamma = T{0};
+        const bool ok = cov_.mahalanobis(H, std::span<const T>{r}, r2, gamma);
+        return ok && !(gamma > cfg_.chi2_per_dof * static_cast<T>(H.rows));
+    }
+
+    /// S6e: the EKF update and the right-invariant retraction. A filter must
+    /// never apply a non-finite correction, nor let a pathological update poison
+    /// the covariance. The χ² gate (cholesky) rejects a non-PD S, but on real
+    /// data a barely-conditioned sqrt-form update can still emit a non-finite
+    /// δx; snapshot, and on any non-finite component restore the covariance and
+    /// reject the track (it never happened). Keeps the estimator alive on a
+    /// degenerate measurement instead of aborting in SO3::normalize.
+    bool ekf_update(const DynMat<T>& H, const std::vector<T>& r, T r2) {
+        const std::vector<T> R_diag(H.rows, r2);
         const Cov cov_snapshot = cov_;
-        const std::vector<T> dx = cov_.update(H, std::span<const T>{proj.r}, std::span<const T>{R_diag});
+        const std::vector<T> dx = cov_.update(H, std::span<const T>{r}, std::span<const T>{R_diag});
         // δx = K·r is the sentinel: a non-finite update means the gain/innovation
         // blew up, and the same factorization would have poisoned the covariance —
         // restoring the snapshot rolls both back. (A covariance that turns
@@ -261,15 +297,10 @@ public:
                 return false;
             }
         }
-
         retract(dx);
         return true;
     }
 
-    static constexpr std::size_t kCloneDim = 6;
-    static constexpr std::size_t kCalibBlock = 6;
-
-private:
     [[nodiscard]] std::array<NoiseTerm<T>, 12> nav_process_noise(T dt) const {
         std::array<NoiseTerm<T>, 12> q;
         auto fill = [&](std::size_t at, std::size_t off, T val) {

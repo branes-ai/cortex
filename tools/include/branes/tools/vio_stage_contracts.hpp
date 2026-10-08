@@ -47,7 +47,8 @@ inline const StageInfo kS0{
      "extrinsic.csv",
      "imu_drift.csv"},
     "math/cameras/*.hpp, sdk/msckf/propagator.hpp",
-    "implemented"};
+    "implemented",
+    "stages::s0_sensor_model::apply(camera, u, v) → normalized xy  [sdk/msckf/stages/s0_sensor_model.hpp]"};
 
 // ── S1  Initialization ─────────────────────────────────────────────────────
 inline const StageInfo kS1{
@@ -68,7 +69,9 @@ inline const StageInfo kS1{
      {"initial-P seed per block", "deg / m / m/s²", "isotropic σ·I — NOT enlarged on yaw/scale/accel-bias"}},
     {"init_static_sweep.csv", "init_excitation_sweep.csv", "init_p_sizing.csv"},
     "sdk/imu_init.hpp, sdk/imu_preintegration.hpp",
-    "implemented"};
+    "implemented",
+    "stages::s1_initialization::seed_from_imu / seed_from_alignment(state, init, t, …) → seeded state  "
+    "[sdk/msckf/stages/s1_initialization.hpp]"};
 
 // ── S2  IMU propagation ─────────────────────────────────────────────────────
 inline const StageInfo kS2{
@@ -89,7 +92,8 @@ inline const StageInfo kS2{
      {"global-position nullspace leak", "—", "Φ preserves the unobservable position subspace (≈0)"}},
     {"prop_q_structure.csv", "prop_growth.csv", "prop_gt_injection.csv", "prop_nees.csv"},
     "sdk/msckf/propagator.hpp",
-    "implemented"};
+    "implemented",
+    "stages::s2_propagation::apply(state, propagator, ω̃, ã, Δt) → state′  [sdk/msckf/stages/s2_propagation.hpp]"};
 
 // ── S3  State augmentation / cloning ────────────────────────────────────────
 inline const StageInfo kS3{
@@ -107,7 +111,8 @@ inline const StageInfo kS3{
      {"P min eigenvalue after augment", "—", "covariance stays PSD"}},
     {"augment_block_equality.csv"},
     "sdk/msckf/state_helper.hpp (augment_clone)",
-    "scaffold"};
+    "scaffold",
+    "stages::s3_augmentation::apply(state, t) → state′ + clone  [sdk/msckf/stages/s3_augmentation.hpp]"};
 
 // ── S4  Visual frontend ─────────────────────────────────────────────────────
 inline const StageInfo kS4{
@@ -126,44 +131,51 @@ inline const StageInfo kS4{
      {"pixel-noise → track survival", "px", "the true measurement noise the backend should use"}},
     {"frontend_fb_residual.csv", "frontend_coverage.csv", "frontend_tracklen.csv", "frontend_noise_sweep.csv"},
     "sdk/vio_estimator.hpp (frontend), cv KLT",
-    "scaffold"};
+    "scaffold",
+    "stages::s4_frontend::apply(tracks, t, obs, S0) → tracks′, ended; assemble(recs, state) → track  "
+    "[sdk/msckf/stages/s4_frontend.hpp]"};
 
 // ── S5  Feature triangulation ──────────────────────────────────────────────
-inline const StageInfo kS5{"S5",
-                           "Feature triangulation",
-                           "triangulate(observations, clone_poses, T_CI) → (p_f∈ℝ³, status)",
-                           {"≥2 observations from distinct, sufficiently-parallax clones; cheirality holds"},
-                           {"reprojection residual at the solution below threshold",
-                            "depth positive and finite; cheirality holds in every observing view",
-                            "triangulation normal-matrix condition number bounded (low parallax ⇒ defer/down-weight)"},
-                           {{"reprojection RMS at solution", "px", "the triangulated point explains its observations"},
-                            {"parallax angle (max over views)", "deg", "the geometric conditioner of depth"},
-                            {"triangulation condition number", "—", "low parallax ⇒ ill-conditioned ⇒ huge depth σ"},
-                            {"depth error vs parallax", "m", "where the parallax gate must sit"},
-                            {"depth uncertainty vs parallax", "m", "the σ a low-parallax feature truly has"}},
-                           {"triang_parallax_sweep.csv", "triang_reproj.csv"},
-                           "sdk/msckf/camera_updater.hpp (triangulate)",
-                           "scaffold"};
+inline const StageInfo kS5{
+    "S5",
+    "Feature triangulation",
+    "triangulate(observations, clone_poses, T_CI) → (p_f∈ℝ³, status)",
+    {"≥2 observations from distinct, sufficiently-parallax clones; cheirality holds"},
+    {"reprojection residual at the solution below threshold",
+     "depth positive and finite; cheirality holds in every observing view",
+     "triangulation normal-matrix condition number bounded (low parallax ⇒ defer/down-weight)"},
+    {{"reprojection RMS at solution", "px", "the triangulated point explains its observations"},
+     {"parallax angle (max over views)", "deg", "the geometric conditioner of depth"},
+     {"triangulation condition number", "—", "low parallax ⇒ ill-conditioned ⇒ huge depth σ"},
+     {"depth error vs parallax", "m", "where the parallax gate must sit"},
+     {"depth uncertainty vs parallax", "m", "the σ a low-parallax feature truly has"}},
+    {"triang_parallax_sweep.csv", "triang_reproj.csv"},
+    "sdk/msckf/camera_updater.hpp (triangulate)",
+    "scaffold",
+    "stages::s5_triangulation::apply(state, updater, track) → p_f  [sdk/msckf/stages/s5_triangulation.hpp]"};
 
 // ── S6  MSCKF update ────────────────────────────────────────────────────────
-inline const StageInfo kS6{"S6",
-                           "MSCKF update (null-space → compress → gate → EKF)",
-                           "update(x⁻,P⁻,{tracks}) → (x⁺,P⁺)",
-                           {"triangulated p_f valid (S5); ≥2 observations; H evaluated at FEJ, residual at current"},
-                           {"H_f full column-rank 3; analytic H_x,H_f == finite-diff",
-                            "null-space N orthonormal (NᵀN=I, NᵀH_f≈0) ⇒ projected noise stays σ²I; rows=2m−3",
-                            "QR compression exact (Q₁ᵀ orthogonal ⇒ noise still σ²I)",
-                            "post-update P⁺ symmetric PSD (Joseph); x⁺ on-manifold; FEJ points untouched",
-                            "MASTER: post-update NEES≈dim, NIS≈dof, innovations white"},
-                           {{"H_f column rank", "—", "the feature direction is observable (rank 3)"},
-                            {"Jacobian analytic-vs-numeric", "—", "measurement Jacobians are the true derivatives"},
-                            {"null-space orthonormality", "—", "‖NᵀN−I‖, ‖NᵀH_f‖ ≈ 0 — else noise model is wrong"},
-                            {"NIS vs χ²(dof)", "—", "innovations sized as predicted; NIS≫dof ⇒ over-confidence"},
-                            {"innovation whiteness (lag-1)", "—", "no information left uncaptured frame-to-frame"},
-                            {"FEJ clone divergence", "deg / cm", "how far the frozen linearization point has drifted"}},
-                           {"update_nis.csv", "update_jacobian.csv", "update_nullspace.csv", "update_fej_div.csv"},
-                           "sdk/msckf/camera_updater.hpp, features/msckf_nullspace.hpp, msckf/covariance.hpp",
-                           "wired"};
+inline const StageInfo kS6{
+    "S6",
+    "MSCKF update (null-space → compress → gate → EKF)",
+    "update(x⁻,P⁻,{tracks}) → (x⁺,P⁺)",
+    {"triangulated p_f valid (S5); ≥2 observations; H evaluated at FEJ, residual at current"},
+    {"H_f full column-rank 3; analytic H_x,H_f == finite-diff",
+     "null-space N orthonormal (NᵀN=I, NᵀH_f≈0) ⇒ projected noise stays σ²I; rows=2m−3",
+     "QR compression exact (Q₁ᵀ orthogonal ⇒ noise still σ²I)",
+     "post-update P⁺ symmetric PSD (Joseph); x⁺ on-manifold; FEJ points untouched",
+     "MASTER: post-update NEES≈dim, NIS≈dof, innovations white"},
+    {{"H_f column rank", "—", "the feature direction is observable (rank 3)"},
+     {"Jacobian analytic-vs-numeric", "—", "measurement Jacobians are the true derivatives"},
+     {"null-space orthonormality", "—", "‖NᵀN−I‖, ‖NᵀH_f‖ ≈ 0 — else noise model is wrong"},
+     {"NIS vs χ²(dof)", "—", "innovations sized as predicted; NIS≫dof ⇒ over-confidence"},
+     {"innovation whiteness (lag-1)", "—", "no information left uncaptured frame-to-frame"},
+     {"FEJ clone divergence", "deg / cm", "how far the frozen linearization point has drifted"}},
+    {"update_nis.csv", "update_jacobian.csv", "update_nullspace.csv", "update_fej_div.csv"},
+    "sdk/msckf/camera_updater.hpp, features/msckf_nullspace.hpp, msckf/covariance.hpp",
+    "wired",
+    "stages::s6a_jacobians → s6b_nullspace_projection → s6c_compression → s6d_gating → s6e_ekf_update; "
+    "s6_msckf_update::apply(state, updater, track)  [sdk/msckf/stages/s6_msckf_update.hpp]"};
 
 // ── S7  SLAM-feature update (optional) ─────────────────────────────────────
 inline const StageInfo kS7{"S7",
@@ -177,7 +189,8 @@ inline const StageInfo kS7{"S7",
                             {"long-track drift reduction", "m", "persistent landmarks bound drift vs pure-MSCKF"}},
                            {"slam_feat_nees.csv"},
                            "sdk/features/representations.hpp",
-                           "scaffold"};
+                           "scaffold",
+                           ""};
 
 // ── S8  Zero-velocity update (optional) ────────────────────────────────────
 inline const StageInfo kS8{"S8",
@@ -191,22 +204,25 @@ inline const StageInfo kS8{"S8",
                             {"false-ZUPT-induced bias", "mm/s", "cost of a wrongly-fired v=0 constraint"}},
                            {"zupt_roc.csv", "zupt_static_drift.csv"},
                            "(not yet present in cortex)",
-                           "scaffold"};
+                           "scaffold",
+                           ""};
 
 // ── S9  Marginalization / clone management ─────────────────────────────────
-inline const StageInfo kS9{"S9",
-                           "Marginalization / clone management",
-                           "marginalize(x,P,clone_idx) → (x',P')  (slide the window)",
-                           {"clone selected by policy (oldest, or two-way keyframe/non-keyframe)"},
-                           {"P' symmetric PSD",
-                            "kept-state marginal UNCHANGED by removing a clone (principal-submatrix extraction)",
-                            "marginalization does not constrain the 4 gauge directions"},
-                           {{"kept-marginal invariance", "—", "‖P'[keep]−P[keep,keep]‖ ≈ 0 for pure extraction"},
-                            {"P min eigenvalue after marginalize", "—", "covariance stays PSD"},
-                            {"window length bound", "clones", "the window stays bounded as designed"}},
-                           {"marg_invariance.csv"},
-                           "sdk/msckf/state_helper.hpp (marginalize_clone)",
-                           "scaffold"};
+inline const StageInfo kS9{
+    "S9",
+    "Marginalization / clone management",
+    "marginalize(x,P,clone_idx) → (x',P')  (slide the window)",
+    {"clone selected by policy (oldest, or two-way keyframe/non-keyframe)"},
+    {"P' symmetric PSD",
+     "kept-state marginal UNCHANGED by removing a clone (principal-submatrix extraction)",
+     "marginalization does not constrain the 4 gauge directions"},
+    {{"kept-marginal invariance", "—", "‖P'[keep]−P[keep,keep]‖ ≈ 0 for pure extraction"},
+     {"P min eigenvalue after marginalize", "—", "covariance stays PSD"},
+     {"window length bound", "clones", "the window stays bounded as designed"}},
+    {"marg_invariance.csv"},
+    "sdk/msckf/state_helper.hpp (marginalize_clone)",
+    "scaffold",
+    "stages::s9_marginalization::apply(state, clone_idx) → state′  [sdk/msckf/stages/s9_marginalization.hpp]"};
 
 // ── S10  Online calibration ─────────────────────────────────────────────────
 inline const StageInfo kS10{
@@ -226,7 +242,9 @@ inline const StageInfo kS10{
      {"calibration-state NEES (if estimated online)", "—", "the principled fix — OpenVINS/MINS-style online calib"}},
     {"calib_budget.csv", "calib_r_sweep.csv"},
     "(no calibration states / no calib term in R in cortex — the S10 gap)",
-    "implemented"};
+    "implemented",
+    "stages::s10_online_calibration::apply(state, extrinsics, σ_rot, σ_trans) → state′  "
+    "[sdk/msckf/stages/s10_online_calibration.hpp]"};
 
 /// The whole pipeline, in dataflow order — for `--list`.
 [[nodiscard]] inline std::vector<StageInfo> pipeline() {
