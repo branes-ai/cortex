@@ -19,6 +19,19 @@ target_link_libraries(branes_tools INTERFACE branes::stb_image)
 # JSONL and reads it back; nlohmann/json supplies the parser the inspectors need.
 target_link_libraries(branes_tools INTERFACE nlohmann_json::nlohmann_json)
 
+# Stage test benches (#453): one small executable per bench, tools/benches/*.cpp,
+# each including only its stage's headers. Fixture files live next to them; the
+# path is exported so the Catch2 bench tests can load the committed fixtures.
+target_compile_definitions(branes_tools INTERFACE
+    BRANES_BENCH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/benches/fixtures")
+file(GLOB STAGE_BENCH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/benches/*.cpp)
+foreach(src ${STAGE_BENCH_SRC})
+    get_filename_component(name ${src} NAME_WE)
+    add_executable(${name} ${src})
+    target_link_libraries(${name} PRIVATE branes::tools)
+    set_target_properties(${name} PROPERTIES FOLDER "Tools/stage-benches")
+endforeach()
+
 file(GLOB STAGE_PROBE_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 foreach(src ${STAGE_PROBE_SRC})
     get_filename_component(name ${src} NAME_WE)
