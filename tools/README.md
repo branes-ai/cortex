@@ -120,8 +120,8 @@ worked boundary; filter-internal stages join as their operators are decoupled.)
 
 ### S4 frontend inspector (`s4_inspect`)
 
-Runs the **shipped** frontend operator — `detect_fast` + pyramidal KLT, mirroring
-`VioEstimator::track_frame` — over real EuRoC frames with full instrumentation,
+Runs the **shipped** frontend stage — `msckf::stages::s4_frontend::track`, the
+function `VioEstimator` calls per frame — over real EuRoC frames with full instrumentation,
 exposing what production hides: per-track **forward-backward residual**, status,
 and age; the FAST detections added each frame; the pyramid geometry; and a spatial
 coverage grid. Unlike the production path it **always** computes the FB residual

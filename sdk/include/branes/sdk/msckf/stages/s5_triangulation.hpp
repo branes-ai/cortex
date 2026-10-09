@@ -22,8 +22,8 @@
 //                 over every view, solved in least squares (X with W = 1).
 //   InverseDepth  anchored inverse depth (α, β, ρ) in the first observing camera,
 //                 seeded by the DLT, refined by Gauss-Newton on the reprojection
-//                 error — the parameterization OpenVINS-class filters use, which
-//                 stays well-posed as parallax → 0 (ρ → 0, not depth → ∞).
+//                 error (Civera, Davison & Montiel, T-RO 2008), which stays
+//                 well-posed as parallax → 0 (ρ → 0, not depth → ∞).
 //
 // Header-only, C++20, type-generic.
 
