@@ -5,32 +5,32 @@
 //
 // An inspector re-runs the REAL stage operator on real data and exposes the
 // intermediate quantities the production path hides, for study. For S4 the
-// operator is the shipped cv/ frontend — `detect_fast` + pyramidal KLT — and
-// the hidden quantities are the per-track forward-backward residual, track
-// status, and track age. `S4FrontendInspector::step` mirrors the production
-// `VioEstimator::track_frame` (sdk/include/branes/sdk/vio_estimator.hpp) call
-// for call, with two deliberate differences for visualization:
+// operator is `msckf::stages::s4_frontend::track` — FAST + pyramidal KLT + the
+// optional forward-backward gate — the exact function VioEstimator calls per
+// frame (#456). `S4FrontendInspector::step` calls it, unmodified, and derives the
+// study quantities around it:
 //
-//   1. it ALWAYS runs the backward KLT pass to compute a forward-backward
-//      residual per track (production only does this when the gate is enabled);
-//   2. it emits an enriched per-frame report (S4FrameReport) — every track's
+//   1. a forward-backward residual for every surviving track, by re-tracking the
+//      survivors back into the previous pyramid (production only does this when
+//      the gate is enabled; the KLT is per-point, so the residual is the one the
+//      gate would see);
+//   2. an enriched per-frame report (S4FrameReport) — every track's
 //      previous/current pixel, FB residual, age and status, the FAST detections
 //      added this frame, the pyramid geometry, and a coverage grid — which the
 //      overlay renderer (docs-site/scripts/gen-overlay.mjs) draws.
 //
-// The instrumented tracking lives in this header (not the .cpp driver) so it is
-// unit-testable on synthetic frames without the ~1.5 GB EuRoC dataset.
+// Because the inspector observes the stage instead of copying it, what it shows
+// is what the estimator does; there is no second implementation to drift.
 //
 // Header-only, C++20.
 
 #ifndef BRANES_TOOLS_S4_FRONTEND_INSPECT_HPP
 #define BRANES_TOOLS_S4_FRONTEND_INSPECT_HPP
 
-#include <branes/cv/fast.hpp>
 #include <branes/cv/image.hpp>
 #include <branes/cv/klt.hpp>
 #include <branes/cv/pyramid.hpp>
-#include <branes/sdk/vio_estimator.hpp>  // branes::sdk::FrontendParams
+#include <branes/sdk/msckf/stages/s4_frontend.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -104,15 +105,25 @@ struct S4FrameReport {
         {"fb_max", r.fb_max}};
 }
 
-/// Runs the shipped frontend operator frame by frame, recording what it did.
+/// Runs the S4_frontend stage frame by frame, recording what it did.
 class S4FrontendInspector {
 public:
     explicit S4FrontendInspector(branes::sdk::FrontendParams fe = {}) : fe_(fe) {}
 
-    /// Track `image` against the previous frame and report. Mirrors
-    /// VioEstimator::track_frame, instrumented.
+    /// Track `image` against the previous frame with the stage and report.
     [[nodiscard]] S4FrameReport step(cv::Image<const std::uint8_t> image, double t_s, std::string path) {
-        cv::Pyramid<std::uint8_t> next(image, std::max(1, fe_.pyramid_levels));
+        namespace s4 = branes::sdk::msckf::stages::s4_frontend;
+
+        // What the stage consumes and then discards: the previous pyramid (for
+        // the backward pass) and each live track's previous position.
+        const cv::Pyramid<std::uint8_t> prev = st_.prev_pyramid;
+        const bool had_prev = st_.have_prev;
+        std::unordered_map<std::uint64_t, std::pair<float, float>> before;
+        for (const auto& t : st_.tracks)
+            before.emplace(t.id, std::pair{t.x, t.y});
+
+        const auto res = s4::track<double>(st_, image, fe_);
+        const auto& next = st_.prev_pyramid;  // the stage leaves this frame's pyramid here
 
         S4FrameReport rep;
         rep.frame = frame_;
@@ -125,65 +136,50 @@ public:
             rep.pyramid_sizes.emplace_back(static_cast<std::uint32_t>(next.level_width(l)),
                                            static_cast<std::uint32_t>(next.level_height(l)));
         rep.fb_max = fe_.fb_max_residual;
+        rep.n_lost = static_cast<std::uint32_t>(res.diag.klt_lost);
+        rep.n_fb_culled = static_cast<std::uint32_t>(res.diag.fb_rejected);
+        rep.n_new = static_cast<std::uint32_t>(res.diag.detected);
+        rep.n_tracked = static_cast<std::uint32_t>(res.diag.tracks_out - res.diag.detected);
 
-        if (have_prev_ && !tracks_.empty()) {
-            std::vector<cv::KeyPoint> pts;
-            pts.reserve(tracks_.size());
-            for (const auto& t : tracks_)
-                pts.push_back(cv::KeyPoint{t.x, t.y, 0.0f});
-            const auto res = cv::track_klt_pyramidal(prev_pyramid_, next, pts, fe_.klt);
-
-            // Backward pass — ALWAYS, for the FB residual we display (production
-            // only does this when fe_.fb_max_residual > 0).
-            std::vector<cv::KeyPoint> back_pts;
-            back_pts.reserve(res.size());
-            for (const auto& rr : res)
-                back_pts.push_back(cv::KeyPoint{rr.x, rr.y, 0.0f});
-            const auto back = cv::track_klt_pyramidal(next, prev_pyramid_, back_pts, fe_.klt);
-            const double fb2 = fe_.fb_max_residual * fe_.fb_max_residual;
-
-            std::vector<Track> kept;
-            kept.reserve(tracks_.size());
-            for (std::size_t i = 0; i < res.size(); ++i) {
-                if (res[i].status != cv::TrackStatus::Tracked) {
-                    ++rep.n_lost;
-                    continue;
+        // Backward pass over the survivors, for the FB residual we display.
+        std::vector<cv::KeyPoint> fwd;
+        std::vector<std::size_t> idx;
+        if (had_prev)
+            for (std::size_t i = 0; i < st_.tracks.size(); ++i)
+                if (before.contains(st_.tracks[i].id)) {
+                    fwd.push_back(cv::KeyPoint{st_.tracks[i].x, st_.tracks[i].y, 0.0f});
+                    idx.push_back(i);
                 }
-                double fb = -1.0;
-                if (back[i].status == cv::TrackStatus::Tracked) {
-                    const double dx = static_cast<double>(back[i].x) - pts[i].x;
-                    const double dy = static_cast<double>(back[i].y) - pts[i].y;
-                    fb = std::sqrt(dx * dx + dy * dy);
+        std::vector<double> fb(st_.tracks.size(), -1.0);
+        if (!fwd.empty()) {
+            const auto back = cv::track_klt_pyramidal(next, prev, fwd, fe_.klt);
+            for (std::size_t k = 0; k < idx.size(); ++k)
+                if (back[k].status == cv::TrackStatus::Tracked) {
+                    const auto [px, py] = before.at(st_.tracks[idx[k]].id);
+                    const double dx = static_cast<double>(back[k].x) - px;
+                    const double dy = static_cast<double>(back[k].y) - py;
+                    fb[idx[k]] = std::sqrt(dx * dx + dy * dy);
                 }
-                if (fe_.fb_max_residual > 0.0) {
-                    if (back[i].status != cv::TrackStatus::Tracked || fb * fb > fb2) {
-                        ++rep.n_fb_culled;
-                        continue;
-                    }
-                }
-                Track t = tracks_[i];
-                t.x = res[i].x;
-                t.y = res[i].y;
-                ++t.age;
-                rep.tracks.push_back(S4Track{t.id, res[i].x, res[i].y, pts[i].x, pts[i].y, fb, t.age, "tracked"});
-                kept.push_back(t);
-                ++rep.n_tracked;
-            }
-            tracks_ = std::move(kept);
         }
 
-        if (tracks_.size() < fe_.target_features) {
-            for (const auto& t : detect_new(next.level(0))) {
+        std::unordered_map<std::uint64_t, std::uint32_t> ages;
+        for (std::size_t i = 0; i < st_.tracks.size(); ++i) {
+            const auto& t = st_.tracks[i];
+            const auto it = before.find(t.id);
+            if (it == before.end()) {
                 rep.detections.emplace_back(t.x, t.y);
                 rep.tracks.push_back(S4Track{t.id, t.x, t.y, t.x, t.y, -1.0, 0, "new"});
-                ++rep.n_new;
+                ages.emplace(t.id, 0);
+            } else {
+                const std::uint32_t age = age_.at(t.id) + 1;
+                rep.tracks.push_back(
+                    S4Track{t.id, t.x, t.y, it->second.first, it->second.second, fb[i], age, "tracked"});
+                ages.emplace(t.id, age);
             }
         }
+        age_ = std::move(ages);
 
         rep.grid_occupied = coverage(rep.grid_cols, rep.grid_rows, image.width(), image.height());
-
-        prev_pyramid_ = std::move(next);
-        have_prev_ = true;
         ++frame_;
         return rep;
     }
@@ -192,47 +188,16 @@ public:
         return frame_;
     }
 
-private:
-    struct Track {
-        std::uint64_t id = 0;
-        float x = 0.0f, y = 0.0f;
-        std::uint32_t age = 0;
-    };
-
-    /// FAST detect + NMS-by-distance against existing tracks, exactly as
-    /// VioEstimator::detect_new; returns the tracks it appended.
-    [[nodiscard]] std::vector<Track> detect_new(cv::Image<const std::uint8_t> level0) {
-        auto kps = cv::detect_fast(level0, fe_.fast_threshold);
-        std::sort(kps.begin(), kps.end(), [](const cv::KeyPoint& a, const cv::KeyPoint& b) {
-            return a.response > b.response;
-        });
-        const double min_d2 = fe_.min_feature_distance * fe_.min_feature_distance;
-        std::vector<Track> added;
-        for (const auto& kp : kps) {
-            if (tracks_.size() >= fe_.target_features)
-                break;
-            bool too_close = false;
-            for (const auto& t : tracks_) {
-                const double dx = static_cast<double>(kp.x) - t.x;
-                const double dy = static_cast<double>(kp.y) - t.y;
-                if (dx * dx + dy * dy < min_d2) {
-                    too_close = true;
-                    break;
-                }
-            }
-            if (!too_close) {
-                Track t{next_id_++, kp.x, kp.y, 0};
-                tracks_.push_back(t);
-                added.push_back(t);
-            }
-        }
-        return added;
+    /// The stage state the inspector drives (read-only, for cross-checks).
+    [[nodiscard]] const branes::sdk::msckf::stages::s4_frontend::FrontendState& state() const noexcept {
+        return st_;
     }
 
+private:
     /// Count grid cells holding ≥1 current track — the spatial-coverage metric.
     [[nodiscard]] std::uint32_t coverage(int cols, int rows, std::size_t w, std::size_t h) const {
         std::vector<char> occ(static_cast<std::size_t>(cols) * rows, 0);
-        for (const auto& t : tracks_) {
+        for (const auto& t : st_.tracks) {
             const int cx = std::clamp(static_cast<int>(t.x / static_cast<double>(w) * cols), 0, cols - 1);
             const int cy = std::clamp(static_cast<int>(t.y / static_cast<double>(h) * rows), 0, rows - 1);
             occ[static_cast<std::size_t>(cy) * cols + cx] = 1;
@@ -244,10 +209,8 @@ private:
     }
 
     branes::sdk::FrontendParams fe_;
-    std::vector<Track> tracks_;
-    cv::Pyramid<std::uint8_t> prev_pyramid_;
-    bool have_prev_ = false;
-    std::uint64_t next_id_ = 0;
+    branes::sdk::msckf::stages::s4_frontend::FrontendState st_;
+    std::unordered_map<std::uint64_t, std::uint32_t> age_;  ///< frames survived, per live track id
     std::uint64_t frame_ = 0;
 };
 

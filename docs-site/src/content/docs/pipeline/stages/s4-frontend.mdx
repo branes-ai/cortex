@@ -69,8 +69,9 @@ with the image noise:
 ## Real-data inspector (`s4_inspect`)
 
 The metrics above come from the *synthetic* probe — known warps, exact ground
-truth, run in CI. Its real-data companion, **`s4_inspect`**, runs the same shipped
-operator (FAST + pyramidal KLT, mirroring `track_frame`) on actual EuRoC `cam0`
+truth, run in CI. Its real-data companion, **`s4_inspect`**, runs the shipped
+stage itself (`stages::s4_frontend::track`, the function `VioEstimator` calls per
+frame: FAST + pyramidal KLT) on actual EuRoC `cam0`
 frames and renders the result, so you can watch the frontend on real motion, blur,
 and repetitive texture.
 
