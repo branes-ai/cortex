@@ -1,0 +1,101 @@
+---
+title: "Worked Example: Finding #461"
+description: The method on a real bug — how proving a refactor bit-identical on EuRoC exposed a heap-buffer-overflow in the square-root covariance update, localized to one transformation and one line.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This is a real episode from the epic. It shows the method's core habit: **don't accept "it looks
+about the same"; localize every difference to the transformation that produced it.** The result is
+[#461](https://github.com/branes-ai/cortex/issues/461), a memory-safety bug that had been on `main`
+all along and is the likely cause of the square-root backend's real-data divergence.
+
+## 1. A pure refactor must be bit-identical
+
+The [stage refactor](/debugging/stages-as-transformations/) (#452) moved every line of the MSCKF
+backend into stage functions. To prove it changed nothing, a throwaway harness dumped every
+per-frame state on EuRoC as hex floats, with a covariance hash, every update's NIS, and the init
+outcome. It ran on `main` and on the refactor. The full-covariance backend matched on every
+sequence, about 125 000 updates bit for bit. **The square-root backend did not.**
+
+## 2. Rule out the noise
+
+Two effects muddied the first comparison, and the method is to remove them before reasoning:
+
+- **Run-to-run noise.** Replays launched sixteen at a time against a network share silently skipped
+  some frames when a PNG failed to read, so runs of the *same* binary differed. Comparing frame
+  timestamps exposed it; serial re-runs removed it.
+- **Truncated dumps.** The sqrt run aborts on an assertion, and `abort()` drops unflushed stdio
+  buffers. Line-buffered output fixed that.
+
+What remained was **deterministic**. Both `main` and the refactor were stable from run to run, yet
+they disagreed with each other from the first accepted update onward.
+
+## 3. Bisect to the transformation
+
+Each step narrowed the scope by one stage boundary:
+
+| Question | Experiment | Answer |
+|---|---|---|
+| Does the S6 composite differ from `CameraUpdater::update`? | synthetic bit-identity test, sqrt covariance, m = 5 and m = 2 | no: identical |
+| Does the backend's use of the composite matter? | backend switched back to `update()` | still differs from `main` |
+| Do the update's **inputs** differ? | hash H, r, R, P and the factor S inside `ekf_update` | **no: all bit-identical** |
+| Do its **outputs** differ? | hash δx and P⁺ | **yes** |
+
+Identical inputs, unchanged source, different outputs. The build had no FMA and no optimization, so
+codegen could not explain it. That leaves undefined behaviour: memory read from outside a buffer.
+
+## 4. Let the tools speak
+
+An AddressSanitizer build answered on the first accepted update, identically on `main` and on the
+refactor:
+
+```text
+ERROR: AddressSanitizer: heap-buffer-overflow
+  #0 SqrtCovariance<double>::update(...)
+  #1 StateHelper<double>::ekf_update<SqrtCovariance<double>>(...)
+  #2 CameraUpdater<double>::update<SqrtCovariance<double>>(...)
+  allocated by: DynMat<double>::DynMat ← mul<double> ← SqrtCovariance<double>::update   (the H·S product)
+```
+
+## 5. The root cause, at one line
+
+`SqrtCovariance::update` sizes its pre-array as if the covariance factor $S$ were square ($d\times d$):
+
+```cpp
+const std::size_t d = S.rows;
+const DynMat<T> HS = mul(H, S);        // k × S.cols
+...  pre(i, k + j) = HS(i, j);         // j < d  → reads past HS when S.cols < d
+...  pre(k + i, k + j) = S(i, j);      // j < d  → reads past S
+```
+
+After a clone is added, the re-triangularized factor is rank-minimal: $(d+6)\times d$, so
+`S.cols = S.rows − 6`. It becomes square again only at the next IMU propagation. The backend's
+per-frame order, S3 augment followed by S5 → S6e on the ended tracks, puts an update in exactly that
+window on **every frame**. Each such update reads uninitialized heap memory into the factorization.
+
+<Aside type="caution" title="Why it hid for so long">
+  The garbage beyond the buffer depends on the heap layout, so the sqrt filter's EuRoC trajectory
+  changed with every rebuild. On synthetic data, the overflowing reads happened not to move any
+  check enough to fail, and nothing ran under a sanitizer in CI. End to end it simply looked like
+  "the square-root form is numerically fragile on real data" (ATE 6e+40 m, an `SO3::normalize`
+  abort). It was a memory bug all along.
+</Aside>
+
+## What the method did differently
+
+- **Exactness as a requirement.** A ≤ 1e-9 tolerance would have accepted the first sqrt
+  discrepancy as roundoff. Bit-identity made it an anomaly that demanded an explanation.
+- **Bisecting on boundaries.** Hashing the inputs and outputs of one transformation moved the
+  question from "the filter diverges" to "this function, with these inputs, is non-deterministic".
+- **Separating environment from algorithm.** I/O failures and buffered output were ruled out first,
+  so the remaining difference was trustworthy.
+
+The fix belongs to [#461](https://github.com/branes-ai/cortex/issues/461). Its acceptance criteria
+come straight from this method:
+
+- a sanitizer-clean run;
+- a bench regression where an update directly follows an augmentation, compared against the full
+  covariance with the [invariants](/debugging/invariants/);
+- sqrt EuRoC runs that are deterministic across builds;
+- the sqrt backend's ATE and NEES re-measured.
