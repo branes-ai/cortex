@@ -296,7 +296,8 @@ public:
         GateDecision<T> out;
         const std::size_t k = pm.H.rows;
         const T r2 = measurement_variance();
-        const T meas_sigma = std::sqrt(r2);
+        using std::sqrt;  // ADL: a non-IEEE T (posit) supplies its own
+        const T meas_sigma = sqrt(r2);
         T gamma = T{0};
         bool nis_valid = false;
         if (want_nis || opts_.enable_gating) {
@@ -524,8 +525,9 @@ private:
                 const T dot = d[i][0] * d[j][0] + d[i][1] * d[j][1] + d[i][2] * d[j][2];
                 min_dot = std::min(min_dot, dot);
             }
-        const T pi = std::acos(T{-1});
-        const T max_angle_deg = std::acos(std::clamp(min_dot, T{-1}, T{1})) * T{180} / pi;
+        using std::acos;  // ADL: a non-IEEE T (posit) supplies its own
+        const T pi = acos(T{-1});
+        const T max_angle_deg = acos(std::clamp(min_dot, T{-1}, T{1})) * T{180} / pi;
         return max_angle_deg >= min_deg;
     }
 

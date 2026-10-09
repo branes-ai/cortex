@@ -7,10 +7,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status">
   The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
-  S9_marginalization bench as its worked example. The S0–S1 benches
-  ([#454](https://github.com/branes-ai/cortex/issues/454)) are merged and the S2–S3 benches
-  ([#455](https://github.com/branes-ai/cortex/issues/455)) are in review; the remaining stages follow
-  in [#456](https://github.com/branes-ai/cortex/issues/456)–[#458](https://github.com/branes-ai/cortex/issues/458).
+  S9_marginalization bench as its worked example. The S0–S3 benches
+  ([#454](https://github.com/branes-ai/cortex/issues/454), [#455](https://github.com/branes-ai/cortex/issues/455))
+  are merged and the S4–S5 benches ([#456](https://github.com/branes-ai/cortex/issues/456)) are in
+  review; the remaining stages follow in [#457](https://github.com/branes-ai/cortex/issues/457)–[#458](https://github.com/branes-ai/cortex/issues/458).
   The developer reference is `docs/arch/stage-benches.md`.
 </Aside>
 
@@ -141,6 +141,18 @@ The S2 and S3 benches (#455) added two more:
   ≈2.4e-6 per 5 ms step on a tumbling trajectory. The bench now measures this directly, per step and
   across Δt and dynamics: the propagation half of the observability question behind the
   over-confidence (#212).
+
+The S4 and S5 benches (#456) found four more:
+
+- **Border churn in the front end.** KLT drops features whose window doesn't fit at the coarsest
+  pyramid level, a ≈24 px border band at the defaults, but FAST detects up to the edge. On the bench's
+  frames about 85% of new detections die on their first tracked frame and are re-detected under new
+  ids.
+- **The forward-backward gate is off by default**, so drifted tracks reach the backend. The bench
+  measures them, and its `fb_gate_1px` variant enforces the contract.
+- **The camera updater didn't compile for posits:** qualified `std::acos`/`std::sqrt` calls, now ADL.
+- **The synthetic world steps from rest to ≈1 m/s** at the end of its warm-up, a velocity jump no
+  IMU stream can produce. Pure IMU propagation from rest is off by ≈1 m/s after one frame.
 
 ## Writing a bench
 
