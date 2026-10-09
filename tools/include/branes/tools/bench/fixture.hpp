@@ -32,6 +32,7 @@
 #ifndef BRANES_TOOLS_BENCH_FIXTURE_HPP
 #define BRANES_TOOLS_BENCH_FIXTURE_HPP
 
+#include <branes/cv/image.hpp>
 #include <branes/math/lie/so3.hpp>
 #include <branes/sdk/msckf/state.hpp>
 
@@ -213,6 +214,86 @@ template <math::Scalar T>
     if (static_cast<double>(q[0]) < 0.0)
         throw std::invalid_argument("fixture: rotation quaternion is not canonical (w < 0)");
     return math::lie::SO3<T>::from_unit_quaternion(q);
+}
+
+// ── Images (8-bit grayscale), lossless ──────────────────────────────────────
+
+namespace detail {
+inline constexpr char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+[[nodiscard]] inline std::string base64_encode(std::span<const std::uint8_t> in) {
+    std::string out;
+    out.reserve((in.size() + 2) / 3 * 4);
+    for (std::size_t i = 0; i < in.size(); i += 3) {
+        const std::uint32_t n = (std::uint32_t{in[i]} << 16) |
+                                (i + 1 < in.size() ? std::uint32_t{in[i + 1]} << 8 : 0u) |
+                                (i + 2 < in.size() ? std::uint32_t{in[i + 2]} : 0u);
+        out += kB64[(n >> 18) & 63];
+        out += kB64[(n >> 12) & 63];
+        out += i + 1 < in.size() ? kB64[(n >> 6) & 63] : '=';
+        out += i + 2 < in.size() ? kB64[n & 63] : '=';
+    }
+    return out;
+}
+
+[[nodiscard]] inline std::vector<std::uint8_t> base64_decode(std::string_view in) {
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z')
+            return c - 'A';
+        if (c >= 'a' && c <= 'z')
+            return c - 'a' + 26;
+        if (c >= '0' && c <= '9')
+            return c - '0' + 52;
+        if (c == '+')
+            return 62;
+        if (c == '/')
+            return 63;
+        return -1;
+    };
+    if (in.size() % 4 != 0)
+        throw std::invalid_argument("fixture: base64 length is not a multiple of 4");
+    std::vector<std::uint8_t> out;
+    out.reserve(in.size() / 4 * 3);
+    for (std::size_t i = 0; i < in.size(); i += 4) {
+        int v[4];
+        for (int k = 0; k < 4; ++k) {
+            v[k] = in[i + k] == '=' ? 0 : val(in[i + k]);
+            if (v[k] < 0)
+                throw std::invalid_argument("fixture: invalid base64 character");
+        }
+        const std::uint32_t n = (std::uint32_t(v[0]) << 18) | (std::uint32_t(v[1]) << 12) | (std::uint32_t(v[2]) << 6) |
+                                std::uint32_t(v[3]);
+        out.push_back(static_cast<std::uint8_t>(n >> 16));
+        if (in[i + 2] != '=')
+            out.push_back(static_cast<std::uint8_t>((n >> 8) & 255));
+        if (in[i + 3] != '=')
+            out.push_back(static_cast<std::uint8_t>(n & 255));
+    }
+    return out;
+}
+}  // namespace detail
+
+/// An 8-bit image as {"width", "height", "data": base64 of the row-major
+/// pixels}. Lossless, so a captured frame replays bit-for-bit.
+[[nodiscard]] inline json pack(cv::Image<const std::uint8_t> img) {
+    std::vector<std::uint8_t> px;
+    px.reserve(img.width() * img.height());
+    for (std::size_t y = 0; y < img.height(); ++y)
+        for (std::size_t x = 0; x < img.width(); ++x)
+            px.push_back(img(y, x));
+    return json{{"width", img.width()}, {"height", img.height()}, {"data", detail::base64_encode(px)}};
+}
+
+[[nodiscard]] inline cv::OwnedImage<std::uint8_t> unpack_image(const json& j) {
+    const auto w = j.at("width").get<std::size_t>(), h = j.at("height").get<std::size_t>();
+    const auto px = detail::base64_decode(j.at("data").get<std::string>());
+    if (px.size() != w * h)
+        throw std::invalid_argument("fixture: image data does not match width*height");
+    cv::OwnedImage<std::uint8_t> img(w, h);
+    for (std::size_t y = 0; y < h; ++y)
+        for (std::size_t x = 0; x < w; ++x)
+            img(y, x) = px[y * w + x];
+    return img;
 }
 
 // ── The MSCKF state (full covariance) ───────────────────────────────────────

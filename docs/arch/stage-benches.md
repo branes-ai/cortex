@@ -32,12 +32,17 @@ Benches so far:
 | `s1_initialization_bench` | #454 | `shipped` (static), `gravity_align`, `dynamic` (VI alignment) | window × IMU noise × excitation → roll/pitch and scale error |
 | `s2_propagation_bench` | #455 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance` | Δt × dynamics × Q scale → position error, yaw leak, diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
 | `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
+| `s4_frontend_bench` | #456 | `shipped` (FB gate off), `fb_gate_1px`, `klt_window_7` | image noise × shift → survival, end-point RMS, FB median |
+| `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg` | parallax × pixel noise → depth error, κ, gate rejection |
 | `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
 
-The remaining stages get their benches in #456–#458.
+The remaining stages get their benches in #457–#458.
 
 A bench whose stage is slow in software arithmetic can set `static constexpr int kTimingReps` (S2
-and S3 use 1). Square-root variants start from a real filter state with `psd_factor`, a Cholesky that
+and S3 use 1). A bench whose stage is not generic in T declares `using SupportedTypes =
+TypeList<...>` (S4: the KLT front end runs in double only, #449 decides whether it becomes
+generic). Image fixtures are stored losslessly as base64 bytes (`pack(cv::Image)`,
+`unpack_image`). Square-root variants start from a real filter state with `psd_factor`, a Cholesky that
 tolerates the exactly singular covariance a fresh clone produces.
 
 ## Fixtures
@@ -213,6 +218,26 @@ The benches build on what is already there rather than replacing it at once:
   (#212, #437).
 - **Φ needed exposing.** `Propagator::transition` now returns Φ and Q_d. `propagate` is its sequence,
   and it is bit-identical on the synthetic full and square-root backend runs.
+
+## What the S4 and S5 benches found (#456)
+
+- **The front end needed extracting.** Its KLT tracking, forward-backward gate and FAST replenishment
+  lived as private methods of `VioEstimator`. They are now `stages::s4_frontend::track`, which
+  `VioEstimator` calls, and the result is bit-identical on EuRoC.
+- **Border churn.** KLT drops any feature whose window doesn't fit at the coarsest pyramid level (a
+  band about (half-window + 1)·2^(levels−1) px wide, ≈24 px at the defaults), while FAST detects up
+  to 3 px from the edge. Detections in that band die on their first tracked frame and are replaced
+  under new ids: about 85% of new detections on the bench's 160×120 frames. The bench reports this
+  as `tracks.lost_on_first_frame`.
+- **The forward-backward gate is off by default**, so the shipped front end keeps tracks that can't
+  round-trip. The bench measures that (reported) and enforces it in the `fb_gate_1px` variant.
+- **`CameraUpdater` didn't compile for posits.** It called `std::acos` and `std::sqrt` as qualified
+  calls (#444 §E lists these lines). They now use ADL, which resolves to the same functions for float
+  and double.
+- **The synthetic world steps its velocity at the end of the warm-up.** The ground truth is at rest
+  at t = 1.5 s and moving at ≈1 m/s right after it, which no IMU stream can produce. Pure IMU
+  propagation from rest is off by ≈1 m/s after one frame. Elsewhere the world's IMU matches its truth
+  to ≈1e-5 m per frame. The S5 captured fixture starts after the step.
 
 Capturing fixtures from the running backend and from EuRoC replays, selected by stage, frame range or
 trigger, is #446. It writes fixtures with `bench::capture(...)` in the format above, so they load

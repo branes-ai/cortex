@@ -228,6 +228,17 @@ template <class T>
     return true;
 }
 
+/// The arithmetic types a bench's stage can run in: `B::SupportedTypes` if
+/// the bench declares it (a stage that is not generic in T, e.g. the KLT front
+/// end), else every type the framework knows.
+template <class B>
+[[nodiscard]] constexpr auto bench_types() {
+    if constexpr (requires { typename B::SupportedTypes; })
+        return typename B::SupportedTypes{};
+    else
+        return AllTypes{};
+}
+
 /// Timing repetitions per run: `B::kTimingReps` if the bench sets it (stages
 /// that are slow in software arithmetic), else 5.
 template <class B>
@@ -450,7 +461,7 @@ int bench_main(int argc, char** argv) {
                 continue;
             }
             runs.push_back(
-                run_fixture<B>(nf, v.name, AllTypes{}, a.types.empty() ? type_names(DefaultTypes{}) : a.types));
+                run_fixture<B>(nf, v.name, bench_types<B>(), a.types.empty() ? type_names(DefaultTypes{}) : a.types));
             print_run(runs.back());
             ok = ok && runs.back().pass();
             type_runs += runs.back().types.size();
@@ -459,7 +470,7 @@ int bench_main(int argc, char** argv) {
     // that is a failure, never a vacuous "all invariants PASS".
     if (type_runs == 0) {
         std::cerr << "  " << B::kStage << ": no stage run — check --fixture / --types (known types:";
-        for (const auto& t : type_names(AllTypes{}))
+        for (const auto& t : type_names(bench_types<B>()))
             std::cerr << ' ' << t;
         std::cerr << ")\n";
         ok = false;
@@ -469,7 +480,7 @@ int bench_main(int argc, char** argv) {
     if constexpr (HasSweep<B>) {
         if (a.sweep) {
             try {
-                run_sweep<B>(a, AllTypes{});
+                run_sweep<B>(a, bench_types<B>());
             } catch (const std::exception& e) {  // a bad --sweep axis, reported like a bad flag
                 std::cerr << "  " << B::kStage << ": " << e.what() << '\n';
                 return 2;
