@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,9 @@ TEST_CASE("S0 bench: ground truth is the camera-frame normalized landmark", "[to
     for (const auto& r : run.types[0].report.results())
         if (r.name == "truth.normalized_point") {
             checked = true;
-            REQUIRE(r.value < 1e-12);
+            // Held to the bench's own threshold (tolerance_vs_double), not a fixed number.
+            REQUIRE(r.pass);
+            REQUIRE(r.value <= r.threshold);
         }
     REQUIRE(checked);
 }
@@ -117,4 +120,10 @@ TEST_CASE("S0 and S1 committed fixture files load and pass", "[tools][bench][s0]
         require_pass<S1>(
             {name, bn::load(dir / "s1_initialization" / (std::string(name) + ".json"))}, bn::kShipped, {"double"});
     }
+}
+
+TEST_CASE("S0 bench rejects a ragged output fixture", "[tools][bench][s0]") {
+    auto f = S0::known_answer();
+    f.expected.at("valid").push_back(1);  // one more flag than points
+    REQUIRE_THROWS_AS(S0::decode_output<double>(f.expected), std::invalid_argument);
 }

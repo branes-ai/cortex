@@ -46,9 +46,12 @@
 #include <branes/sdk/msckf/stages/s1_initialization.hpp>
 #include <branes/tools/bench/bench.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -397,7 +400,7 @@ struct S1InitializationBench {
     }
 
 private:
-    static constexpr double kDeg = 3.14159265358979323846 / 180.0;
+    static constexpr double kDeg = std::numbers::pi / 180.0;
 
     /// −(R · mean specific force): the gravity a static seed implies, world frame.
     template <class T>

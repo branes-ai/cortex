@@ -37,9 +37,13 @@
 #include <branes/sdk/msckf/stages/s0_sensor_model.hpp>
 #include <branes/tools/bench/bench.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <numbers>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -137,9 +141,13 @@ struct S0SensorModelBench {
     }
     template <class T>
     [[nodiscard]] static Output<T> decode_output(const json& j) {
-        return Output<T>{j.at("valid").get<std::vector<int>>(),
-                         unpack_points<T>(j.at("normalized")),
-                         unpack_points<T>(j.at("reprojected"))};
+        Output<T> out{j.at("valid").get<std::vector<int>>(),
+                      unpack_points<T>(j.at("normalized")),
+                      unpack_points<T>(j.at("reprojected"))};
+        // The invariants index all three per pixel: a ragged output is a malformed fixture.
+        if (out.normalized.size() != out.valid.size() || out.reprojected.size() != out.valid.size())
+            throw std::invalid_argument("s0 bench: valid/normalized/reprojected lengths differ");
+        return out;
     }
 
     // ── The stage ───────────────────────────────────────────────────────────
@@ -151,8 +159,11 @@ struct S0SensorModelBench {
             std::array<T, 2> xy{};
             bool ok = false;
             if (variant == "fixed_point") {
-                xy = fixed_point_undistort(in.intr, px);
-                ok = true;
+                // Same validity rules as the shipped path: the iteration must
+                // converge, and the ray (x, y, 1) is in front of the camera.
+                const auto fp = fixed_point_undistort(in.intr, px);
+                xy = fp.xy;
+                ok = fp.converged;
             } else {
                 const auto r = sdk::msckf::stages::s0_sensor_model::apply(cam, px[0], px[1]);
                 ok = r.valid;
@@ -332,7 +343,7 @@ struct S0SensorModelBench {
         in0.intr = euroc(ds);
         const double half_diag = 0.5 * std::sqrt(752.0 * 752.0 + 480.0 * 480.0);
         for (int k = 0; k < 16; ++k) {
-            const double a = 2.0 * 3.14159265358979323846 * k / 16.0;
+            const double a = 2.0 * std::numbers::pi * k / 16.0;
             const double u = std::clamp(in0.intr.cx + rf * half_diag * std::cos(a), 0.0, 751.0);
             const double v = std::clamp(in0.intr.cy + rf * half_diag * std::sin(a), 0.0, 479.0);
             in0.pixels.push_back({u, v});
@@ -354,7 +365,7 @@ struct S0SensorModelBench {
                 const T du = px[0] - in.pixels[i][0], dv = px[1] - in.pixels[i][1];
                 return std::sqrt(static_cast<double>(du * du + dv * dv));
             };
-            rot = std::max(rot, shifted(3.14159265358979323846 / 180.0));
+            rot = std::max(rot, shifted(std::numbers::pi / 180.0));
             toff = std::max(toff, shifted(1e-3));
         }
         return {rt, jacobian_check<T>(in, out).value, rot, toff};
@@ -362,20 +373,35 @@ struct S0SensorModelBench {
 
 private:
     template <class T>
-    [[nodiscard]] static std::array<T, 2> fixed_point_undistort(const Intrinsics<T>& c, const std::array<T, 2>& px) {
+    struct FixedPoint {
+        std::array<T, 2> xy{};
+        bool converged = false;
+    };
+
+    /// n ← n − (distort(n) − n_d) until the step drops below 100·ε_T. A run
+    /// that exhausts its iterations without the step settling is accepted only
+    /// if the final residual |distort(n) − n_d| is within 1000·ε_T (roundoff
+    /// limit cycles in narrow types); otherwise the pixel is reported invalid.
+    template <class T>
+    [[nodiscard]] static FixedPoint<T> fixed_point_undistort(const Intrinsics<T>& c, const std::array<T, 2>& px) {
+        using std::abs;
+        using std::isfinite;
         const auto cam = c.camera();
         const std::array<T, 2> nd{(px[0] - c.cx) / c.fx, (px[1] - c.cy) / c.fy};
-        std::array<T, 2> n = nd;
+        FixedPoint<T> out{nd, false};
         const T eps = T{100} * std::numeric_limits<T>::epsilon();
-        for (int it = 0; it < 200; ++it) {
-            const auto d = cam.distort(n);
+        for (int it = 0; it < 200 && !out.converged; ++it) {
+            const auto d = cam.distort(out.xy);
             const T dx = d[0] - nd[0], dy = d[1] - nd[1];
-            n = {n[0] - dx, n[1] - dy};
-            using std::abs;
-            if (abs(dx) + abs(dy) < eps)
-                break;
+            out.xy = {out.xy[0] - dx, out.xy[1] - dy};
+            out.converged = abs(dx) + abs(dy) < eps;
         }
-        return n;
+        if (!out.converged) {
+            const auto d = cam.distort(out.xy);
+            out.converged = abs(d[0] - nd[0]) + abs(d[1] - nd[1]) < T{10} * eps;
+        }
+        out.converged = out.converged && isfinite(out.xy[0]) && isfinite(out.xy[1]);
+        return out;
     }
 
     template <class T>
