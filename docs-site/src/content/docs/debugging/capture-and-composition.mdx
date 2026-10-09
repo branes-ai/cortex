@@ -73,6 +73,7 @@ EuRoC run ──live assertions──▶ first violation: S6e_ekf_update, frame 
                                                    │
                          s6_msckf_update_bench --fixture fixture.json   (seconds, every type, every variant)
                                                    │
-                                        fix in the bench, re-run the composition benches,
-                                        confirm NEES/NIS on the full run
+                                        fix the stage in the filter (sdk/), re-run its bench
+                                        and the composition benches, confirm NEES/NIS on the
+                                        full run
 ```

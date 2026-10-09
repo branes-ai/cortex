@@ -50,20 +50,24 @@ number fails. Epic #444 replaces it as the debugging instrument.
 	</Card>
 	<Card title="Every transformation has a bench" icon="laptop">
 		A small executable that runs one stage on fixtures, in several number systems and
-		implementation variants, and prints its invariant report in seconds.
+		implementation variants, and prints its invariant report in seconds. The framework and the
+		S9 bench exist; the other stages' benches are #454–#458.
 		[#453](/debugging/stage-benches/)
 	</Card>
 	<Card title="Real runs become fixtures" icon="document">
-		Any moment of a real EuRoC run can be captured at a stage boundary and replayed bit for bit
-		in that stage's bench. [#446](/debugging/capture-and-composition/)
+		*Planned.* Any moment of a real EuRoC run will be capturable at a stage boundary and
+		replayable bit for bit in that stage's bench. The fixture format and its bit-exact replay
+		check already exist. [#446](/debugging/capture-and-composition/)
 	</Card>
 	<Card title="The loop is checked as a loop" icon="random">
-		Composition benches and trajectory-level checks confirm a fix fixes the *system*, because
-		over-confidence is a property of the cycle. [#447](/debugging/capture-and-composition/)
+		*Planned.* Composition benches and trajectory-level checks will confirm that a fix fixes the
+		*system*, because over-confidence is a property of the cycle.
+		[#447](/debugging/capture-and-composition/)
 	</Card>
 	<Card title="Mixed precision is a diagnostic" icon="seti:config">
-		The pipeline's linear algebra moves onto MTL5, generic in the arithmetic type. A stage whose
-		output moves between `double`, `posit<32,2>` and `float` is numerically fragile.
+		*Planned.* The pipeline's linear algebra moves onto MTL5, generic in the arithmetic type. A
+		stage whose output moves between `double`, `posit<32,2>` and `float` is numerically fragile.
+		The benches already run each stage in several types.
 		[#448–#451](/debugging/mixed-precision/)
 	</Card>
 </CardGrid>
