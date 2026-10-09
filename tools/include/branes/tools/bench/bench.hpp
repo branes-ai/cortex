@@ -93,6 +93,16 @@ struct FixtureRun {
     }
 };
 
+/// Tolerance for comparing a stage output in T against a reference held in
+/// `double` (a known answer, a ground truth): the arithmetic tolerance of T,
+/// but never tighter than double's, since the reference itself carries double
+/// rounding. Matters for types wider than double (long double).
+template <class T>
+[[nodiscard]] double tolerance_vs_double(std::size_t n, double scale = 1.0, double safety = inv::kDefaultSafety) {
+    return std::max(inv::arithmetic_tolerance<T>(n, scale, safety),
+                    inv::arithmetic_tolerance<double>(n, scale, safety));
+}
+
 namespace detail {
 
 /// Bitwise equality of two doubles (NaN == NaN when the bits agree; −0 ≠ +0).
@@ -134,7 +144,9 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
         for (std::size_t i = 0; i < flat.size(); ++i)
             tr.max_diff_vs_double = std::max(tr.max_diff_vs_double, std::abs(flat[i] - reference[i]));
 
-    if (!f.expected.is_null()) {
+    // The expected output binds only the variant it was produced by (or every
+    // variant, when the fixture leaves `variant` empty).
+    if (!f.expected.is_null() && (f.variant.empty() || f.variant == variant)) {
         const std::vector<double> want = B::template flatten<T>(B::template decode_output<T>(f.expected));
         if (f.kind == FixtureKind::Captured && f.arithmetic == tr.type) {
             // A captured fixture must replay to exactly the output it recorded.
@@ -161,7 +173,7 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
                     scale = std::max(scale, std::abs(want[i]));
                 }
             tr.report.add(inv::check_scalar(worst,
-                                            inv::arithmetic_tolerance<T>(flat.size(), scale),
+                                            tolerance_vs_double<T>(flat.size(), scale),
                                             inv::Bound::Upper,
                                             B::kInvStage,
                                             "known_answer.residual",

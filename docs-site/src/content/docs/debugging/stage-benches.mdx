@@ -7,8 +7,9 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status">
   The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
-  S9_marginalization bench as its worked example. Benches for the other stages follow in
-  [#454](https://github.com/branes-ai/cortex/issues/454)–[#458](https://github.com/branes-ai/cortex/issues/458).
+  S9_marginalization bench as its worked example. The S0_sensor_model and S1_initialization benches
+  ([#454](https://github.com/branes-ai/cortex/issues/454)) are in review; the remaining stages follow
+  in [#455](https://github.com/branes-ai/cortex/issues/455)–[#458](https://github.com/branes-ai/cortex/issues/458).
   The developer reference is `docs/arch/stage-benches.md`.
 </Aside>
 
@@ -26,7 +27,8 @@ one small executable, so an edit to a stage costs seconds to re-check, not a EuR
   written to CSV for the figure pipeline.
 - **Research:** alternative implementations of the stage (variants) run on identical fixtures,
   side by side.
-- **Mixed precision:** the same stage runs in `double`, `float`, `posit<32,2>` and `posit<16,1>`,
+- **Mixed precision:** the same stage runs in `double`, `float`, `posit<32,2>`, `posit<16,1>` and
+  `long double`,
   each compared with the `double` run.
 
 ## Fixtures
@@ -112,6 +114,22 @@ At κ ≈ 1e8, neither `posit<32,2>` nor `float` can resolve the smallest eigenv
 still positive-definite in `double`, but not measurably so in the narrower types, and `float` is
 an order of magnitude further off than posit32. That is exactly the kind of per-stage precision finding the
 [mixed-precision](/debugging/mixed-precision/) work builds on.
+
+## What the first benches found
+
+The S0 and S1 benches (#454) turned up three things on their first run, none of which an end-to-end
+metric had shown:
+
+- **The synthetic world's camera isn't quite EuRoC cam0.** Its tangential coefficient p2 is 1000×
+  the EuRoC value (1.76e-2 vs 1.76e-5). The ground-truth fixture caught it as a 0.1 disagreement in
+  normalized coordinates. The world is self-consistent, so nothing downstream failed.
+- **The S1 seeding stage didn't compile for posits:** an implicit `T` → `double` narrowing, now
+  explicit.
+- **The dynamic visual-inertial alignment is precision-fragile.** It declines entirely in `float` and
+  `posit<32,2>` on inputs where it resolves in `double`. Its solve forms normal equations (squaring
+  κ), adds a fixed `1e-9` ridge, and needs a Cholesky factorization, which breaks down once κ²
+  exceeds 1/ε. That is exactly the kind of per-stage precision finding the
+  [mixed-precision work](/debugging/mixed-precision/) is built to act on.
 
 ## Writing a bench
 

@@ -392,13 +392,13 @@ private:
             worst_r = std::max(worst_r, std::isfinite(angle) ? angle : inv::detail::kInf);
         }
         return {inv::check_scalar(worst_p,
-                                  inv::arithmetic_tolerance<T>(3, 10.0),
+                                  tolerance_vs_double<T>(3, 10.0),
                                   inv::Bound::Upper,
                                   kInvStage,
                                   "truth.kept_clone_position",
                                   "m"),
                 inv::check_scalar(worst_r,
-                                  inv::arithmetic_tolerance<T>(4, 1.0),
+                                  tolerance_vs_double<T>(4, 1.0),
                                   inv::Bound::Upper,
                                   kInvStage,
                                   "truth.kept_clone_rotation",
