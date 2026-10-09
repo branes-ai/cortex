@@ -56,6 +56,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -183,6 +184,60 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
     return tr;
 }
 
+/// Safety factor for a check on data that entered T through a double-held
+/// fixture (a rotation, a state): scaled so the threshold is never tighter than
+/// double's, for types wider than double. Equal to `safety` otherwise.
+template <class T>
+[[nodiscard]] double safety_vs_double(double safety = inv::kDefaultSafety) {
+    const double et = static_cast<double>(std::numeric_limits<T>::epsilon());
+    return safety * std::max(1.0, std::numeric_limits<double>::epsilon() / et);
+}
+
+/// A lower-triangular factor L with L Lᵀ = P for a symmetric positive
+/// SEMI-definite P (Cholesky that turns roundoff-level pivots into zero columns
+/// instead of failing). Clone augmentation makes P exactly singular, so square-
+/// root variants need this to start from a real filter state. Returns false only
+/// if a pivot is clearly negative (P is not PSD in T).
+template <class T>
+[[nodiscard]] bool psd_factor(const sdk::msckf::DynMat<T>& P, sdk::msckf::DynMat<T>& L) {
+    using std::abs;
+    using std::sqrt;
+    const std::size_t n = P.rows;
+    L = sdk::msckf::DynMat<T>(n, n);
+    T scale{0};
+    for (const T& x : P.d)
+        scale = std::max(scale, abs(x));
+    const T tol = T(inv::kDefaultSafety * static_cast<double>(n)) * std::numeric_limits<T>::epsilon() * scale;
+    for (std::size_t j = 0; j < n; ++j) {
+        T d = P(j, j);
+        for (std::size_t k = 0; k < j; ++k)
+            d -= L(j, k) * L(j, k);
+        if (d < -tol)
+            return false;
+        if (!(d > tol))
+            continue;  // zero pivot: this direction carries no variance
+        const T ljj = sqrt(d);
+        L(j, j) = ljj;
+        for (std::size_t i = j + 1; i < n; ++i) {
+            T s = P(i, j);
+            for (std::size_t k = 0; k < j; ++k)
+                s -= L(i, k) * L(j, k);
+            L(i, j) = s / ljj;
+        }
+    }
+    return true;
+}
+
+/// Timing repetitions per run: `B::kTimingReps` if the bench sets it (stages
+/// that are slow in software arithmetic), else 5.
+template <class B>
+[[nodiscard]] constexpr int timing_reps() {
+    if constexpr (requires { B::kTimingReps; })
+        return B::kTimingReps;
+    else
+        return 5;
+}
+
 /// Run bench `B` on one fixture for every type in `Types` whose name is in
 /// `selected` (empty: all), always computing the `double` run as the reference.
 template <class B, class... Ts>
@@ -200,7 +255,7 @@ template <class B, class... Ts>
         const std::string name(type_name<T>());
         if (!selected.empty() && std::find(selected.begin(), selected.end(), name) == selected.end())
             return;
-        fr.types.push_back(run_type<B, T>(nf.fixture, variant, reference));
+        fr.types.push_back(run_type<B, T>(nf.fixture, variant, reference, timing_reps<B>()));
     });
     return fr;
 }
@@ -228,7 +283,7 @@ inline void print_run(const FixtureRun& fr) {
                       << r.unit << (r.pass ? "PASS" : "FAIL") << '\n';
         rule('-');
         std::cout << "  max |output - double output| = " << fmt(t.max_diff_vs_double)
-                  << "    stage run time (best of 5) = " << fmt(t.run_us) << " us\n";
+                  << "    stage run time (best of reps) = " << fmt(t.run_us) << " us\n";
     }
 }
 
@@ -412,8 +467,14 @@ int bench_main(int argc, char** argv) {
     if (!a.csv.empty())
         write_report_csv(runs, std::filesystem::path(a.csv) / (std::string(B::kStage) + "_report.csv"));
     if constexpr (HasSweep<B>) {
-        if (a.sweep)
-            run_sweep<B>(a, AllTypes{});
+        if (a.sweep) {
+            try {
+                run_sweep<B>(a, AllTypes{});
+            } catch (const std::exception& e) {  // a bad --sweep axis, reported like a bad flag
+                std::cerr << "  " << B::kStage << ": " << e.what() << '\n';
+                return 2;
+            }
+        }
     }
     std::cout << "\n  " << B::kStage << ": " << (ok ? "all invariants PASS" : "INVARIANT FAILURES") << '\n';
     return ok ? 0 : 1;
