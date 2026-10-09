@@ -39,9 +39,10 @@ Benches so far:
 | `s6c_compression_bench` | #457 | `shipped` (identity), `qr` | features stacked → rows in/out, normal-equation error |
 | `s6d_gating_bench` | #457 | `shipped` (5 per dof), `chi2_95`, `gate_off` | dof × outlier size → inlier NIS/dof, acceptance per gate |
 | `s6e_ekf_update_bench` | #457 | `shipped` (Joseph), `sqrt_array` | pixel noise × calibration σ → trace ratio, information along N, ‖δx‖, NIS/dof |
-| `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
+| `s9_marginalization_bench` | #453 (worked example), #458 | `shipped`, `direct_gather`, `policy_oldest`, `policy_second_newest` | clones × conditioning → residual, λ_min |
+| `s10_online_calibration_bench` | #458 | `shipped` (extrinsic estimated), `fixed`, `folded_into_r` | extrinsic rotation error × prior → remaining error, NIS/dof per treatment |
 
-S10 gets its bench in #458. The S6 sub-steps share a scene (`s6_scene.hpp`): the synthetic world
+Every stage S0–S6, S9 and S10 now has a bench. The S6 sub-steps share a scene (`s6_scene.hpp`): the synthetic world
 run through S2 and S3, so the covariance is the one those stages produce, with each sub-step's input
 built by running the shipped upstream sub-steps in double. A sub-step's bench (`S6a_…` to `S6e_…`)
 prints the S6 contract.
@@ -278,6 +279,23 @@ The benches build on what is already there rather than replacing it at once:
 - **Givens and Householder null spaces agree** (the same HᵀH to 1e-13), and **QR compression** of a
   72-row stack keeps n + 1 = 52 rows with the normal equations preserved to 1e-16: batched updates are
   numerically safe.
+
+## What the S9 and S10 benches found (#458)
+
+- **A wrong extrinsic is nearly invisible to the update.** Over one 6-clone window (16 tracks), a
+  constant camera↔IMU rotation error raises NIS only to ≈0.002 per dof at 5° and ≈8e-5 at 1°; the
+  null-space projection absorbs almost all of it into the feature positions. A filter that trusts a
+  wrong extrinsic cannot see it in NIS or the χ² gate, and folding the prior into R lowers NIS
+  further. Estimated as state, the extrinsic moves toward the truth (1° → 0.955° with a 2° prior;
+  5° → 3.98° with a 5° prior) while its covariance stays consistent (NEES 0.49 of a χ²₀.₉₉₉(6) bound of
+  22.5), so recovery needs many windows of excitation. This is the "calibration treated as known"
+  suspicion of #458, measured.
+- **The window policy does not change the marginalization contract.** Removing the oldest or the
+  second-newest clone keeps the principal-submatrix contract exactly; what a policy changes is which
+  information the update had a chance to use first, which is a pipeline question (#447).
+- Fixture expected outputs can now bind a list of variants (`"shipped,direct_gather"`), and the S9
+  ground truth lists every clone's pose keyed by time, so policy variants are checked against it.
+- The filter has no time-offset state, so the issue's t_d sweep has nothing to vary.
 
 ## Alternative triangulation methods (S5)
 

@@ -19,8 +19,12 @@
 //   captured       the S9 boundary recorded while running the S2/S3/S9 stage
 //                  sequence on the synthetic world's IMU stream
 //
-// Variants: "shipped" (the stage) and "direct_gather" (an index gather written
-// out by hand), to exercise the variant slot on identical fixtures.
+// Variants: "shipped" (the stage, at the fixture's clone), "direct_gather" (an
+// index gather written out by hand), and the window policies (#458) that pick
+// the clone instead of the fixture: "policy_oldest" (the sliding window's
+// choice) and "policy_second_newest" (a keyframe-style choice that keeps the
+// newest clone for the next frame's tracks). The principal-submatrix contract
+// holds whichever clone a policy removes.
 //
 // Header-only, C++20.
 
@@ -60,11 +64,25 @@ struct S9MarginalizationBench {
     struct Output {
         State<T> state;
         sdk::msckf::stages::s9_marginalization::Diagnostics diag;
+        std::size_t removed_index = 0;  ///< the clone the run removed (not serialized)
     };
 
     [[nodiscard]] static std::vector<Variant> variants() {
         return {{"shipped", "stages::s9_marginalization::apply"},
-                {"direct_gather", "hand-written principal-submatrix gather, for comparison"}};
+                {"direct_gather", "hand-written principal-submatrix gather, for comparison"},
+                {"policy_oldest", "the window policy removes the oldest clone"},
+                {"policy_second_newest", "the window policy removes the second-newest clone (keyframe-style)"}};
+    }
+
+    /// The clone a variant removes: the fixture's, or the policy's choice.
+    template <class T>
+    [[nodiscard]] static std::size_t index_for(const Input<T>& in, std::string_view variant) {
+        const std::size_t n = in.state.clones.size();
+        if (variant == "policy_oldest")
+            return 0;
+        if (variant == "policy_second_newest")
+            return n >= 2 ? n - 2 : 0;
+        return in.clone_index;
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
@@ -97,12 +115,13 @@ struct S9MarginalizationBench {
     // ── The stage ───────────────────────────────────────────────────────────
     template <class T>
     [[nodiscard]] static Output<T> run(const Input<T>& in, std::string_view variant) {
-        Output<T> out{in.state, {}};
+        Output<T> out{in.state, {}, index_for(in, variant)};
+        const std::size_t idx = out.removed_index;
         if (variant == "direct_gather") {
             auto& s = out.state;
-            const std::size_t d = s.dim(), off = s.clone_offset(in.clone_index);
+            const std::size_t d = s.dim(), off = s.clone_offset(idx);
             out.diag.dim_before = d;
-            out.diag.removed_time = s.clones[in.clone_index].timestamp;
+            out.diag.removed_time = s.clones[idx].timestamp;
             sdk::msckf::DynMat<T> P(d - 6, d - 6);
             for (std::size_t i = 0, a = 0; i < d; ++i) {
                 if (i >= off && i < off + 6)
@@ -115,12 +134,12 @@ struct S9MarginalizationBench {
                 ++a;
             }
             s.cov.P = std::move(P);
-            s.clones.erase(s.clones.begin() + static_cast<std::ptrdiff_t>(in.clone_index));
+            s.clones.erase(s.clones.begin() + static_cast<std::ptrdiff_t>(idx));
             out.diag.dim_after = s.dim();
             out.diag.clones = s.clones.size();
             return out;
         }
-        out.diag = sdk::msckf::stages::s9_marginalization::apply(out.state, in.clone_index);
+        out.diag = sdk::msckf::stages::s9_marginalization::apply(out.state, idx);
         return out;
     }
 
@@ -170,7 +189,13 @@ struct S9MarginalizationBench {
         std::vector<inv::InvariantResult> r;
         const auto& before = in.state;
         const auto& after = out.state;
-        const std::size_t off = before.clone_offset(in.clone_index);
+        const std::size_t idx = out.removed_index;
+        if (idx >= before.clones.size()) {
+            r.push_back(inv::check_scalar(
+                static_cast<double>(idx), 0.0, inv::Bound::Upper, kInvStage, "window.removed_index_in_range", "index"));
+            return r;
+        }
+        const std::size_t off = before.clone_offset(idx);
         std::vector<std::size_t> keep;
         for (std::size_t i = 0; i < before.dim(); ++i)
             if (i < off || i >= off + 6)
@@ -181,13 +206,13 @@ struct S9MarginalizationBench {
         r.push_back(inv::check_psd(after.cov.P, kInvStage, "covariance.psd"));
         r.push_back(
             inv::check_dimension(after.clones.size() + 1, before.clones.size(), kInvStage, "window.clones_minus_1"));
-        r.push_back(inv::check_scalar(std::abs(out.diag.removed_time - before.clones[in.clone_index].timestamp),
+        r.push_back(inv::check_scalar(std::abs(out.diag.removed_time - before.clones[idx].timestamp),
                                       0.0,
                                       inv::Bound::Upper,
                                       kInvStage,
                                       "window.removed_the_requested_clone",
                                       "s"));
-        r.push_back(inv::check_scalar(static_cast<double>(mean_changes(before, after, in.clone_index)),
+        r.push_back(inv::check_scalar(static_cast<double>(mean_changes(before, after, idx)),
                                       0.0,
                                       inv::Bound::Upper,
                                       kInvStage,
@@ -235,6 +260,7 @@ struct S9MarginalizationBench {
         Fixture f;
         f.stage = std::string(kStage);
         f.kind = FixtureKind::KnownAnswer;
+        f.variant = "shipped,direct_gather";  // the policies choose their own clone
         f.source = "s9_marginalization_bench: correlated_spd(33), remove clone 1";
         f.description = "principal-submatrix gather, expected output computed analytically";
         f.input = encode_input(in);
@@ -247,9 +273,11 @@ struct S9MarginalizationBench {
     /// so the window holds the true poses; S9 removes the oldest.
     [[nodiscard]] static Fixture ground_truth() {
         const auto seq = stage_sequence(/*inject_truth=*/true, /*max_clones=*/4, /*capture_at_frame=*/6);
+        // Every clone's true pose, keyed by its time: whichever clone a variant
+        // removes, the kept ones must stay on theirs.
         json truth = json::array();
-        for (std::size_t c = 1; c < seq.input.state.clones.size(); ++c)
-            truth.push_back({{"R", pack(seq.input.state.clones[c].R)}, {"p", pack(seq.input.state.clones[c].p)}});
+        for (const auto& c : seq.input.state.clones)
+            truth.push_back({{"t", pack_num(c.timestamp)}, {"R", pack(c.R)}, {"p", pack(c.p)}});
         Fixture f;
         f.stage = std::string(kStage);
         f.kind = FixtureKind::GroundTruth;
@@ -369,17 +397,27 @@ private:
     /// 2·atan2(‖v‖, |w|), which stays accurate near zero (unlike acos of a dot).
     template <class T>
     [[nodiscard]] static std::vector<inv::InvariantResult> truth_check(const State<T>& after, const json& truth) {
-        const bool same_size = after.clones.size() == truth.size();
-        double worst_p = same_size ? 0.0 : inv::detail::kInf;
-        double worst_r = same_size ? 0.0 : inv::detail::kInf;
-        for (std::size_t c = 0; c < std::min(after.clones.size(), truth.size()); ++c) {
-            const auto p = unpack_fixed<double, 3>(truth[c].at("p"));
+        // One fewer clone than the truth lists, each kept clone matched by time.
+        const bool one_removed = after.clones.size() + 1 == truth.size();
+        double worst_p = one_removed ? 0.0 : inv::detail::kInf;
+        double worst_r = one_removed ? 0.0 : inv::detail::kInf;
+        for (std::size_t c = 0; c < after.clones.size(); ++c) {
+            const json* match = nullptr;
+            for (const auto& t : truth)
+                if (unpack_num(t.at("t")) == after.clones[c].timestamp)
+                    match = &t;
+            if (match == nullptr) {
+                worst_p = worst_r = inv::detail::kInf;
+                break;
+            }
+            const json& tc = *match;
+            const auto p = unpack_fixed<double, 3>(tc.at("p"));
             for (std::size_t i = 0; i < 3; ++i) {
                 // A non-finite position (estimate or truth) never matches: std::max drops a NaN.
                 const double d = std::abs(static_cast<double>(after.clones[c].p[i]) - p[i]);
                 worst_p = std::isfinite(d) ? std::max(worst_p, d) : inv::detail::kInf;
             }
-            const auto qt = unpack_fixed<double, 4>(truth[c].at("R"));
+            const auto qt = unpack_fixed<double, 4>(tc.at("R"));
             const auto& qa = after.clones[c].R.quaternion();
             const double a0 = static_cast<double>(qa[0]), a1 = static_cast<double>(qa[1]);
             const double a2 = static_cast<double>(qa[2]), a3 = static_cast<double>(qa[3]);

@@ -129,6 +129,22 @@ template <class F>
 
 }  // namespace detail
 
+/// Whether a fixture's expected output binds `variant`: every variant when the
+/// fixture names none, else each variant in its comma-separated list.
+[[nodiscard]] inline bool binds_variant(std::string_view list, std::string_view variant) {
+    if (list.empty())
+        return true;
+    while (!list.empty()) {
+        const auto comma = list.find(',');
+        if (list.substr(0, comma) == variant)
+            return true;
+        if (comma == std::string_view::npos)
+            break;
+        list.remove_prefix(comma + 1);
+    }
+    return false;
+}
+
 /// Run bench `B` on one fixture in arithmetic type T, with `reference` the
 /// flattened `double` output to compare against (empty: no comparison).
 template <class B, class T>
@@ -148,7 +164,7 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
 
     // The expected output binds only the variant it was produced by (or every
     // variant, when the fixture leaves `variant` empty).
-    if (!f.expected.is_null() && (f.variant.empty() || f.variant == variant)) {
+    if (!f.expected.is_null() && binds_variant(f.variant, variant)) {
         const std::vector<double> want = B::template flatten<T>(B::template decode_output<T>(f.expected));
         if (f.kind == FixtureKind::Captured && f.arithmetic == tr.type) {
             // A captured fixture must replay to exactly the output it recorded.
