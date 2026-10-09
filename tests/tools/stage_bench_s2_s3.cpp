@@ -132,3 +132,13 @@ TEST_CASE("S2 and S3 committed fixture files load and pass", "[tools][bench][s2]
             {name, bn::load(dir / "s3_augmentation" / (std::string(name) + ".json"))}, bn::kShipped, {"double"});
     }
 }
+
+TEST_CASE("S2 bench rejects a sweep dt that would exhaust memory, with exit code 2", "[tools][bench][s2]") {
+    REQUIRE_THROWS_AS(S2::sweep_point<double>({{"dt", 1e-6}, {"dynamics", 0.0}, {"q_scale", 1.0}}),
+                      std::invalid_argument);
+    std::vector<std::string> args{"s2_propagation_bench", "--types", "double", "--sweep", "dt=1e-6"};
+    std::vector<char*> argv;
+    for (auto& a : args)
+        argv.push_back(a.data());
+    REQUIRE(bn::bench_main<S2>(static_cast<int>(argv.size()), argv.data()) == 2);
+}

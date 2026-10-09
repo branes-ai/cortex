@@ -467,8 +467,14 @@ int bench_main(int argc, char** argv) {
     if (!a.csv.empty())
         write_report_csv(runs, std::filesystem::path(a.csv) / (std::string(B::kStage) + "_report.csv"));
     if constexpr (HasSweep<B>) {
-        if (a.sweep)
-            run_sweep<B>(a, AllTypes{});
+        if (a.sweep) {
+            try {
+                run_sweep<B>(a, AllTypes{});
+            } catch (const std::exception& e) {  // a bad --sweep axis, reported like a bad flag
+                std::cerr << "  " << B::kStage << ": " << e.what() << '\n';
+                return 2;
+            }
+        }
     }
     std::cout << "\n  " << B::kStage << ": " << (ok ? "all invariants PASS" : "INVARIANT FAILURES") << '\n';
     return ok ? 0 : 1;

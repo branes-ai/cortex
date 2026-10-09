@@ -248,7 +248,7 @@ struct S2PropagationBench {
                               "s"));
         r.push_back(inv::check_dimension(s.dim(), in.state.dim(), kInvStage, "state.dimension_unchanged"));
         if (f.kind == FixtureKind::GroundTruth)
-            for (auto& x : truth_checks<T>(s, f.truth))
+            for (auto& x : truth_checks<T>(s, f.truth, in.samples.size()))
                 r.push_back(x);
         return r;
     }
@@ -386,8 +386,10 @@ struct S2PropagationBench {
     template <class T>
     [[nodiscard]] static std::vector<double> sweep_point(const Point& p) {
         const double dt = p.at("dt"), dyn = p.at("dynamics"), qs = p.at("q_scale");
-        if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1)
-            throw std::invalid_argument("s2 bench sweep: dt must be in (0, 0.1]");
+        // Lower bound: each step keeps six matrices for the per-step checks, so
+        // 0.5 s at dt = 1e-4 (5000 steps) is the most a sweep point may allocate.
+        if (!std::isfinite(dt) || dt < 1e-4 || dt > 0.1)
+            throw std::invalid_argument("s2 bench sweep: dt must be in [1e-4, 0.1]");
         if (dyn != 0.0 && dyn != 1.0 && dyn != 2.0)
             throw std::invalid_argument("s2 bench sweep: dynamics must be 0, 1 or 2");
         if (!std::isfinite(qs) || qs <= 0.0 || qs > 100.0)
@@ -590,12 +592,14 @@ private:
         return tr;
     }
 
-    /// Final pose and velocity against the analytic truth. The propagation
-    /// holds each IMU sample over its interval (zero-order hold), so on a
-    /// rotating trajectory it carries an O(|ω||a−g|Δt) integration error; the
-    /// bounds are physical, set for the ground-truth fixture's 0.25 s segment.
+    /// Final pose and velocity against the analytic truth. On this trajectory
+    /// the propagation is exact in exact arithmetic: ω is constant, so
+    /// R ← R·Exp(ωΔt) is exact, and each accel sample is Rₖᵀ(a_w − g) + b_a, so
+    /// Rₖ(ã − b_a) + g = a_w exactly at every step. Any residual is arithmetic,
+    /// held to the type's tolerance accumulated over the `steps` steps.
     template <class T>
-    [[nodiscard]] static std::vector<inv::InvariantResult> truth_checks(const State<T>& s, const json& truth) {
+    [[nodiscard]] static std::vector<inv::InvariantResult>
+    truth_checks(const State<T>& s, const json& truth, std::size_t steps) {
         const auto R = unpack_so3<double>(truth.at("R"));
         const auto p = unpack_fixed<double, 3>(truth.at("p"));
         const auto v = unpack_fixed<double, 3>(truth.at("v"));
@@ -618,14 +622,19 @@ private:
         double ang = 2.0 * std::atan2(std::sqrt(qx * qx + qy * qy + qz * qz), std::abs(qw));
         if (!std::isfinite(ang))
             ang = inv::detail::kInf;
-        return {inv::check_scalar(ep, 2e-3, inv::Bound::Upper, kInvStage, "truth.position_error", "m"),
-                inv::check_scalar(ev, 1e-2, inv::Bound::Upper, kInvStage, "truth.velocity_error", "m/s"),
-                inv::check_scalar(ang,
-                                  std::max(1e-9, tolerance_vs_double<T>(8, 1.0, 4096.0)),
-                                  inv::Bound::Upper,
-                                  kInvStage,
-                                  "truth.attitude_error",
-                                  "rad")};
+        double p_scale = 1.0, v_scale = 1.0;
+        for (std::size_t i = 0; i < 3; ++i) {
+            p_scale = std::max(p_scale, std::abs(p[i]));
+            v_scale = std::max(v_scale, std::abs(v[i]));
+        }
+        const std::size_t n = std::max<std::size_t>(steps, 1);
+        return {
+            inv::check_scalar(
+                ep, tolerance_vs_double<T>(n, p_scale), inv::Bound::Upper, kInvStage, "truth.position_error", "m"),
+            inv::check_scalar(
+                ev, tolerance_vs_double<T>(n, v_scale), inv::Bound::Upper, kInvStage, "truth.velocity_error", "m/s"),
+            inv::check_scalar(
+                ang, tolerance_vs_double<T>(n, 1.0), inv::Bound::Upper, kInvStage, "truth.attitude_error", "rad")};
     }
 };
 
