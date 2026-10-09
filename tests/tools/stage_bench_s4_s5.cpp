@@ -158,3 +158,21 @@ TEST_CASE("bench review hardening: base64 padding, vacuous truth, gate rejection
     bad.at("observations").at(0).at(1) = 1;
     REQUIRE_THROWS_AS(S5::decode_input<double>(bad), std::invalid_argument);
 }
+
+TEST_CASE("S5 bench: the alternative triangulation methods, measured", "[tools][bench][s5]") {
+    // Columns: 0 shipped, 3 midpoint, 4 DLT, 5 inverse depth (depth error, m).
+    const auto low = S5::sweep_point<double>({{"parallax_deg", 0.25}, {"px_noise", 0.5}});
+    const auto mid = S5::sweep_point<double>({{"parallax_deg", 5.0}, {"px_noise", 1.0}});
+    // Inverse depth minimizes the same reprojection error as the shipped
+    // Gauss-Newton, from a different seed and parameterization: the same answer.
+    REQUIRE(std::abs(mid[5] - mid[0]) < 1e-9);
+    REQUIRE(std::abs(low[5] - low[0]) < 0.05 * low[0]);
+    // The algebraic DLT is shrunk toward the cameras: better at grazing
+    // parallax, a little worse where depth is observable.
+    REQUIRE(low[4] < low[0]);
+    REQUIRE(mid[4] > mid[0]);
+    // The two-view midpoint discards views: the worst of the four, and it
+    // loses the track outright at grazing parallax.
+    REQUIRE(mid[3] > mid[4]);
+    REQUIRE(std::isinf(low[3]));
+}

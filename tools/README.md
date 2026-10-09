@@ -74,7 +74,7 @@ replays a stage and visualizes it.
 |---|---|
 | `tools/include/branes/tools/vio_trace.hpp` | the **trace bus** — the JSONL schema (`{frame, t_s, stage, input, output}`) every inspector reads/writes |
 | `tools/src/asl_trace.cpp` | the **`--trace` tap**: runs the real estimator over EuRoC and dumps per-stage records |
-| `tools/src/s4_inspect.cpp` | **S4 visual-frontend inspector** (the template) — real frames → FAST+KLT → enriched per-track JSONL |
+| `tools/src/s4_inspect.cpp` | **S4 visual-frontend inspector** (the template) — real frames → the S4_frontend stage → enriched per-track JSONL |
 | `tools/src/s0_inspect.cpp` | **S0 sensor-model inspector** — real `cam0` frame → camera distortion grid + round-trip; real `imu0` stream → per-channel Allan / noise density |
 | `tools/src/s5_inspect.cpp` | **S5 triangulation inspector** (3-D tier) — real tracks + GT clone poses → real triangulator → 3-D landmark cloud + covariance + reprojection residuals |
 | `docs-site/scripts/gen-overlay.mjs` | renders an inspector's `frames.jsonl` to per-frame SVG overlays (image-domain tier) |

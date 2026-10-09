@@ -33,7 +33,7 @@ Benches so far:
 | `s2_propagation_bench` | #455 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance` | Δt × dynamics × Q scale → position error, yaw leak, diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
 | `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
 | `s4_frontend_bench` | #456 | `shipped` (FB gate off), `fb_gate_1px`, `klt_window_7` | image noise × shift → survival, end-point RMS, FB median |
-| `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg` | parallax × pixel noise → depth error, κ, gate rejection |
+| `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg`, `midpoint_two_view`, `dlt_linear`, `inverse_depth_gn` | parallax × pixel noise → depth error per method, κ, gate rejection |
 | `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
 
 The remaining stages get their benches in #457–#458.
@@ -223,12 +223,14 @@ The benches build on what is already there rather than replacing it at once:
 
 - **The front end needed extracting.** Its KLT tracking, forward-backward gate and FAST replenishment
   lived as private methods of `VioEstimator`. They are now `stages::s4_frontend::track`, which
-  `VioEstimator` calls, and the result is bit-identical on EuRoC.
+  `VioEstimator` calls, and the result is bit-identical on EuRoC. The S4 inspector (`s4_inspect`)
+  calls the stage too, rather than its own instrumented copy. Its JSONL output is byte-identical to
+  the copy's on 600 MH_05 frames, with the gate off and at 1 px.
 - **Border churn.** KLT drops any feature whose window doesn't fit at the coarsest pyramid level (a
   band about (half-window + 1)·2^(levels−1) px wide, ≈24 px at the defaults), while FAST detects up
   to 3 px from the edge. Detections in that band die on their first tracked frame and are replaced
   under new ids: about 85% of new detections on the bench's 160×120 frames. The bench reports this
-  as `tracks.lost_on_first_frame`.
+  as `tracks.lost_on_first_frame`. Tracked in #474.
 - **The forward-backward gate is off by default**, so the shipped front end keeps tracks that can't
   round-trip. The bench measures that (reported) and enforces it in the `fb_gate_1px` variant.
 - **`CameraUpdater` didn't compile for posits.** It called `std::acos` and `std::sqrt` as qualified
@@ -237,7 +239,42 @@ The benches build on what is already there rather than replacing it at once:
 - **The synthetic world steps its velocity at the end of the warm-up.** The ground truth is at rest
   at t = 1.5 s and moving at ≈1 m/s right after it, which no IMU stream can produce. Pure IMU
   propagation from rest is off by ≈1 m/s after one frame. Elsewhere the world's IMU matches its truth
-  to ≈1e-5 m per frame. The S5 captured fixture starts after the step.
+  to ≈1e-5 m per frame. The S5 captured fixture starts after the step. Tracked in #475.
+
+## Alternative triangulation methods (S5)
+
+`stages::s5_triangulation::apply(state, updater, track, method)` runs a candidate instead of the
+shipped solve; the estimator does not use them. They share the updater's camera model
+(`CameraUpdater::camera_pose`, `projection_jacobians`) and ignore the parallax gate.
+
+| Method | Variant | What it solves |
+|---|---|---|
+| `Shipped` | `shipped` | ray-perpendicular linear solve Σ(I − d̂d̂ᵀ)·p = Σ(I − d̂d̂ᵀ)·c, then Gauss-Newton on reprojection |
+| `Midpoint` | `midpoint_two_view` | the widest pair of rays; the midpoint of their common perpendicular |
+| `Dlt` | `dlt_linear` | inhomogeneous DLT: algebraic least squares over every view (W = 1) |
+| `InverseDepth` | `inverse_depth_gn` | anchored inverse depth (α, β, ρ) in the first camera, seeded by the DLT, Gauss-Newton on reprojection |
+
+All four pass every fixture in every default type. The sweep (four clones, feature at 5 m, 16
+draws; mean depth error in m, double) separates them:
+
+| parallax | px noise | shipped | midpoint | DLT | inverse depth |
+|---|---|---|---|---|---|
+| 0.25° | 0.5 | 2.38 | fails | 1.60 | 2.41 |
+| 1° | 2 | 2.40 | fails | 1.60 | 2.41 |
+| 5° | 1 | 0.140 | 0.168 | 0.147 | 0.140 |
+| 15° | 1 | 0.0455 | 0.0553 | 0.0465 | 0.0455 |
+
+- **Inverse depth matches the shipped Gauss-Newton** to 1e-9 m wherever depth is observable. It
+  minimizes the same reprojection error, so the parameterization changes the path, not the answer.
+  Where it differs at grazing parallax, it is by the few percent of a different local minimum.
+- **The DLT is biased toward the cameras.** That shrinkage beats the maximum-likelihood answer
+  where depth is barely observable, and costs ≈5% where it is observable.
+- **The two-view midpoint is the worst** and loses tracks at low parallax with noise. It is also
+  the one method that loses precision with exact observations: the closed form divides by 1 − cos²
+  of the parallax angle, which cancels catastrophically. In float it is off by 9 mm at 0.25°, where
+  the others are within 1 µm.
+- Every method loses the track at 0.25° with 1 px of noise; no parameterization recovers a depth
+  the geometry doesn't hold. The parallax gate is the answer there, not the solver.
 
 Capturing fixtures from the running backend and from EuRoC replays, selected by stage, frame range or
 trigger, is #446. It writes fixtures with `bench::capture(...)` in the format above, so they load
