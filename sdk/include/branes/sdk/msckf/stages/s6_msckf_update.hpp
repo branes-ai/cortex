@@ -8,6 +8,11 @@
 //   s6a_jacobians::apply(state, updater, track, p_f)  → (H_f, H_x, r)
 //   s6b_nullspace_projection::apply(H_f, H_x, r)      → (H₀, r₀), feature marginalized
 //   s6c_compression::apply(H₀, r₀)                    → (H_c, r_c)
+//
+// S6b and S6c also take an alternative method for the benches to compare (#457):
+// Givens rotations instead of Householder reflectors for the null space, and a
+// QR compression of a stacked multi-feature system instead of the identity.
+// The shipped sequence below uses neither.
 //   s6d_gating::apply(state, updater, H_c, r_c)       → (NIS, accept | reject)
 //   s6e_ekf_update::apply(state, updater, H_c, r_c)   → (state', δx)
 //
@@ -20,6 +25,7 @@
 #define BRANES_SDK_MSCKF_STAGES_S6_MSCKF_UPDATE_HPP
 
 #include <branes/sdk/msckf/camera_updater.hpp>
+#include <branes/sdk/msckf/qr.hpp>
 #include <branes/sdk/msckf/stages/s5_triangulation.hpp>
 
 #include <cstddef>
@@ -66,6 +72,61 @@ template <math::Scalar T>
     return out;
 }
 
+/// How the left null space of H_f is applied.
+enum class Method {
+    Householder,  ///< shipped: three reflectors (CameraUpdater::nullspace_project)
+    Givens,       ///< plane rotations, column by column, bottom-up
+};
+
+/// Givens variant: zero the sub-diagonal of H_f's three columns with plane
+/// rotations applied across [H_f | H_x | r], and keep the bottom rows − 3. The
+/// rows span the same left null space as the Householder projection; they differ
+/// from it by an orthogonal change of basis, so HᵀH and Hᵀr agree.
+template <math::Scalar T>
+[[nodiscard]] Result<T> apply_givens(const MeasurementSystem<T>& sys) {
+    Result<T> out;
+    const std::size_t m = sys.rows, n = sys.cols, cols = 3 + n + 1;
+    if (m <= 3)
+        return out;
+    std::vector<T> a(m * cols, T{0});
+    for (std::size_t i = 0; i < m; ++i) {
+        for (std::size_t j = 0; j < 3; ++j)
+            a[i * cols + j] = sys.Hf[i * 3 + j];
+        for (std::size_t j = 0; j < n; ++j)
+            a[i * cols + 3 + j] = sys.Hx[i * n + j];
+        a[i * cols + 3 + n] = sys.r[i];
+    }
+    using math::lie::detail::sqrt_;
+    for (std::size_t c = 0; c < 3; ++c)
+        for (std::size_t i = m - 1; i > c; --i) {
+            // Rotate rows (i−1, i) so that a(i, c) = 0.
+            const T x = a[(i - 1) * cols + c], y = a[i * cols + c];
+            if (y == T{0})
+                continue;
+            const T rr = sqrt_(x * x + y * y);
+            const T cs = x / rr, sn = y / rr;
+            for (std::size_t j = 0; j < cols; ++j) {
+                const T u = a[(i - 1) * cols + j], v = a[i * cols + j];
+                a[(i - 1) * cols + j] = cs * u + sn * v;
+                a[i * cols + j] = cs * v - sn * u;
+            }
+        }
+    out.projected.H = DynMat<T>(m - 3, n);
+    out.projected.r.resize(m - 3);
+    for (std::size_t i = 0; i < m - 3; ++i) {
+        for (std::size_t j = 0; j < n; ++j)
+            out.projected.H(i, j) = a[(i + 3) * cols + 3 + j];
+        out.projected.r[i] = a[(i + 3) * cols + 3 + n];
+    }
+    out.ok = true;
+    return out;
+}
+
+template <math::Scalar T>
+[[nodiscard]] Result<T> apply(const MeasurementSystem<T>& system, Method method) {
+    return method == Method::Givens ? apply_givens(system) : apply(system);
+}
+
 }  // namespace s6b_nullspace_projection
 
 // ── S6c: measurement compression ──────────────────────────────────────────
@@ -76,7 +137,7 @@ struct Result {
     ProjectedMeasurement<T> compressed;
     std::size_t rows_in = 0;
     std::size_t rows_out = 0;
-    bool compressed_applied = false;  ///< cortex applies none yet (see below)
+    bool compressed_applied = false;  ///< the shipped path compresses nothing (see below)
 };
 
 /// The identity today: cortex updates one feature at a time, whose projected
@@ -90,6 +151,42 @@ template <math::Scalar T>
     out.rows_in = projected.H.rows;
     out.rows_out = projected.H.rows;
     out.compressed = std::move(projected);
+    return out;
+}
+
+/// The compression applied.
+enum class Method {
+    Identity,  ///< shipped: no compression (one feature at a time)
+    Qr,        ///< QR of the stacked [H | r]: at most n + 1 rows survive
+};
+
+/// QR variant: [H | r] = Q·R, keep R's leading min(rows, n + 1) rows. With n + 1
+/// columns the residual column is kept whole, so ‖r_c‖ = ‖r‖, and HᵀH and Hᵀr
+/// are preserved exactly. Only a system taller than n + 1 rows (a stack of
+/// features) actually shrinks.
+template <math::Scalar T>
+[[nodiscard]] Result<T> apply(ProjectedMeasurement<T> projected, Method method) {
+    if (method != Method::Qr || projected.H.rows <= projected.H.cols + 1)
+        return apply(std::move(projected));
+    const std::size_t k = projected.H.rows, n = projected.H.cols;
+    DynMat<T> a(k, n + 1);
+    for (std::size_t i = 0; i < k; ++i) {
+        for (std::size_t j = 0; j < n; ++j)
+            a(i, j) = projected.H(i, j);
+        a(i, n) = projected.r[i];
+    }
+    const DynMat<T> rf = householder_qr_r(a);
+    Result<T> out;
+    out.rows_in = k;
+    out.rows_out = rf.rows;
+    out.compressed.H = DynMat<T>(rf.rows, n);
+    out.compressed.r.resize(rf.rows);
+    for (std::size_t i = 0; i < rf.rows; ++i) {
+        for (std::size_t j = 0; j < n; ++j)
+            out.compressed.H(i, j) = rf(i, j);
+        out.compressed.r[i] = rf(i, n);
+    }
+    out.compressed_applied = true;
     return out;
 }
 

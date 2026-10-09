@@ -1,0 +1,61 @@
+{
+ "arithmetic": "double",
+ "description": "expected: the identity returns the input",
+ "expected": {
+  "applied": 0,
+  "compressed": {
+   "H": {
+    "cols": 2,
+    "data": [
+     1.0,
+     2.0,
+     0.0,
+     1.0,
+     3.0,
+     -1.0,
+     2.0,
+     2.0
+    ],
+    "rows": 4
+   },
+   "r": [
+    0.5,
+    -1.0,
+    2.0,
+    0.25
+   ]
+  },
+  "rows_in": 4,
+  "rows_out": 4
+ },
+ "input": {
+  "stacked": {
+   "H": {
+    "cols": 2,
+    "data": [
+     1.0,
+     2.0,
+     0.0,
+     1.0,
+     3.0,
+     -1.0,
+     2.0,
+     2.0
+    ],
+    "rows": 4
+   },
+   "r": [
+    0.5,
+    -1.0,
+    2.0,
+    0.25
+   ]
+  }
+ },
+ "kind": "known_answer",
+ "schema": "branes.vio.fixture/1",
+ "seed": 0,
+ "source": "s6c_compression_bench: a 4x2 system",
+ "stage": "S6c_compression",
+ "variant": "shipped"
+}

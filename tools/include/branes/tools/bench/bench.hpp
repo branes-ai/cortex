@@ -60,6 +60,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace branes::tools::bench {
@@ -191,6 +192,36 @@ template <class T>
 [[nodiscard]] double safety_vs_double(double safety = inv::kDefaultSafety) {
     const double et = static_cast<double>(std::numeric_limits<T>::epsilon());
     return safety * std::max(1.0, std::numeric_limits<double>::epsilon() / et);
+}
+
+/// The relative precision of T at `magnitude`. An IEEE type's relative spacing
+/// is ε_T for every normal number. A tapered type (posit) is most precise near 1
+/// and loses fraction bits as |x| moves away: its relative gap to the next value
+/// above |magnitude| — never less than ε_T.
+template <class T>
+[[nodiscard]] double eps_at(double magnitude) {
+    const double eps = static_cast<double>(std::numeric_limits<T>::epsilon());
+    if constexpr (std::is_floating_point_v<T>) {
+        return eps;
+    } else {
+        const double m = std::abs(magnitude);
+        if (!(m > 0.0) || !std::isfinite(m))
+            return eps;
+        const T a(m);
+        T b = a;
+        ++b;  // the next representable value
+        const double da = static_cast<double>(a), db = static_cast<double>(b);
+        return da > 0.0 && std::isfinite(db) ? std::max(eps, (db - da) / da) : eps;
+    }
+}
+
+/// `safety_vs_double` scaled to T's precision at the data's `magnitude`: a check
+/// on quantities of that size holds T to the precision it has there. Identical
+/// to `safety_vs_double` for IEEE types.
+template <class T>
+[[nodiscard]] double safety_at(double magnitude, double safety = inv::kDefaultSafety) {
+    const double eps = static_cast<double>(std::numeric_limits<T>::epsilon());
+    return safety_vs_double<T>(safety) * (eps_at<T>(magnitude) / eps);
 }
 
 /// A lower-triangular factor L with L Lᵀ = P for a symmetric positive
@@ -372,7 +403,13 @@ struct BenchArgs {
 /// The stage's contract from the registry, by its S<N> prefix.
 [[nodiscard]] inline const StageInfo* find_contract(std::string_view stage) {
     static const std::vector<StageInfo> all = pipeline();
-    const std::string_view id = stage.substr(0, stage.find('_'));
+    std::string_view id = stage.substr(0, stage.find('_'));
+    for (const auto& s : all)
+        if (s.id == id)
+            return &s;
+    // A sub-step (S6a … S6e) shares its stage's contract (S6).
+    while (!id.empty() && id.back() >= 'a' && id.back() <= 'z')
+        id.remove_suffix(1);
     for (const auto& s : all)
         if (s.id == id)
             return &s;
