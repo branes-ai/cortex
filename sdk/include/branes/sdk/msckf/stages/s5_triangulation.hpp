@@ -16,7 +16,8 @@
 // solve (#444); VioEstimator does not use them. They share the updater's camera
 // model (`camera_pose`, `projection_jacobians`) and ignore the parallax gate:
 //
-//   Midpoint      the widest-parallax pair of rays; the midpoint of their common
+//   Midpoint      the best-conditioned pair of rays (largest sin of the angle
+//                 between them); the midpoint of their common
 //                 perpendicular. Two views, closed form.
 //   Dlt           inhomogeneous DLT: the algebraic error x·(r₃·X + t₃) − (r₁·X + t₁)
 //                 over every view, solved in least squares (X with W = 1).
@@ -98,19 +99,23 @@ bool midpoint(const State<T, Cov>& s, const CameraUpdater<T>& upd, const Feature
             return false;
         rays.push_back(d * (T{1} / n));
     }
-    // The widest pair (smallest cosine) carries the most depth information.
+    // The best-conditioned pair — the largest sin² = 1 − c² — carries the most
+    // depth information. Ranking by the cosine alone would pick an antiparallel
+    // pair (c = −1), which is as degenerate as a parallel one.
     std::size_t bi = 0, bj = 1;
-    T best = T{2};
+    T best_den = T{-1};
     for (std::size_t i = 0; i < rays.size(); ++i)
-        for (std::size_t j = i + 1; j < rays.size(); ++j)
-            if (const T c = dot(rays[i], rays[j]); c < best) {
-                best = c;
+        for (std::size_t j = i + 1; j < rays.size(); ++j) {
+            const T cij = dot(rays[i], rays[j]);
+            if (const T den_ij = T{1} - cij * cij; den_ij > best_den) {
+                best_den = den_ij;
                 bi = i;
                 bj = j;
             }
+        }
     // Closest points c₁ + s·d₁ and c₂ + t·d₂ (unit d): [1 −c; c −1]·[s t]ᵀ = [d₁·w; d₂·w].
     const V3<T> w = poses[bj].center - poses[bi].center;
-    const T c = best, den = T{1} - c * c;
+    const T c = dot(rays[bi], rays[bj]), den = T{1} - c * c;
     if (!(den > T{0}))
         return false;  // parallel rays
     const T e1 = dot(rays[bi], w), e2 = dot(rays[bj], w);

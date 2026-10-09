@@ -23,7 +23,7 @@
 // Variants: "shipped" (linear + 5 Gauss-Newton steps, no gate), "linear_only"
 // (no refinement), "parallax_gate_2deg" (reject below 2° of parallax), and the
 // alternative methods of stages::s5_triangulation::Method — "midpoint_two_view"
-// (widest pair, common-perpendicular midpoint), "dlt_linear" (inhomogeneous
+// (best-conditioned pair, common-perpendicular midpoint), "dlt_linear" (inhomogeneous
 // DLT), "inverse_depth_gn" (anchored inverse depth, Gauss-Newton).
 //
 // Sweep: parallax × pixel noise → depth error per method, normal-matrix κ, and
@@ -83,7 +83,7 @@ struct S5TriangulationBench {
         return {{"shipped", "linear ray-perpendicular solve + 5 Gauss-Newton steps, no parallax gate"},
                 {"linear_only", "the linear solve without refinement"},
                 {"parallax_gate_2deg", "reject tracks with less than 2 deg of parallax"},
-                {"midpoint_two_view", "midpoint of the common perpendicular of the widest pair of rays"},
+                {"midpoint_two_view", "midpoint of the common perpendicular of the best-conditioned pair of rays"},
                 {"dlt_linear", "inhomogeneous DLT: algebraic least squares over every view"},
                 {"inverse_depth_gn", "anchored inverse depth seeded by the DLT, Gauss-Newton on reprojection"}};
     }

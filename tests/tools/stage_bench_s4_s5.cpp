@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -175,4 +176,24 @@ TEST_CASE("S5 bench: the alternative triangulation methods, measured", "[tools][
     // loses the track outright at grazing parallax.
     REQUIRE(mid[3] > mid[4]);
     REQUIRE(std::isinf(low[3]));
+}
+
+TEST_CASE("S5 midpoint: an antiparallel pair is skipped for a usable one", "[tools][bench][s5]") {
+    // Camera 0 at the origin and camera 1 at z = 6 turned to face it see the
+    // feature at z = 3 along opposite rays (sin = 0); camera 2, offset in x, does not.
+    namespace s5 = branes::sdk::msckf::stages::s5_triangulation;
+    auto in = S5::decode_input<double>(S5::known_answer().input);
+    in.state.clones.resize(3);
+    in.track.observations.clear();
+    const S5::Vec3<double> F{{0.0, 0.0, 3.0}};
+    in.state.clones[0] = {{}, {{0.0, 0.0, 0.0}}, 0.0};
+    in.state.clones[1] = {branes::math::lie::SO3<double>::exp({{0.0, std::numbers::pi, 0.0}}), {{0.0, 0.0, 6.0}}, 1.0};
+    in.state.clones[2] = {{}, {{1.0, 0.0, 0.0}}, 2.0};
+    in.state.cov.P = branes::sdk::msckf::DynMat<double>::identity(in.state.dim());
+    in.track.observations = {{0, 0, {{0.0, 0.0}}}, {1, 0, {{0.0, 0.0}}}, {2, 0, {{-1.0 / 3.0, 0.0}}}};
+    const branes::sdk::msckf::CameraUpdater<double> upd({in.extrinsics}, in.options);
+    const auto r = s5::apply(in.state, upd, in.track, s5::Method::Midpoint);
+    REQUIRE(r.ok);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(std::abs(r.p_f[i] - F[i]) < 1e-12);
 }

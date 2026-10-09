@@ -250,7 +250,7 @@ shipped solve; the estimator does not use them. They share the updater's camera 
 | Method | Variant | What it solves |
 |---|---|---|
 | `Shipped` | `shipped` | ray-perpendicular linear solve Σ(I − d̂d̂ᵀ)·p = Σ(I − d̂d̂ᵀ)·c, then Gauss-Newton on reprojection |
-| `Midpoint` | `midpoint_two_view` | the widest pair of rays; the midpoint of their common perpendicular |
+| `Midpoint` | `midpoint_two_view` | the best-conditioned pair of rays (largest sin of their angle); the midpoint of their common perpendicular |
 | `Dlt` | `dlt_linear` | inhomogeneous DLT: algebraic least squares over every view (W = 1) |
 | `InverseDepth` | `inverse_depth_gn` | anchored inverse depth (α, β, ρ) in the first camera, seeded by the DLT, Gauss-Newton on reprojection |
 
