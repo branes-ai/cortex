@@ -34,9 +34,17 @@ Benches so far:
 | `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
 | `s4_frontend_bench` | #456 | `shipped` (FB gate off), `fb_gate_1px`, `klt_window_7` | image noise × shift → survival, end-point RMS, FB median |
 | `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg`, `midpoint_two_view`, `dlt_linear`, `inverse_depth_gn` | parallax × pixel noise → depth error per method, κ, gate rejection |
+| `s6a_jacobians_bench` | #457 | `shipped` | observations × depth → H_f, H_x finite-difference error, max \|H_f\| |
+| `s6b_nullspace_projection_bench` | #457 | `shipped` (Householder), `givens` | observations × depth → NᵀN − I, Nᵀ H_f, H₀·N per method |
+| `s6c_compression_bench` | #457 | `shipped` (identity), `qr` | features stacked → rows in/out, normal-equation error |
+| `s6d_gating_bench` | #457 | `shipped` (5 per dof), `chi2_95`, `gate_off` | dof × outlier size → inlier NIS/dof, acceptance per gate |
+| `s6e_ekf_update_bench` | #457 | `shipped` (Joseph), `sqrt_array` | pixel noise × calibration σ → trace ratio, information along N, ‖δx‖, NIS/dof |
 | `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
 
-The remaining stages get their benches in #457–#458.
+S10 gets its bench in #458. The S6 sub-steps share a scene (`s6_scene.hpp`): the synthetic world
+run through S2 and S3, so the covariance is the one those stages produce, with each sub-step's input
+built by running the shipped upstream sub-steps in double. A sub-step's bench (`S6a_…` to `S6e_…`)
+prints the S6 contract.
 
 A bench whose stage is slow in software arithmetic can set `static constexpr int kTimingReps` (S2
 and S3 use 1). A bench whose stage is not generic in T declares `using SupportedTypes =
@@ -44,6 +52,12 @@ TypeList<...>` (S4: the KLT front end runs in double only, #449 decides whether 
 generic). Image fixtures are stored losslessly as base64 bytes (`pack(cv::Image)`,
 `unpack_image`). Square-root variants start from a real filter state with `psd_factor`, a Cholesky that
 tolerates the exactly singular covariance a fresh clone produces.
+
+A posit is most precise near 1 and loses fraction bits as |x| moves away; at 1e-17 posit32 keeps
+about 14 of its 28. A check on small quantities (a residual at the true state, a covariance entry
+near σ²) uses `safety_at<T>(magnitude)`, which scales the safety factor by `eps_at<T>(magnitude) /
+ε_T`: T's relative spacing at that size. It is 1 for IEEE types. Don't apply it to a lower bound
+(an SPD margin): a larger safety factor makes those stricter.
 
 ## Fixtures
 
@@ -240,6 +254,24 @@ The benches build on what is already there rather than replacing it at once:
   at t = 1.5 s and moving at ≈1 m/s right after it, which no IMU stream can produce. Pure IMU
   propagation from rest is off by ≈1 m/s after one frame. Elsewhere the world's IMU matches its truth
   to ≈1e-5 m per frame. The S5 captured fixture starts after the step. Tracked in #475.
+
+## What the S6 benches found (#457)
+
+- **The update is not where yaw and global position gain information.** The projected Jacobian
+  annihilates the four unobservable directions to ≈1e-16 at the S2/S3-estimated state as well as at
+  the true one, and the update's information-form correction Hᵀ S⁻¹ r has no component along them. A
+  camera update evaluated at one consistent point is consistent by construction; the over-confidence
+  of #212 has to come from linearization points that drift apart across stages (S2's Φ), not from S6.
+- **The shipped χ² gate is loose at low dof.** It accepts γ ≤ 5·dof. Inliers are χ²-consistent
+  (NIS/dof inside the band at every dof), but at 1–3 dof the gate admits 59–70% of measurements biased
+  by 2σ, where a 95% χ² gate admits 22–44%. At 9 dof and above both reject them.
+- **The square-root update loses precision against Joseph in posits.** On the captured fixture the
+  QR array update lands 2.3e-6 from its double result in posit32 where the Joseph form lands 6.9e-9
+  (≈330×), and 0.038 against 3.4e-4 in posit16. In IEEE types both agree with K·r and P − K S Kᵀ to
+  roundoff.
+- **Givens and Householder null spaces agree** (the same HᵀH to 1e-13), and **QR compression** of a
+  72-row stack keeps n + 1 = 52 rows with the normal equations preserved to 1e-16: batched updates are
+  numerically safe.
 
 ## Alternative triangulation methods (S5)
 
