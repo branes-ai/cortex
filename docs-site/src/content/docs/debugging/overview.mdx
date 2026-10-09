@@ -67,7 +67,8 @@ number fails. Epic #444 replaces it as the debugging instrument.
 	<Card title="Mixed precision is a diagnostic" icon="seti:config">
 		*Planned.* The pipeline's linear algebra moves onto MTL5, generic in the arithmetic type. A
 		stage whose output moves between `double`, `posit<32,2>` and `float` is numerically fragile.
-		The benches already run each stage in several types.
+		The bench framework already runs a stage in several types, today for the S9 bench; the other
+		stages' benches (#454–#458) are planned.
 		[#448–#451](/debugging/mixed-precision/)
 	</Card>
 </CardGrid>
