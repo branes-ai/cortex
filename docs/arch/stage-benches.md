@@ -30,9 +30,15 @@ Benches so far:
 |---|---|---|---|
 | `s0_sensor_model_bench` | #454 | `shipped` (Newton undistortion), `fixed_point` | distortion strength × radius → round trip, Jacobian, px per 1° extrinsic / per 1 ms offset |
 | `s1_initialization_bench` | #454 | `shipped` (static), `gravity_align`, `dynamic` (VI alignment) | window × IMU noise × excitation → roll/pitch and scale error |
+| `s2_propagation_bench` | #455 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance` | Δt × dynamics × Q scale → position error, yaw leak, diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
+| `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
 | `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
 
-The remaining stages get their benches in #455–#458.
+The remaining stages get their benches in #456–#458.
+
+A bench whose stage is slow in software arithmetic can set `static constexpr int kTimingReps` (S2
+and S3 use 1). Square-root variants start from a real filter state with `psd_factor`, a Cholesky that
+tolerates the exactly singular covariance a fresh clone produces.
 
 ## Fixtures
 
@@ -193,6 +199,20 @@ The benches build on what is already there rather than replacing it at once:
   (squaring the condition number), adds a fixed `T(1e-9)` ridge, and then needs a Cholesky
   factorization, which breaks down once κ² exceeds 1/ε. This is #449/#450 territory; the default
   (static) path is green in every type.
+
+## What the S2 and S3 benches found (#455)
+
+- **The propagator didn't compile for posits.** `s.timestamp += dt` added a `T` into the `double`
+  timestamp; #444 §E lists this exact site. It now uses an explicit `static_cast<double>(dt)`, which
+  is identical for float and double.
+- **The yaw direction leaks under propagation, as expected.** Φ preserves the global-translation
+  directions of the unobservable subspace exactly, but the body-frame filter's first-order Φ,
+  linearized at the current estimate, leaks the yaw direction at O(Δt²) per step. That is ≈2.4e-6
+  per 5 ms step on the tumbling fixture, and the sweep shows it across Δt and dynamics. The bench
+  reports it rather than gating it; it is the propagation half of the observability question
+  (#212, #437).
+- **Φ needed exposing.** `Propagator::transition` now returns Φ and Q_d. `propagate` is its sequence,
+  and it is bit-identical on the synthetic full and square-root backend runs.
 
 Capturing fixtures from the running backend and from EuRoC replays, selected by stage, frame range or
 trigger, is #446. It writes fixtures with `bench::capture(...)` in the format above, so they load

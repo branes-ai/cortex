@@ -7,9 +7,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status">
   The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
-  S9_marginalization bench as its worked example. The S0_sensor_model and S1_initialization benches
-  ([#454](https://github.com/branes-ai/cortex/issues/454)) are in review; the remaining stages follow
-  in [#455](https://github.com/branes-ai/cortex/issues/455)–[#458](https://github.com/branes-ai/cortex/issues/458).
+  S9_marginalization bench as its worked example. The S0–S1 benches
+  ([#454](https://github.com/branes-ai/cortex/issues/454)) are merged and the S2–S3 benches
+  ([#455](https://github.com/branes-ai/cortex/issues/455)) are in review; the remaining stages follow
+  in [#456](https://github.com/branes-ai/cortex/issues/456)–[#458](https://github.com/branes-ai/cortex/issues/458).
   The developer reference is `docs/arch/stage-benches.md`.
 </Aside>
 
@@ -130,6 +131,16 @@ metric had shown:
   κ), adds a fixed `1e-9` ridge, and needs a Cholesky factorization, which breaks down once κ²
   exceeds 1/ε. That is exactly the kind of per-stage precision finding the
   [mixed-precision work](/debugging/mixed-precision/) is built to act on.
+
+The S2 and S3 benches (#455) added two more:
+
+- **The propagator didn't compile for posits** either: `timestamp += dt` mixed `T` into a `double`
+  (now explicit, bit-identical for float and double).
+- **Propagation leaks the yaw direction**, as the body-frame filter is known to do. Φ preserves global
+  translation exactly, but its first-order form, linearized at the current estimate, leaks yaw by
+  ≈2.4e-6 per 5 ms step on a tumbling trajectory. The bench now measures this directly, per step and
+  across Δt and dynamics: the propagation half of the observability question behind the
+  over-confidence (#212).
 
 ## Writing a bench
 
