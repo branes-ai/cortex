@@ -1,0 +1,90 @@
+{
+ "arithmetic": "double",
+ "description": "expected: H0, r0 = the last three rows of H_x, r",
+ "expected": {
+  "nt": {
+   "cols": 0,
+   "data": [],
+   "rows": 0
+  },
+  "ok": 1,
+  "projected": {
+   "H": {
+    "cols": 2,
+    "data": [
+     7.0,
+     8.0,
+     9.0,
+     10.0,
+     11.0,
+     12.0
+    ],
+    "rows": 3
+   },
+   "r": [
+    4.0,
+    5.0,
+    6.0
+   ]
+  }
+ },
+ "input": {
+  "system": {
+   "Hf": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "Hx": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.0,
+    8.0,
+    9.0,
+    10.0,
+    11.0,
+    12.0
+   ],
+   "cols": 2,
+   "r": [
+    1.0,
+    2.0,
+    3.0,
+    4.0,
+    5.0,
+    6.0
+   ],
+   "rows": 6
+  },
+  "unobservable": {
+   "cols": 0,
+   "data": [],
+   "rows": 0
+  }
+ },
+ "kind": "known_answer",
+ "schema": "branes.vio.fixture/1",
+ "seed": 0,
+ "source": "s6b_nullspace_projection_bench: H_f = [I3; 0], 6x2 H_x",
+ "stage": "S6b_nullspace_projection",
+ "variant": "shipped"
+}
