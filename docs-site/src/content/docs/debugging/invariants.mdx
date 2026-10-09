@@ -1,0 +1,111 @@
+---
+title: Invariants — the Oracle
+description: The invariant-check library (#445) — one check per invariant of every VIO stage, each a measured residual in native units against a threshold that scales with the arithmetic type, with examples.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A bench is only as good as its oracle. The invariant library
+([#445](https://github.com/branes-ai/cortex/issues/445)) lives in
+`sdk/include/branes/sdk/eval/invariants/` (namespace `branes::sdk::eval::inv`). It has one check per
+invariant of every stage, so a wrong output is caught **at the transformation that produced it**.
+
+## What a check returns
+
+Every check returns an `InvariantResult`:
+
+| Field | Meaning |
+|---|---|
+| `name`, `stage` | a stable id such as `covariance.psd`, and the stage it belongs to (`S9_marginalization`) |
+| `value` | the **measured** residual or statistic, in **native units** (rad, m², px, s, count, dimensionless) |
+| `threshold`, `threshold_hi` | the bound it is held to, in the same units |
+| `bound` | `Upper` (a residual), `Lower` (a margin, e.g. λ_min of an SPD matrix), `Band` (e.g. NIS/dof), or `Report` (context only, never fails) |
+| `pass` | the verdict; a NaN or a non-finite input never passes |
+
+Results collect into an `InvariantReport`, which answers three questions:
+
+- **`first_failure()`:** in pipeline order, the first stage that broke something.
+- **`tightest()`:** which invariant is closest to failing.
+- **`for_stage(s)`:** what one stage reported.
+
+The report stores values in `double`, which holds every value of float, `posit<32,2>` and double
+exactly, so one report can mix stages that ran in different number systems.
+
+## Tolerances that scale with the arithmetic
+
+A threshold that comes from floating-point arithmetic is **never** a hardcoded `1e-9`. It is
+
+$$
+\tau \;=\; \text{safety}\cdot n\cdot \varepsilon_T\cdot \text{scale},
+$$
+
+where:
+
+- $\varepsilon_T$ is the unit roundoff of the type under test;
+- $n$ is the size of the computation (the $\gamma_n = n\,u$ growth of the standard backward-error
+  bounds);
+- *scale* is the norm the residual is measured against, which gives the threshold native units.
+
+So the same check means the same thing in `float`, `posit16`, `posit<32,2>` and `double`. Where a
+residual is a *backward error*, for example the Kalman-gain solve
+$\|KS - PH^\top\|_F / (\|K\|_F\|S\|_F + \|PH^\top\|_F)$, the conditioning of $S$ cancels out of the
+bound, and a stable solve passes in any type however ill-conditioned $S$ is.
+
+Physical bounds stay explicit parameters of the check, never defaults dressed up as universal. These
+include Δt limits, pixel margins, and the static-window ‖a‖ ≈ g tolerance.
+
+<Aside type="note" title="The verdict follows ε_T">
+  An asymmetry of 2·10⁻⁶·‖P‖ in a 4×4 covariance is roundoff in `float` (threshold
+  ≈ 7.6e-6), but a genuine defect in `posit<32,2>` (≈ 4.8e-7) and in `double` (≈ 1.4e-14). The
+  regression test pins exactly that.
+</Aside>
+
+## The invariants, stage by stage
+
+| Stage | Invariants | Checks |
+|---|---|---|
+| Inputs | timestamps strictly increasing; Δt within the sensor-rate bounds; samples finite and in range; static ‖a‖ ≈ g; R_imu_cam ∈ SO(3); intrinsics positive and inside the image | `check_timestamps_increasing`, `check_dt_bounds`, `check_finite`, `check_bounded`, `check_static_gravity`, `check_so3`, `check_intrinsics` |
+| S0_sensor_model | project/unproject round trip; analytic Jacobians vs finite differences | `check_round_trip`, `check_jacobian_fd` |
+| S1_initialization | gravity sign and magnitude; biases bounded; P₀ SPD; attitude ∈ SO(3) | `check_gravity`, `check_bounded`, `check_spd`, `check_so3` |
+| S2_propagation | R ∈ SO(3); Q_d ⪰ 0; P = ΦPΦᵀ + Q_d, symmetric, ⪰ 0; Φ preserves the 4-D unobservable subspace | `check_so3`, `check_psd`, `check_covariance_propagation`, `check_subspace_preserved` |
+| S3_augmentation | +6 per clone; blocks equal J P Jᵀ and J P; P ⪰ 0 | `check_augmentation`, `check_psd` |
+| S4_frontend | tracks inside the image; KLT forward–backward bound; track length vs clone window | `check_points_in_image`, `check_bounded`, `check_track_lengths` |
+| S5_triangulation | positive depth; reprojection bound; parallax and normal-matrix κ (reported) | `check_at_least`, `check_bounded`, `report_condition_number` |
+| S6a_jacobians | H_x, H_f vs finite differences | `check_jacobian_fd` |
+| S6b_nullspace_projection | ‖NᵀH_f‖ ≈ 0, NᵀN = I, rank 2m − 3 | `check_annihilates`, `check_orthonormal_rows`, `check_rank` |
+| S6c_compression | QR compression preserves HᵀH and Hᵀr; ‖r_c‖ ≤ ‖r‖ | `check_compression` |
+| S6d_gating | S SPD; NIS ~ χ²(dof) over windows | `check_spd`, `check_chi2_window` |
+| S6e_ekf_update | gain-solve residual; Joseph P⁺ ⪰ 0; P⁺ ⪯ P⁻; δx finite; **δx ⟂ unobservable directions** | `check_solve_residual`, `check_psd`, `check_loewner_le`, `check_finite`, `check_no_update_along` |
+| S9_marginalization | P′ = principal submatrix of P; bookkeeping; ⪰ 0 | `check_principal_submatrix`, `check_dimension`, `check_psd` |
+| S10_online_calibration | extrinsic ∈ SO(3); calibration covariance ⪰ 0 | `check_so3`, `check_psd` |
+| End to end | NEES/NIS over windows; ATE/RPE | `check_chi2_window`, `check_scalar` |
+
+The S6e row's last check is the observability question at the heart of the #212 over-confidence. A
+consistent filter can't gain information about global position or yaw, so the update must have no
+component along those four directions.
+
+Definiteness, Loewner order and rank use small Jacobi eigenvalue and SVD kernels
+(`invariants/linalg.hpp`). They are computed **in the type under test** and are accurate to
+relative precision, which an oracle needs, because the verdicts hinge on the smallest values.
+
+## Example: checking an update
+
+```cpp
+#include <branes/sdk/eval/invariants.hpp>
+namespace inv = branes::sdk::eval::inv;
+using inv::Stage;
+
+inv::InvariantReport rep;
+rep.add(inv::check_solve_residual(K, S, PHt, Stage::S6e_ekf_update));       // K S = P Hᵀ
+rep.add(inv::check_psd(P_post, Stage::S6e_ekf_update, "joseph.psd"));
+rep.add(inv::check_loewner_le(P_post, P_prior, Stage::S6e_ekf_update));     // P⁺ ⪯ P⁻
+rep.add(inv::check_no_update_along<double>(dx, N_unobs, Stage::S6e_ekf_update));
+
+if (const auto bad = rep.first_failure())
+    std::cerr << to_string(bad->stage) << ": " << bad->name << " = " << bad->value
+              << " " << bad->unit << " (threshold " << bad->threshold << ")\n";
+```
+
+A deliberately violating input shows what the native-unit residual buys you. An "update" that
+*adds* $cc^\top$ with $\|c\|^2 = 0.30$ to the covariance fails `loewner_le` with
+`value = 0.30` in matrix units: the size of the violation, not just a red light.

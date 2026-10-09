@@ -1,0 +1,136 @@
+---
+title: Divide-and-Conquer VIO Debugging
+description: The methodology of epic #444 — why cortex debugs its VIO pipeline one transformation at a time, what it builds to do so (stage transformations, invariants, stage benches, captured fixtures, mixed-precision MTL5), and where each piece stands.
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+This section describes **how cortex debugs, tests and characterizes its VIO pipeline**: one
+transformation at a time, each in its own test bench, each held to explicit invariants, in several
+arithmetic types. It is the methodology of
+[epic #444](https://github.com/branes-ai/cortex/issues/444). It builds on the
+[stage contracts](/pipeline/overview/) of the VIO Pipeline section and the
+[diagnostic methodology](/pipeline/diagnostic-methodology/) behind them.
+
+## Why: the end-to-end number can't say *where*
+
+The VIO filter still doesn't produce a trustworthy estimate, and the end-to-end metrics can't say
+where it goes wrong:
+
+- **The filter is over-confident.** NEES and NIS sit far above their χ² targets
+  ([#212](/pipeline/consistency-analysis/)). The leading suspects are properties of the stages
+  running *together*, so watching the final trajectory doesn't separate them.
+- **A fix proven at one level underperforms at another.** The right-invariant EKF removes the yaw
+  leak at the Jacobian level (0.39 → 2e-16), yet runs worse than the body-frame MSCKF end to end.
+- **Several failures were numerical, not algorithmic:**
+  - the square-root covariance diverged on real data (ATE 6e+40 m);
+  - a barely-conditioned update produced a non-finite δx;
+  - the invariant backend diverges under Clang but not GCC (#437: 58 m vs 3.4 m RMS).
+
+  With only an end-to-end metric, an algorithmic fault and a precision or conditioning fault look
+  the same.
+
+ATE and RPE are measured *after* aligning away the very degrees of freedom VIO bugs live in, and a
+EuRoC replay takes minutes to return roughly one bit of information. The
+[diagnostic methodology](/pipeline/diagnostic-methodology/) page explains why steering by that
+number fails. Epic #444 replaces it as the debugging instrument.
+
+## What: an instrumented, divide-and-conquer environment
+
+<CardGrid>
+	<Card title="Every stage is a transformation" icon="puzzle">
+		Each stage S0–S10 is an explicit function, *(state, inputs, params) → (state,
+		diagnostics)*. The backend is just their call sequence, so a stage can be run, tested and
+		replaced on its own. [#452](/debugging/stages-as-transformations/)
+	</Card>
+	<Card title="Every transformation has invariants" icon="approve-check">
+		SO(3) membership, PSD, Loewner order, null-space annihilation, principal submatrix, χ²
+		consistency… Each is a measured residual in native units, against a threshold that scales
+		with the arithmetic type. [#445](/debugging/invariants/)
+	</Card>
+	<Card title="Every transformation has a bench" icon="laptop">
+		A small executable that runs one stage on fixtures, in several number systems and
+		implementation variants, and prints its invariant report in seconds. The framework and the
+		S9 bench exist; the other stages' benches are #454–#458.
+		[#453](/debugging/stage-benches/)
+	</Card>
+	<Card title="Real runs become fixtures" icon="document">
+		*Planned.* Any moment of a real EuRoC run will be capturable at a stage boundary and
+		replayable bit for bit in that stage's bench. The fixture format and its bit-exact replay
+		check already exist. [#446](/debugging/capture-and-composition/)
+	</Card>
+	<Card title="The loop is checked as a loop" icon="random">
+		*Planned.* Composition benches and trajectory-level checks will confirm that a fix fixes the
+		*system*, because over-confidence is a property of the cycle.
+		[#447](/debugging/capture-and-composition/)
+	</Card>
+	<Card title="Mixed precision is a diagnostic" icon="seti:config">
+		*Planned.* The pipeline's linear algebra moves onto MTL5, generic in the arithmetic type. A
+		stage whose output moves between `double`, `posit<32,2>` and `float` is numerically fragile.
+		The bench framework already runs a stage in several types, today for the S9 bench; the other
+		stages' benches (#454–#458) are planned.
+		[#448–#451](/debugging/mixed-precision/)
+	</Card>
+</CardGrid>
+
+## How: the method, step by step
+
+1. **Cut the pipeline at its stage boundaries.** Each stage becomes a function whose only effect is
+   on the state passed in, and which returns what happened instead of logging it. The backend
+   becomes the readable call sequence S2 → S6 + S9 → S3 → S0 + S4 → S5 → S6a…S6e.
+2. **Write down what each transformation must preserve.** The [invariant table](/debugging/invariants/)
+   gives every stage its checks, from timestamp monotonicity at the inputs to "δx has no component
+   along the unobservable directions" at S6e. A wrong output is caught at the transformation that
+   produced it, not three stages later.
+3. **Give each transformation a bench.** A [bench](/debugging/stage-benches/) runs that one stage on
+   fixtures:
+   - **known-answer:** synthetic input with an analytic expected output;
+   - **ground-truth-injected:** truth fed in upstream;
+   - **captured:** a stage boundary recorded from a real run.
+
+   It runs each fixture in every arithmetic type and every implementation variant, and sweeps the
+   conditions (noise, Δt, parallax, conditioning, window size) to CSV.
+4. **Turn interesting moments of real runs into fixtures.** When a EuRoC run misbehaves, capture the
+   stage boundary where an invariant first fails and debug it in that stage's bench, at the speed of
+   a unit test.
+5. **Confirm at the system level.** Some faults exist only in the loop. Composition benches and
+   trajectory-level NEES/NIS confirm that a fix localized by a bench also fixes the filter.
+6. **Use the arithmetic as an instrument.** Port the linear algebra to MTL5, stage by stage behind
+   each bench, then run every stage in several number systems. Precision sensitivity becomes a
+   per-stage measurement, not a guess.
+
+<Aside type="tip" title="The method already found a bug">
+  Proving that the stage refactor (#452) changed nothing, bit for bit on EuRoC, exposed a
+  pre-existing heap-buffer-overflow in the square-root covariance update. That bug is the likely
+  cause of the sqrt backend's real-data divergence. See the
+  [worked example](/debugging/worked-example/).
+</Aside>
+
+## Where it stands
+
+| Step | Issue | What | Status |
+|---|---|---|---|
+| 1 | [#452](https://github.com/branes-ai/cortex/issues/452) | Stage interface: explicit transformations, the backend as their call sequence | **done**: bit-identical on EuRoC |
+| 2 | [#453](https://github.com/branes-ai/cortex/issues/453) | Bench framework: three fixture kinds, invariant reports, sweeps, multi-type, variants | **done**: [PR #463](https://github.com/branes-ai/cortex/pull/463), with the S9 bench as worked example |
+| 3 | [#445](https://github.com/branes-ai/cortex/issues/445) | Invariant library: the benches' oracle, with type-scaled tolerances | **done** |
+| 4 | [#454](https://github.com/branes-ai/cortex/issues/454)–[#458](https://github.com/branes-ai/cortex/issues/458) | Stage benches: S0–S1, S2–S3, S4–S5, S6, S9–S10 | planned; the S9 example bench is in place |
+| 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | planned |
+| 6 | [#447](https://github.com/branes-ai/cortex/issues/447) | Composition benches, trajectory-level consistency, live-assertion mode | planned |
+| 7–9 | [#448](https://github.com/branes-ai/cortex/issues/448), [#449](https://github.com/branes-ai/cortex/issues/449), [#450](https://github.com/branes-ai/cortex/issues/450) | MTL5 port per stage; genericity over non-IEEE types; per-stage precision characterization | planned |
+| 10 | [#451](https://github.com/branes-ai/cortex/issues/451) | MTL5 gap register, gaps filed upstream | planned |
+| — | [#461](https://github.com/branes-ai/cortex/issues/461) | sqrt-covariance update overflow, found by the method | open |
+
+The epic subsumes two older diagnostics issues: per-component invariant self-checks (#263) and
+conditioning monitors (#265).
+
+## Reading this section
+
+- [Stages as Transformations](/debugging/stages-as-transformations/): the stage interface and the
+  backend as a call sequence.
+- [Invariants](/debugging/invariants/): the oracle, its tolerance policy, and examples.
+- [Stage Benches](/debugging/stage-benches/): fixtures, writing and running a bench, the measured
+  loop.
+- [Capture & Composition](/debugging/capture-and-composition/): from real runs to fixtures; the
+  system-level checks.
+- [Mixed Precision on MTL5](/debugging/mixed-precision/): the port and precision as a diagnostic.
+- [Worked Example: Finding #461](/debugging/worked-example/): the method on a real bug.
