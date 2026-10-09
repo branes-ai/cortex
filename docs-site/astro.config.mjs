@@ -136,6 +136,18 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Stage-Bench Debugging (#444)',
+          items: [
+            { label: 'Methodology: What, Why, How', slug: 'debugging/overview' },
+            { label: 'Stages as Transformations', slug: 'debugging/stages-as-transformations' },
+            { label: 'Invariants — the Oracle', slug: 'debugging/invariants' },
+            { label: 'Stage Benches', slug: 'debugging/stage-benches' },
+            { label: 'Capture & Composition', slug: 'debugging/capture-and-composition' },
+            { label: 'Mixed Precision on MTL5', slug: 'debugging/mixed-precision' },
+            { label: 'Worked Example: Finding #461', slug: 'debugging/worked-example' },
+          ],
+        },
+        {
           label: 'Benchmarks & Validation',
           items: [
             { label: 'Trajectory Accuracy (ATE/RPE)', slug: 'benchmarks/accuracy' },

@@ -1,0 +1,124 @@
+---
+title: Stages as Transformations
+description: Every VIO stage as an explicit (state, inputs, params) → (state, diagnostics) function, named for what it does, and the MSCKF backend as their call sequence (#452).
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The first step of the method ([#452](https://github.com/branes-ai/cortex/issues/452)) makes every
+pipeline stage callable on its own. The components already existed, but they mutated a shared
+state inside a 735-line backend, with the sequencing buried in `process_camera`.
+
+## The shape of a stage
+
+Each stage lives in its own header and namespace under `sdk/include/branes/sdk/msckf/stages/`, and
+exposes an `apply`:
+
+```text
+apply(state, inputs, params) → (state′, diagnostics)
+```
+
+- **The state passed in is the only thing mutated.** No hidden members, no globals.
+- **Diagnostics are returned, not logged.** A bench, a test or the live-assertion mode decides what
+  to do with them.
+- **The name carries the transformation.** It is `S2_propagation`, not `S2`, so a stage, its bench
+  and its invariants read without the rest of the pipeline in your head.
+
+| Stage | Transformation | Header |
+|---|---|---|
+| S0_sensor_model | pixel → normalized image point | `s0_sensor_model.hpp` |
+| S1_initialization | init result → seeded state | `s1_initialization.hpp` |
+| S2_propagation | IMU sample → propagated mean and covariance, P ← ΦPΦᵀ + Q_d | `s2_propagation.hpp` |
+| S3_augmentation | state → state + clone, P′ = G P Gᵀ | `s3_augmentation.hpp` |
+| S4_frontend | frame observations → tracks, ended tracks | `s4_frontend.hpp` |
+| S5_triangulation | track → feature position | `s5_triangulation.hpp` |
+| S6a_jacobians | track, p_f → H_f, H_x, r | `s6_msckf_update.hpp` |
+| S6b_nullspace_projection | H_f, H_x, r → H₀, r₀ (feature marginalized) | `s6_msckf_update.hpp` |
+| S6c_compression | H₀, r₀ → H_c, r_c (identity today) | `s6_msckf_update.hpp` |
+| S6d_gating | H_c, r_c → NIS, accept or reject | `s6_msckf_update.hpp` |
+| S6e_ekf_update | H_c, r_c → state′, δx | `s6_msckf_update.hpp` |
+| S9_marginalization | state → state − clone (principal submatrix) | `s9_marginalization.hpp` |
+| S10_online_calibration | state → state + camera↔IMU extrinsic states (optional) | `s10_online_calibration.hpp` |
+
+S7 (SLAM features) and S8 (zero-velocity update) aren't implemented in cortex yet; they get a stage
+header when they are. The stage contract registry (`tools/include/branes/tools/vio_stage_contracts.hpp`)
+points each stage at its function, and every probe and bench prints it.
+
+## Example: one stage on its own
+
+S9 removes a clone from the sliding window. Called directly, with its diagnostics checked by the
+invariant library:
+
+```cpp
+#include <branes/sdk/msckf/stages/s9_marginalization.hpp>
+#include <branes/sdk/eval/invariants.hpp>
+
+namespace st  = branes::sdk::msckf::stages;
+namespace inv = branes::sdk::eval::inv;
+
+const auto P_before = s.covariance();
+const auto d = st::s9_marginalization::apply(s, /*clone index*/ 0);
+// d.dim_before, d.dim_after (= dim_before − 6), d.removed_time, d.clones
+
+for (const auto& r : inv::check_principal_submatrix<double>(P_before, keep, s.covariance()))
+    REQUIRE(r.pass);   // P′ is exactly the kept principal submatrix of P
+```
+
+S6 is split so the update can be studied one sub-step at a time, for example the gate on its own:
+
+```cpp
+const auto tri  = st::s5_triangulation::apply(s, updater, track);          // p_f
+const auto jac  = st::s6a_jacobians::apply(s, updater, track, tri.p_f);    // H_f, H_x, r
+const auto proj = st::s6b_nullspace_projection::apply(jac.system);         // 2m − 3 rows
+const auto comp = st::s6c_compression::apply(proj.projected);
+const auto gate = st::s6d_gating::apply(s, updater, comp.compressed);      // NIS, accept?
+if (gate.accepted)
+    st::s6e_ekf_update::apply(s, updater, comp.compressed);                 // returns δx
+```
+
+## The backend is the call sequence
+
+`MsckfBackendT::process_camera` now reads as the pipeline. What remains in the backend is policy:
+when to initialize, the window size, and the feature schedule.
+
+```cpp
+// S2: propagate to the image time.
+msckf::stages::s2_propagation::apply(state_, prop_, last_gyro_, last_accel_, dt);
+
+// S6 + S9: keep the window bounded — update with, then marginalize, the oldest clone.
+while (state_.clones.size() >= max_clones_)
+    marginalize_oldest();
+
+// S3: clone the frame-time pose into the window.
+msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+
+// S0 + S4: normalize this frame's observations onto their tracks.
+const auto ingest = msckf::stages::s4_frontend::apply<T>(tracks_, timestamp_s, obs, normalize);
+
+// S5 → S6e: features not seen this frame have ended; update with them, by ascending id.
+for (const std::uint64_t id : ingest.ended)
+    update_and_erase(id);   // s4_frontend::assemble → s6_msckf_update::apply
+```
+
+The right-invariant backend's update follows the same S5 → S6e shape.
+
+## Proving it changed nothing
+
+A refactor that moves every line of the estimator must be **bit-identical**, or every later
+comparison is suspect. The gate dumped every per-frame state as hex floats, together with a
+covariance hash, every update's NIS and accept flag, and the initialization outcome. It then compared
+`main` against the refactor on EuRoC:
+
+| Backend | V1_01 | MH_05 | MH_05 (forced dynamic init) | V2_03 |
+|---|---|---|---|---|
+| full covariance | bit-identical | bit-identical | bit-identical | bit-identical |
+| full covariance + online calibration | bit-identical | bit-identical | bit-identical | bit-identical |
+
+That is about 125 000 EKF updates per configuration. The invariant backend's end-to-end numbers
+matched to the last digit on GCC and Clang.
+
+<Aside type="caution" title="The square-root backend could not be compared">
+  The same gate showed the square-root backend producing different EuRoC results from identical
+  inputs. Tracking that down found a memory-safety bug on `main`, not in the refactor; see the
+  [worked example](/debugging/worked-example/).
+</Aside>

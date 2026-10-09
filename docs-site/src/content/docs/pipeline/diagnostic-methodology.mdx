@@ -113,3 +113,13 @@ completion: the Q/R sweeps (ASSESS), the whiteness discriminator (HYPOTHESIZE), 
 FEJ experiment and its refutation (MODEL → TEST), and the stage-by-stage probes
 (S0, S1, S2, S5, S6, S10) that partitioned the fault into a measured, ranked
 [decomposition](/pipeline/engineering-status/) — instead of ten ATE-blind edits.
+
+## Where this goes next
+
+[Divide-and-Conquer VIO Debugging](/debugging/overview/) (epic #444) turns this workflow into
+infrastructure. It provides:
+
+- every stage as an explicit transformation;
+- a library of invariants that serve as the independent oracle;
+- a test bench per stage that runs on synthetic, ground-truth-injected and captured fixtures;
+- the arithmetic type itself as a diagnostic.

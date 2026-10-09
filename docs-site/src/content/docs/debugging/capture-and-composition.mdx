@@ -1,0 +1,79 @@
+---
+title: Capture & Composition
+description: Turning moments of real runs into replayable stage fixtures (#446), and checking the filter as a loop with composition benches, trajectory-level consistency and a live-assertion mode (#447).
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="note" title="Status: planned">
+  These two steps build on the [stage benches](/debugging/stage-benches/):
+  [#446](https://github.com/branes-ai/cortex/issues/446) (capture) and
+  [#447](https://github.com/branes-ai/cortex/issues/447) (composition). The fixture format and the
+  capture writer they use already exist in the bench framework.
+</Aside>
+
+Stage benches localize a fault. Two things are still missing: real data inside the benches, and
+evidence that a fix localized in a bench also fixes the system.
+
+## Real runs become fixtures (#446)
+
+The pipeline instrumentation's main job changes. Instead of logging for a human, it **captures
+real stage-boundary streams as bench fixtures**, so any interesting moment of a EuRoC run can be
+replayed into its stage's bench and debugged at unit-test speed.
+
+**What is captured, per frame and per stage:**
+
+| Category | Content |
+|---|---|
+| Inputs | IMU samples, frame timestamps, tracks (pixels and undistorted bearings), the calibration in use |
+| Transformations | F/Φ, G, Q_d; the clone Jacobian J; H_x, H_f, r; the null-space-projected H₀/r₀; the compressed H/r; S, K, δx; χ² and the gate decision |
+| State | x (nav, biases, clones, calibration) and P (or the square-root factor) **before and after** each stage, with dimension and clone bookkeeping |
+| Outputs | pose, velocity, biases, and per-stage diagnostics |
+
+**What selects a capture:**
+- the stage;
+- a frame range;
+- a trigger, such as a NIS spike or the first invariant violation.
+
+**Cost when off.** Zero: matrix dumps are opt-in, with a verbosity level and frame and stage filters.
+
+**Arithmetic.** Each record is tagged with the type the stage ran in, so a captured fixture replays
+**bit-identically** in its stage's bench. That replay check is already enforced by the framework.
+
+## The loop is checked as a loop (#447)
+
+Some failures only emerge from stages running together. The over-confidence is the main example.
+S0 and S2 pass in isolation, and the leading suspects are properties of the loop:
+
+- the S6 update;
+- S10 calibration;
+- observability over repeated cycles.
+
+So a thin composition and trajectory-level layer sits above the stage benches. **The benches
+localize faults; this layer confirms a fix fixes the system.**
+
+- **Composition benches** run the filter loop on fixed fixtures, propagate → augment → update →
+  marginalize, for a single cycle and for N cycles. Stage and loop invariants are checked at every
+  boundary.
+- **Trajectory-level checks** cover:
+  - NEES and NIS over windows (#264);
+  - the 4-dimensional unobservable subspace preserved across whole runs;
+  - ATE and RPE.
+- **Live-assertion mode** is a debug-instrumented build that evaluates the
+  [invariants](/debugging/invariants/) at every stage boundary during a full run. It reports the
+  first violating stage and frame (`InvariantReport::first_failure`), and can trigger a capture of
+  exactly that boundary as a fixture.
+
+## The resulting workflow
+
+```text
+EuRoC run ──live assertions──▶ first violation: S6e_ekf_update, frame 1742, no_update_along_unobservable
+     │
+     └──capture (stage = S6e, frame = 1742)──▶ fixture.json
+                                                   │
+                         s6_msckf_update_bench --fixture fixture.json   (seconds, every type, every variant)
+                                                   │
+                                        fix the stage in the filter (sdk/), re-run its bench
+                                        and the composition benches, confirm NEES/NIS on the
+                                        full run
+```

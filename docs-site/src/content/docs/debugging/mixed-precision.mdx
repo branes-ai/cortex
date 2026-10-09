@@ -1,0 +1,81 @@
+---
+title: Mixed Precision on MTL5
+description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the arithmetic type, stage by stage behind each bench (#448–#451), so precision sensitivity becomes a per-stage measurement.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="note" title="Status: planned">
+  [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
+  [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
+  [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
+  characterization) and [#451](https://github.com/branes-ai/cortex/issues/451) (the MTL5 gap
+  register). The benches and the type-scaled invariants they rely on are in place.
+</Aside>
+
+The same effort that makes every stage observable also puts the pipeline's linear algebra on
+**MTL5**, generic in the arithmetic type. Running the pipeline in several number systems then
+becomes a diagnostic of its own: **a stage whose output changes materially between `double`,
+`posit<32,2>` and a wider type is numerically fragile.**
+
+## Why it matters here
+
+Several of the pipeline's failures were numerical:
+
+- the square-root covariance diverging on real data;
+- a non-finite δx from a barely-conditioned update;
+- the Clang-only divergence of #437.
+
+With per-stage arithmetic, "is this algorithmic or numerical?" becomes a measurement. Run the stage
+in a wider and a narrower type on the same fixture, and see whether its invariants move.
+
+## Today vs the port
+
+Today the pipeline makes no `mtl::` calls. Its only MTL5 touchpoint is the `mtl::Scalar` concept
+behind `math::Scalar`, and its linear algebra is hand-rolled:
+
+| Today (hand-rolled) | MTL5 replacement |
+|---|---|
+| `msckf::DynMat<T>`, a row-major `std::vector` holding P, F, G, H, S, K | `mtl::mat::dense2D<T>` |
+| GEMM/GEMV, transpose, add | `mat/operators.hpp`, `operation/mult.hpp`, `trans.hpp` |
+| A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` |
+| Cholesky, SPD solve | `operation/cholesky.hpp`, multi-RHS via `trsm.hpp`; `ldlt.hpp` for semidefinite S |
+| Householder QR (R only), retriangularize | `qr.hpp`, `lq.hpp` |
+| Triangular solves (square-root form) | `lower_trisolve.hpp`, `upper_trisolve.hpp`, `trsv.hpp` |
+| MSCKF left null space | `householder.hpp` + `apply_householder_left` |
+| Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` |
+| Principal-submatrix gather | `mat/view/map_view.hpp` |
+
+## How the port is gated
+
+1. **Safety gate first.** At `T = double`, the MTL5 port must reproduce today's results: the same
+   EuRoC trajectories to ≤ 1e-9 relative, and all current tests, gates and inspector outputs
+   unchanged. The bit-identical equivalence harness used for the
+   [stage refactor](/debugging/stages-as-transformations/) is the model.
+2. **Stage by stage, each behind its bench.** A stage is ported only when its bench passes on its
+   fixtures in every type. A whole-pipeline check closes the port.
+3. **Fix the sites that break or narrow a non-IEEE `T`:**
+   - non-ADL math (`std::sqrt`, `std::acos` on `T`);
+   - `static_cast<double>` on the estimation path;
+   - fixed ridges and epsilons like `T(1e-9)` that vanish in 16-bit types, which should be
+     T-relative;
+   - the `double` timestamp mixed into `T`.
+
+   By design, timestamps stay `double` and the telemetry accumulators in `eval/` stay `double`.
+4. **Per-stage arithmetic.** Covariance and update math can run in one type while Jacobian assembly
+   runs in another. A precision matrix of stages × types becomes the characterization report, and
+   the diagnosis of #437.
+
+## The MTL5 gap register (#451)
+
+Every operator the pipeline needs that MTL5 doesn't provide is recorded with its pipeline sites, the
+interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
+
+- scalar × matrix for non-arithmetic scalars (mtl5#538);
+- block insert/scatter into `dense2D`;
+- a symmetric A·P·Aᵀ primitive;
+- a left-null-space helper;
+- a multi-RHS `cholesky_solve`;
+- a matrix exponential.
+
+Lie-group exp/log and Jacobians stay in `branes::math::lie`; they are not MTL5's job.

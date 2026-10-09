@@ -1,0 +1,136 @@
+---
+title: Stage Benches
+description: The stage test-bench framework (#453) — one small executable per transformation that runs it on known-answer, ground-truth-injected and captured fixtures, in several arithmetic types and variants, with sweeps to CSV and a seconds-long edit-compile-run loop.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="note" title="Status">
+  The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
+  S9_marginalization bench as its worked example. Benches for the other stages follow in
+  [#454](https://github.com/branes-ai/cortex/issues/454)–[#458](https://github.com/branes-ai/cortex/issues/458).
+  The developer reference is `docs/arch/stage-benches.md`.
+</Aside>
+
+A **stage bench** is the focused debug, test, characterization and research environment for **one**
+transformation. It runs the stage on fixtures, in several arithmetic types and implementation
+variants, and prints the stage's [invariants](/debugging/invariants/) in native units. A bench is
+one small executable, so an edit to a stage costs seconds to re-check, not a EuRoC replay.
+
+## What a bench gives you
+
+- **Debugging:** a failing invariant points at the transformation and names the size of the
+  violation.
+- **Testing:** fixtures are regression tests, and a captured fixture must replay **bit for bit**.
+- **Characterization:** declarative sweeps over noise, Δt, parallax, conditioning or window size,
+  written to CSV for the figure pipeline.
+- **Research:** alternative implementations of the stage (variants) run on identical fixtures,
+  side by side.
+- **Mixed precision:** the same stage runs in `double`, `float`, `posit<32,2>` and `posit<16,1>`,
+  each compared with the `double` run.
+
+## Fixtures
+
+| Kind | Input | Judged against | Made by |
+|---|---|---|---|
+| `known_answer` | synthetic | an analytic expected output, computed independently of the stage | hand, in the bench |
+| `ground_truth` | built with truth injected upstream (#266) | the true values the output must reproduce | a synthetic-world run with the mean reset to truth |
+| `captured` | a recorded stage boundary | the output the stage produced in that run | `capture(...)`; from real runs via #446 |
+
+The runner adds two checks to every stage's own invariants:
+
+- **`replay.bit_identical`:** a captured fixture, run in the type it was captured in, must reproduce
+  its recorded output exactly.
+- **`known_answer.residual`:** a known-answer fixture must match within the type's arithmetic
+  tolerance.
+
+Fixtures are JSON (`branes.vio.fixture/1`) with an exact codec:
+
+- numbers go through `double`, written in shortest round-trip form;
+- non-finite values are written as strings;
+- rotations are restored without renormalizing.
+
+A file reads back bit-identical; the tests prove it for −0, denormals, the largest double, ±∞, NaN
+and a full captured state.
+
+```json
+{"schema": "branes.vio.fixture/1", "stage": "S9_marginalization", "kind": "captured",
+ "arithmetic": "double", "source": "synthetic_world, S2/S3/S9 stage sequence, frame 6",
+ "input":    {"state": {"R": [...], "p": [...], "clones": [...], "P": {"rows": 39, ...}}, "clone_index": 0},
+ "expected": {"state": {...}, "dim_before": 39, "dim_after": 33, "removed_time": ...}}
+```
+
+## Running a bench
+
+```bash
+cmake --build build --target s9_marginalization_bench
+./build/tools/s9_marginalization_bench                         # built-in fixtures; double, float, posit32
+./build/tools/s9_marginalization_bench --types double,posit16  # choose number systems
+./build/tools/s9_marginalization_bench --variant all           # shipped vs research variants
+./build/tools/s9_marginalization_bench --fixture F.json        # e.g. a fixture captured from EuRoC
+./build/tools/s9_marginalization_bench --sweep clones=2,4,8 --csv out/
+```
+
+The bench prints the stage's contract from the registry, then one report per fixture, variant and
+type. This is real output:
+
+```text
+  captured_stage_sequence [captured]  variant=shipped  type=double
+------------------------------------------------------------------------------
+  invariant                               value        threshold    unit            verdict
+------------------------------------------------------------------------------
+  marginalization.dimension               33           33           count           PASS
+  marginalization.principal_submatrix     0            1.386e-13    dimensionless   PASS
+  covariance.symmetric                    0            6.541e-13    matrix units    PASS
+  covariance.psd                          0            2.829e-12    matrix units    PASS
+  window.clones_minus_1                   4            4            count           PASS
+  window.removed_the_requested_clone      0            0            s               PASS
+  mean.untouched                          0            0            count           PASS
+  replay.bit_identical                    0            0            count           PASS
+------------------------------------------------------------------------------
+  max |output - double output| = 0    stage run time (best of 5) = 7.993 us
+```
+
+The same fixture in `float` reports `max |output − double output| ≈ 2e-7`, and every invariant
+still passes, because each threshold scaled to `float`'s ε. The bench exits non-zero on any failure,
+so it can gate CI. A run that executes nothing, for example an unknown `--types`, also fails rather
+than reporting a vacuous pass.
+
+## A characterization sweep
+
+The S9 bench sweeps window size × covariance conditioning and reports, per type, the principal-
+submatrix residual, the smallest eigenvalue after removal, and the run time. A sweep makes a
+precision limit visible before it bites in a full run:
+
+| clones | log₁₀ κ | λ_min after (double) | λ_min after (posit32) | λ_min after (float) |
+|---|---|---|---|---|
+| 2 | 0 | 1.0e-2 | 1.0e-2 | 1.0e-2 |
+| 2 | 4 | 1.0e-6 | 1.0e-6 | 9.5e-7 |
+| 2 | 8 | 1.0e-10 | **−4.1e-9** | **−5.2e-8** |
+
+At κ ≈ 1e8, neither `posit<32,2>` nor `float` can resolve the smallest eigenvalue. The matrix is
+still positive-definite in `double`, but not measurably so in the narrower types, and `float` is
+an order of magnitude further off than posit32. That is exactly the kind of per-stage precision finding the
+[mixed-precision](/debugging/mixed-precision/) work builds on.
+
+## Writing a bench
+
+A bench is a struct describing its stage: the I/O types, the codec, `run` (which calls
+`stages::<sN_name>::apply`, with research variants as extra branches), `flatten` (every output
+number, for the cross-type and replay comparisons), `invariants` (the stage's checks), the built-in
+fixtures, and optionally a sweep. `bench_main<B>` turns it into the executable. The S9 bench
+(`tools/include/branes/tools/bench/s9_marginalization_bench.hpp`) is the template; the developer
+reference spells out the full contract.
+
+## The edit-compile-run loop
+
+Measured by touching the stage header, then rebuilding and running only the bench target
+(i7-12700K, gcc 13.3, `-j4`):
+
+| Build | Rebuild | Run: double, float | Run: + posit32 |
+|---|---|---|---|
+| default (no `-O`) | 4.3 s | 0.08 s | 9.1 s |
+| Release (`-O3`) | 8.4 s | < 0.01 s | 1.1 s |
+
+Posits are software arithmetic, so posit work is best done in a Release build. Either way, a stage
+edit is re-checked in seconds.
