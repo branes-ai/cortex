@@ -86,7 +86,7 @@ TEST_CASE("S4 bench sweep: survival and accuracy degrade with noise", "[tools][b
 TEST_CASE("S5 bench: every fixture passes for every variant and default type", "[tools][bench][s5]") {
     for (const auto& v : S5::variants())
         for (const auto& nf : S5::builtin_fixtures())
-            require_pass<S5>(nf, v.name, {"double", "float", "posit32", "long_double"});
+            require_pass<S5>(nf, v.name, {"double", "float", "posit32", "posit16", "long_double"});
 }
 
 TEST_CASE("S5 bench: exact observations recover the landmark; parallax and kappa reported", "[tools][bench][s5]") {
@@ -119,4 +119,37 @@ TEST_CASE("S4 and S5 committed fixture files load and pass", "[tools][bench][s4]
         require_pass<S5>(
             {name, bn::load(dir / "s5_triangulation" / (std::string(name) + ".json"))}, bn::kShipped, {"double"});
     }
+}
+
+TEST_CASE("bench review hardening: base64 padding, vacuous truth, gate rejections", "[tools][bench][s4][s5]") {
+    // Padding only at the end of the final group.
+    REQUIRE(bn::detail::base64_decode("AAA=").size() == 2);
+    REQUIRE(bn::detail::base64_decode("AA==").size() == 1);
+    REQUIRE_THROWS_AS(bn::detail::base64_decode("AA=A"), std::invalid_argument);
+    REQUIRE_THROWS_AS(bn::detail::base64_decode("=AAA"), std::invalid_argument);
+    REQUIRE_THROWS_AS(bn::detail::base64_decode("AA==AAAA"), std::invalid_argument);
+
+    // S4: a ground truth with no continuing track checks nothing, so it fails.
+    auto gt = S4::ground_truth();
+    auto in = S4::decode_input<double>(gt.input);
+    S4::Output<double> none;
+    none.frames.assign(in.frames.size(), {});
+    none.diag.assign(in.frames.size(), {});
+    const auto r = S4::invariants<double>(in, none, gt);
+    bool saw = false;
+    for (const auto& x : r)
+        if (x.name == "truth.endpoint_error") {
+            saw = true;
+            REQUIRE_FALSE(x.pass);
+        }
+    REQUIRE(saw);
+
+    // S5: a gate variant that rejects a wide-parallax track has failed, not gated.
+    auto ka = S5::decode_input<double>(S5::known_answer().input);
+    S5::Output<double> rejected{0, {}, 2.0};  // "rejected" at 2 deg on a ~53 deg track
+    bool resolved_failed = false;
+    for (const auto& x : S5::invariants<double>(ka, rejected, S5::known_answer()))
+        if (x.name == "triangulation.resolved")
+            resolved_failed = !x.pass;
+    REQUIRE(resolved_failed);
 }

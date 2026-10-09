@@ -255,6 +255,12 @@ inline constexpr char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
     std::vector<std::uint8_t> out;
     out.reserve(in.size() / 4 * 3);
     for (std::size_t i = 0; i < in.size(); i += 4) {
+        // Padding only at the end of the last group, and never before data:
+        // "xx==" or "xxx=" in the final group, nothing else.
+        const bool last = i + 4 == in.size();
+        const bool pad2 = in[i + 2] == '=', pad3 = in[i + 3] == '=';
+        if (in[i] == '=' || in[i + 1] == '=' || ((pad2 || pad3) && !last) || (pad2 && !pad3))
+            throw std::invalid_argument("fixture: misplaced base64 padding");
         int v[4];
         for (int k = 0; k < 4; ++k) {
             v[k] = in[i + k] == '=' ? 0 : val(in[i + k]);

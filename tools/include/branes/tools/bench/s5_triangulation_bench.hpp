@@ -159,8 +159,10 @@ struct S5TriangulationBench {
             geo.max_parallax_deg, 0.0, inv::Bound::Report, kInvStage, "parallax.max_inter_view", "deg"));
         r.push_back(inv::report_condition_number(geo.normal, kInvStage, "normal_matrix.condition_number"));
 
-        // A gate exists to reject: its "no" is a result, not a failure.
-        const bool gated = out.gate_deg > 0.0;
+        // A gate exists to reject: its "no" is a result, not a failure — but only
+        // when the measured parallax is actually below the gate. A rejection above
+        // it is a triangulation failure and stays one.
+        const bool gated = out.gate_deg > 0.0 && geo.max_parallax_deg < out.gate_deg;
         auto resolved = inv::check_scalar(out.ok, 1.0, inv::Bound::Lower, kInvStage, "triangulation.resolved", "flag");
         if (gated) {
             resolved.bound = inv::Bound::Report;

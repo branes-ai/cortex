@@ -79,7 +79,8 @@ struct S4FrontendBench {
     struct Output {
         std::vector<std::vector<Obs>> frames;  ///< observations per frame
         std::vector<sdk::msckf::stages::s4_frontend::TrackDiagnostics> diag;
-        double fb_gate = 0.0;  ///< the forward-backward gate the run used (0 = off)
+        double fb_gate = 0.0;             ///< the forward-backward gate the run used (0 = off)
+        sdk::FrontendParams effective{};  ///< the params the run tracked with (not serialized)
     };
 
     [[nodiscard]] static std::vector<Variant> variants() {
@@ -175,6 +176,7 @@ struct S4FrontendBench {
         sdk::msckf::stages::s4_frontend::FrontendState st;
         Output<T> out;
         out.fb_gate = params.fb_max_residual;
+        out.effective = params;
         for (const auto& f : in.frames) {
             const auto tr = sdk::msckf::stages::s4_frontend::track<T>(st, f.view(), params);
             std::vector<Obs> obs;
@@ -406,8 +408,11 @@ private:
     [[nodiscard]] static std::vector<double> fb_residuals(const Input<T>& in, const Output<T>& out) {
         std::vector<double> res;
         for (std::size_t k = 0; k + 1 < out.frames.size(); ++k) {
-            const cv::Pyramid<std::uint8_t> p0(in.frames[k].view(), std::max(1, in.params.pyramid_levels));
-            const cv::Pyramid<std::uint8_t> p1(in.frames[k + 1].view(), std::max(1, in.params.pyramid_levels));
+            // Re-track with the parameters the run used (the variant's), so the
+            // residual measures that run's tracking.
+            const auto& fe = out.effective;
+            const cv::Pyramid<std::uint8_t> p0(in.frames[k].view(), std::max(1, fe.pyramid_levels));
+            const cv::Pyramid<std::uint8_t> p1(in.frames[k + 1].view(), std::max(1, fe.pyramid_levels));
             std::vector<cv::KeyPoint> pts;
             std::vector<std::array<double, 2>> origin;
             for (const auto& o1 : out.frames[k + 1])
@@ -416,7 +421,7 @@ private:
                         pts.push_back(cv::KeyPoint{static_cast<float>(o1.u), static_cast<float>(o1.v), 0.0f});
                         origin.push_back({o0.u, o0.v});
                     }
-            const auto back = cv::track_klt_pyramidal(p1, p0, pts, in.params.klt);
+            const auto back = cv::track_klt_pyramidal(p1, p0, pts, fe.klt);
             for (std::size_t i = 0; i < back.size(); ++i) {
                 if (back[i].status != cv::TrackStatus::Tracked) {
                     res.push_back(inv::detail::kInf);  // can't round-trip at all
@@ -506,6 +511,7 @@ private:
     [[nodiscard]] static inv::InvariantResult truth_check(const Output<T>& out, const json& truth) {
         // End-point error: each continuing track must move by the frame-to-frame shift.
         double worst = out.frames.size() == truth.size() ? 0.0 : inv::detail::kInf;
+        std::size_t matched = 0;
         for (std::size_t k = 0; k + 1 < std::min(out.frames.size(), truth.size()); ++k) {
             const double sx = unpack_num(truth[k + 1][0]) - unpack_num(truth[k][0]);
             const double sy = unpack_num(truth[k + 1][1]) - unpack_num(truth[k][1]);
@@ -514,8 +520,12 @@ private:
                     if (o0.id == o1.id) {
                         const double e = std::hypot(o1.u - (o0.u + sx), o1.v - (o0.v + sy));
                         worst = std::isfinite(e) ? std::max(worst, e) : inv::detail::kInf;
+                        ++matched;
                     }
         }
+        // No continuing track means nothing was checked: that is a failure, not a pass.
+        if (matched == 0)
+            worst = inv::detail::kInf;
         // A clean translation must be tracked to a fraction of a pixel.
         return inv::check_scalar(worst, 0.25, inv::Bound::Upper, kInvStage, "truth.endpoint_error", "px");
     }
