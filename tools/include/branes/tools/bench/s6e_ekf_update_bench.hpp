@@ -79,10 +79,15 @@ struct S6eEkfUpdateBench {
     // ── Codec ───────────────────────────────────────────────────────────────
     template <class T>
     [[nodiscard]] static json encode_input(const Input<T>& in) {
-        return json{{"state", pack(in.state)},
-                    {"options", s6::encode_options(in.options)},
-                    {"projected", s6::encode_projected(in.projected)},
-                    {"unobservable", pack(in.unobservable)}};
+        json j{{"state", pack(in.state)},
+               {"options", s6::encode_options(in.options)},
+               {"projected", s6::encode_projected(in.projected)},
+               {"unobservable", pack(in.unobservable)}};
+        // A carried factor round-trips with the input; without one, decoding
+        // derives it from the (double) covariance.
+        if (in.factor.rows != 0)
+            j["factor"] = pack(in.factor);
+        return j;
     }
     template <class T>
     [[nodiscard]] static Input<T> decode_input(const json& j) {
@@ -100,6 +105,12 @@ struct S6eEkfUpdateBench {
         // dense variant gets P rounded to T. (Factoring P in a narrow T instead
         // zeroes the clone blocks' small Schur-complement pivots — 36 of 51 in
         // float and posit32 — and represents a different covariance.)
+        if (j.contains("factor")) {
+            in.factor = unpack_mat<T>(j.at("factor"));
+            if (in.factor.rows != in.state.dim() || in.factor.cols != in.state.dim())
+                throw std::invalid_argument("s6e bench: factor is not state-dimension square");
+            return in;
+        }
         s6::Mat<double> Ld;
         if (psd_factor(unpack_state<double>(j.at("state")).cov.P, Ld)) {
             in.factor = s6::Mat<T>(Ld.rows, Ld.cols);
@@ -189,25 +200,29 @@ struct S6eEkfUpdateBench {
         const auto y = m::cholesky_solve(L, s6::as_col(in.projected.r));  // S⁻¹ r
         const auto dx_ref = m::mul(PHt, y);                               // K r
 
-        // δx against K·r = (P Hᵀ)·(S⁻¹ r). Two backward-stable evaluations differ
-        // by ε·κ(S) times the product's componentwise size Σⱼ |(P Hᵀ)ᵢⱼ|·|yⱼ| — not
-        // |K r|, which at the true state is a near-total cancellation of far
-        // larger terms (r ≈ 0, so δx ≈ 1e-17).
-        double worst = out.dx.size() == n ? 0.0 : inv::detail::kInf, scale = 0.0;
+        // δx against K·r = (P Hᵀ)·(S⁻¹ r), component by component. Two
+        // backward-stable evaluations of δxᵢ differ by ε·κ(S) times that row's
+        // componentwise size Σⱼ |(P Hᵀ)ᵢⱼ|·|yⱼ| — not |K r|, which at the true
+        // state is a near-total cancellation of far larger terms (r ≈ 0, so
+        // δx ≈ 1e-17). A row of size 0 still gets ε_T·(the largest row) of
+        // mixing noise. Value: the worst error as a fraction of its own bound.
+        std::vector<double> rows(n, 0.0);
+        double big = 0.0;
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < y.rows; ++j)
+                rows[i] += std::abs(static_cast<double>(PHt(i, j))) * std::abs(static_cast<double>(y(j, 0)));
+            big = std::max(big, rows[i]);
+        }
+        const double eps_t = static_cast<double>(std::numeric_limits<T>::epsilon());
+        double worst = out.dx.size() == n ? 0.0 : inv::detail::kInf;
         for (std::size_t i = 0; i < std::min(n, out.dx.size()); ++i) {
             const double a = static_cast<double>(out.dx[i]), b = static_cast<double>(dx_ref(i, 0));
-            worst = std::isfinite(a) ? std::max(worst, std::abs(a - b)) : inv::detail::kInf;
-            double row = 0.0;
-            for (std::size_t j = 0; j < y.rows; ++j)
-                row += std::abs(static_cast<double>(PHt(i, j))) * std::abs(static_cast<double>(y(j, 0)));
-            scale = std::max(scale, row);
+            const double sc = std::max({rows[i], eps_t * big, 1e-300});
+            const double tol = tolerance_vs_double<T>(n, kappa * sc, safety_at<T>(sc));
+            worst = std::isfinite(a) ? std::max(worst, std::abs(a - b) / tol) : inv::detail::kInf;
         }
-        r.push_back(inv::check_scalar(worst,
-                                      tolerance_vs_double<T>(n, kappa * std::max(scale, 1e-300), safety_at<T>(scale)),
-                                      inv::Bound::Upper,
-                                      kInvStage,
-                                      "dx.equals_gain_times_residual",
-                                      "state units"));
+        r.push_back(inv::check_scalar(
+            worst, 1.0, inv::Bound::Upper, kInvStage, "dx.equals_gain_times_residual", "fraction of bound"));
 
         // P⁺ = P − PHᵀ S⁻¹ HP, symmetric, PSD, and no larger than P.
         const auto& Pp = out.p_plus;

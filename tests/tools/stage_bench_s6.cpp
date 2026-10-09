@@ -172,6 +172,20 @@ TEST_CASE("S6e: re-factoring the covariance in a narrow type loses the clone dir
     REQUIRE(zero_pivots(in_f.state.cov.P) > 30);
 }
 
+TEST_CASE("S6e: the carried factor survives an encode/decode round trip", "[tools][bench][s6]") {
+    // Decoded in float, the factor is chol(P) in double rounded once; re-encoding
+    // must carry it rather than let a later decode re-derive it from the rounded P.
+    const auto in = S6e::decode_input<float>(S6e::captured().input);
+    REQUIRE(in.factor.rows == in.state.dim());
+    const auto back = S6e::decode_input<float>(S6e::encode_input(in));
+    REQUIRE(back.factor.rows == in.factor.rows);
+    for (std::size_t i = 0; i < in.factor.d.size(); ++i)
+        REQUIRE(back.factor.d[i] == in.factor.d[i]);
+    auto bad = S6e::encode_input(in);
+    bad["factor"] = bn::pack(bn::s6::Mat<float>(2, 2));
+    REQUIRE_THROWS_AS(S6e::decode_input<float>(bad), std::invalid_argument);
+}
+
 TEST_CASE("S6 bench codecs reject malformed inputs", "[tools][bench][s6]") {
     auto a = S6a::known_answer().input;
     a.at("observations").at(0).at(1) = 1;
