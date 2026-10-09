@@ -204,8 +204,9 @@ struct S6eEkfUpdateBench {
         // backward-stable evaluations of δxᵢ differ by ε·κ(S) times that row's
         // componentwise size Σⱼ |(P Hᵀ)ᵢⱼ|·|yⱼ| — not |K r|, which at the true
         // state is a near-total cancellation of far larger terms (r ≈ 0, so
-        // δx ≈ 1e-17). A row of size 0 still gets ε_T·(the largest row) of
-        // mixing noise. Value: the worst error as a fraction of its own bound.
+        // δx ≈ 1e-17). Every row's bound is at least ε_T·(the largest row): the
+        // mixing noise a row of size 0 can still pick up. Value: the worst error
+        // as a fraction of its own bound.
         std::vector<double> rows(n, 0.0);
         double big = 0.0;
         for (std::size_t i = 0; i < n; ++i) {
@@ -217,8 +218,10 @@ struct S6eEkfUpdateBench {
         double worst = out.dx.size() == n ? 0.0 : inv::detail::kInf;
         for (std::size_t i = 0; i < std::min(n, out.dx.size()); ++i) {
             const double a = static_cast<double>(out.dx[i]), b = static_cast<double>(dx_ref(i, 0));
-            const double sc = std::max({rows[i], eps_t * big, 1e-300});
-            const double tol = tolerance_vs_double<T>(n, kappa * sc, safety_at<T>(sc));
+            // The row's own bound, floored once at the ε_T·(largest row) mixing
+            // allowance (not passed through the ε-scaled tolerance again).
+            const double sc = std::max(rows[i], 1e-300);
+            const double tol = std::max({tolerance_vs_double<T>(n, kappa * sc, safety_at<T>(sc)), eps_t * big, 1e-300});
             worst = std::isfinite(a) ? std::max(worst, std::abs(a - b) / tol) : inv::detail::kInf;
         }
         r.push_back(inv::check_scalar(
