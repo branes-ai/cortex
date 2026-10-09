@@ -112,6 +112,10 @@ struct S5TriangulationBench {
             const auto ci = o.at(0).get<std::size_t>();
             if (ci >= in.state.clones.size())
                 throw std::invalid_argument("s5 bench: observation clone index out of range");
+            // The bench supplies one camera; another index would fail S5's track
+            // validation and could pass as a gate rejection.
+            if (o.at(1).get<std::size_t>() != 0)
+                throw std::invalid_argument("s5 bench: observation camera index must be 0 (one camera)");
             in.track.observations.push_back(
                 {ci, o.at(1).get<std::size_t>(), {{unpack_scalar<T>(o.at(2)), unpack_scalar<T>(o.at(3))}}});
         }

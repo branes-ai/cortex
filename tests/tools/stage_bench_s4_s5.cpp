@@ -152,4 +152,9 @@ TEST_CASE("bench review hardening: base64 padding, vacuous truth, gate rejection
         if (x.name == "triangulation.resolved")
             resolved_failed = !x.pass;
     REQUIRE(resolved_failed);
+
+    // S5: a camera the bench does not supply is an input error, not a rejection.
+    auto bad = S5::known_answer().input;
+    bad.at("observations").at(0).at(1) = 1;
+    REQUIRE_THROWS_AS(S5::decode_input<double>(bad), std::invalid_argument);
 }
