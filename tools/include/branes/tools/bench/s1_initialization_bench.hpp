@@ -265,7 +265,8 @@ struct S1InitializationBench {
         r.push_back(inv::check_scalar(o.success, 1.0, inv::Bound::Lower, kInvStage, "init.resolved", "flag"));
         if (!o.success)
             return r;
-        for (auto& x : inv::check_so3<T>(o.state.R, kInvStage, "attitude.orthogonality", "attitude.determinant"))
+        for (auto& x : inv::check_so3<T>(
+                 o.state.R, kInvStage, "attitude.orthogonality", "attitude.determinant", safety_vs_double<T>()))
             r.push_back(x);
         const T g0 = in.gravity_magnitude;
         for (auto& x : inv::check_gravity<T>(o.gravity_world, g0, g0 * T(0.05), T(2.0 * kDeg)))
