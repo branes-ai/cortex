@@ -374,8 +374,11 @@ private:
         double worst_r = same_size ? 0.0 : inv::detail::kInf;
         for (std::size_t c = 0; c < std::min(after.clones.size(), truth.size()); ++c) {
             const auto p = unpack_fixed<double, 3>(truth[c].at("p"));
-            for (std::size_t i = 0; i < 3; ++i)
-                worst_p = std::max(worst_p, std::abs(static_cast<double>(after.clones[c].p[i]) - p[i]));
+            for (std::size_t i = 0; i < 3; ++i) {
+                // A non-finite position (estimate or truth) never matches: std::max drops a NaN.
+                const double d = std::abs(static_cast<double>(after.clones[c].p[i]) - p[i]);
+                worst_p = std::isfinite(d) ? std::max(worst_p, d) : inv::detail::kInf;
+            }
             const auto qt = unpack_fixed<double, 4>(truth[c].at("R"));
             const auto& qa = after.clones[c].R.quaternion();
             const double a0 = static_cast<double>(qa[0]), a1 = static_cast<double>(qa[1]);

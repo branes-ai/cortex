@@ -197,6 +197,13 @@ TEST_CASE("bench ground truth checks kept-clone rotations as well as positions",
     const auto run = bn::run_fixture<Bench>({"wrong_truth_rotation", gt}, bn::kShipped, bn::DefaultTypes{}, {"double"});
     REQUIRE_FALSE(run.pass());
     REQUIRE(run.types[0].report.first_failure()->name == "truth.kept_clone_rotation");
+
+    // A NaN truth position never passes the position check.
+    auto gt_nan = Bench::ground_truth();
+    gt_nan.truth[0]["p"][1] = "nan";
+    const auto nan_run = bn::run_fixture<Bench>({"nan_truth", gt_nan}, bn::kShipped, bn::DefaultTypes{}, {"double"});
+    REQUIRE_FALSE(nan_run.pass());
+    REQUIRE(nan_run.types[0].report.first_failure()->name == "truth.kept_clone_position");
 }
 
 TEST_CASE("bench CSV escapes text fields; an empty selection fails the bench", "[tools][bench]") {
