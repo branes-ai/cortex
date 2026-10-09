@@ -16,7 +16,7 @@ replay.
 |---|---|
 | `tools/include/branes/tools/bench/bench.hpp` | the runner, the report, and the CLI (`bench_main<B>`) |
 | `tools/include/branes/tools/bench/fixture.hpp` | the fixture model, the exact JSON codec, and the capture writer |
-| `tools/include/branes/tools/bench/types.hpp` | the arithmetic types: `double`, `float`, `posit32` (posit<32,2>), `posit16` (posit<16,1>) |
+| `tools/include/branes/tools/bench/types.hpp` | the arithmetic types: `double`, `float`, `posit32` (posit<32,2>), `posit16` (posit<16,1>), and `long_double` as the wider-than-double reference |
 | `tools/include/branes/tools/bench/variant.hpp` | the variant slot: named alternative implementations of a stage |
 | `tools/include/branes/tools/bench/sweep.hpp` | declarative characterization sweeps and CSV tables |
 | `tools/include/branes/tools/bench/s<N>_<transformation>_bench.hpp` | one stage's bench (the adapter) |
@@ -24,8 +24,15 @@ replay.
 | `tools/benches/fixtures/s<N>_<transformation>/*.json` | the stage's committed fixtures |
 | `tests/tools/stage_bench.cpp` | the Catch2 integration: the framework's guarantees, locked |
 
-The worked example is **S9_marginalization**: `s9_marginalization_bench.hpp` and
-`tools/benches/s9_marginalization_bench.cpp`. The remaining stages get their benches in #454–#458.
+Benches so far:
+
+| Bench | Issue | Variants | Sweep |
+|---|---|---|---|
+| `s0_sensor_model_bench` | #454 | `shipped` (Newton undistortion), `fixed_point` | distortion strength × radius → round trip, Jacobian, px per 1° extrinsic / per 1 ms offset |
+| `s1_initialization_bench` | #454 | `shipped` (static), `gravity_align`, `dynamic` (VI alignment) | window × IMU noise × excitation → roll/pitch and scale error |
+| `s9_marginalization_bench` | #453 (worked example) | `shipped`, `direct_gather` | clones × conditioning → residual, λ_min |
+
+The remaining stages get their benches in #455–#458.
 
 ## Fixtures
 
@@ -44,6 +51,16 @@ The runner adds two checks to the stage's own invariants:
   becomes a regression test this way.
 - **`known_answer.residual`**: the output must match `expected` within the type's arithmetic
   tolerance (`safety · n · ε_T · scale`, #445).
+
+**Variant binding.** An `expected` output can belong to one implementation. The fixture's `variant`
+field names it, and the runner applies the known-answer and replay checks only to that variant. An
+empty `variant` means every variant must reproduce it. Captured fixtures record the variant that ran.
+S1 needs this: its static and dynamic variants legitimately estimate different things from the same
+input.
+
+**Comparisons against double references.** Known answers, ground truth and stored rotations all pass
+through `double`. So a comparison is never held tighter than double's ε, even when the stage ran in a
+wider type (`tolerance_vs_double<T>`).
 
 ### File format
 
@@ -161,6 +178,21 @@ The benches build on what is already there rather than replacing it at once:
   same figure scripts.
 - `tests/sdk/` stage tests, e.g. `msckf_stages.cpp` for the stage transformations: these stay as the
   fast unit tests. The bench's Catch2 integration covers its fixtures.
+
+## What the S0 and S1 benches found (#454)
+
+- **The synthetic world's camera isn't quite EuRoC cam0.** Its tangential coefficient p2 is
+  1.76187114e-2, where the EuRoC calibration has 1.76187114e-5. The world is self-consistent, but the
+  ground-truth fixture, built with the real EuRoC intrinsics, disagreed by 0.1 in normalized
+  coordinates until it used the world's camera.
+- **The S1 seeding stage didn't compile for posits.** It narrowed `T` into a `double` diagnostic
+  implicitly. That is now an explicit `static_cast`, which is unchanged for float and double.
+- **The dynamic VI alignment is precision-fragile.** `ImuInitializer::try_dynamic` declines in
+  `float` and `posit<32,2>` on fixtures where it resolves in `double` and `long double`, and in
+  `posit<16,1>` it resolves with a 23.5% scale error. Its alignment solve forms the normal equations
+  (squaring the condition number), adds a fixed `T(1e-9)` ridge, and then needs a Cholesky
+  factorization, which breaks down once κ² exceeds 1/ε. This is #449/#450 territory; the default
+  (static) path is green in every type.
 
 Capturing fixtures from the running backend and from EuRoC replays, selected by stage, frame range or
 trigger, is #446. It writes fixtures with `bench::capture(...)` in the format above, so they load
