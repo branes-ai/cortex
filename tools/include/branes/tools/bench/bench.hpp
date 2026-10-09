@@ -152,6 +152,11 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
             double worst = want.size() == flat.size() ? 0.0 : inv::detail::kInf, scale = 1.0;
             if (want.size() == flat.size())
                 for (std::size_t i = 0; i < flat.size(); ++i) {
+                    // A non-finite value never matches a known answer (std::max would drop a NaN).
+                    if (!std::isfinite(flat[i]) || !std::isfinite(want[i])) {
+                        worst = inv::detail::kInf;
+                        break;
+                    }
                     worst = std::max(worst, std::abs(flat[i] - want[i]));
                     scale = std::max(scale, std::abs(want[i]));
                 }
@@ -226,9 +231,10 @@ inline void write_report_csv(const std::vector<FixtureRun>& runs, const std::fil
     for (const auto& fr : runs)
         for (const auto& t : fr.types)
             for (const auto& r : t.report.results())
-                out << fr.fixture << ',' << to_string(fr.kind) << ',' << fr.variant << ',' << t.type << ',' << r.name
-                    << ',' << r.unit << ',' << r.value << ',' << r.threshold << ',' << r.threshold_hi << ','
-                    << (r.pass ? 1 : 0) << ',' << t.run_us << ',' << t.max_diff_vs_double << '\n';
+                out << csv_field(fr.fixture) << ',' << to_string(fr.kind) << ',' << csv_field(fr.variant) << ','
+                    << t.type << ',' << csv_field(r.name) << ',' << csv_field(r.unit) << ',' << r.value << ','
+                    << r.threshold << ',' << r.threshold_hi << ',' << (r.pass ? 1 : 0) << ',' << t.run_us << ','
+                    << t.max_diff_vs_double << '\n';
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -369,6 +375,7 @@ int bench_main(int argc, char** argv) {
 
     std::vector<FixtureRun> runs;
     bool ok = true;
+    std::size_t type_runs = 0;
     for (const auto& v : select_variants(B::variants(), a.variant))
         for (const auto& nf : fixtures) {
             if (nf.fixture.stage != B::kStage) {
@@ -379,7 +386,17 @@ int bench_main(int argc, char** argv) {
                 run_fixture<B>(nf, v.name, AllTypes{}, a.types.empty() ? type_names(DefaultTypes{}) : a.types));
             print_run(runs.back());
             ok = ok && runs.back().pass();
+            type_runs += runs.back().types.size();
         }
+    // Nothing ran (no fixture for this stage, or --types named no known type):
+    // that is a failure, never a vacuous "all invariants PASS".
+    if (type_runs == 0) {
+        std::cerr << "  " << B::kStage << ": no stage run — check --fixture / --types (known types:";
+        for (const auto& t : type_names(AllTypes{}))
+            std::cerr << ' ' << t;
+        std::cerr << ")\n";
+        ok = false;
+    }
     if (!a.csv.empty())
         write_report_csv(runs, std::filesystem::path(a.csv) / (std::string(B::kStage) + "_report.csv"));
     if constexpr (HasSweep<B>) {

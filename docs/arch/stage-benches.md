@@ -3,8 +3,9 @@
 Epic #444 §A, issue #453. A **stage bench** is a focused debug, test, characterization and research
 environment for **one** pipeline transformation. It runs that stage on fixtures, in several arithmetic
 types and implementation variants, and reports the stage's invariants (#445) in native units. The full
-pipeline is the call sequence of the same transformations (`sdk/include/branes/sdk/msckf/stages/`,
-#452), so whatever a bench establishes about a stage holds where the backend calls it.
+pipeline is the call sequence of the same transformations (#452, in
+`sdk/include/branes/sdk/msckf/stages/`), so whatever a bench establishes about a stage holds where
+the backend calls it.
 
 A bench is one small executable. Editing a stage and re-running its bench takes seconds, not a EuRoC
 replay.

@@ -37,6 +37,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -141,6 +142,11 @@ struct S9MarginalizationBench {
         put3(s.v);
         put3(s.bg);
         put3(s.ba);
+        v.push_back(s.timestamp);
+        for (const auto& c : s.calib) {
+            put_rot(c.R_imu_cam);
+            put3(c.p_imu_cam);
+        }
         for (const auto& c : s.clones) {
             put_rot(c.R);
             put3(c.p);
@@ -148,8 +154,12 @@ struct S9MarginalizationBench {
         }
         for (const T& x : s.cov.P.d)
             v.push_back(static_cast<double>(x));
+        // Every diagnostic encode_output writes, so replay and known-answer
+        // comparisons cover the whole recorded output.
+        v.push_back(static_cast<double>(out.diag.dim_before));
         v.push_back(static_cast<double>(out.diag.dim_after));
         v.push_back(out.diag.removed_time);
+        v.push_back(static_cast<double>(out.diag.clones));
         return v;
     }
 
@@ -184,7 +194,8 @@ struct S9MarginalizationBench {
                                       "mean.untouched",
                                       "count"));
         if (f.kind == FixtureKind::GroundTruth)
-            r.push_back(truth_check<T>(after, f.truth));
+            for (auto& x : truth_check<T>(after, f.truth))
+                r.push_back(x);
         return r;
     }
 
@@ -276,11 +287,17 @@ struct S9MarginalizationBench {
     /// smallest eigenvalue is reported in the type under test.
     template <class T>
     [[nodiscard]] static std::vector<double> sweep_point(const Point& p) {
-        const auto n = static_cast<std::size_t>(p.at("clones"));
+        const double clones = p.at("clones");
+        const double log10_cond = p.at("log10_cond");
+        if (!std::isfinite(clones) || clones < 1.0 || clones > 64.0 || clones != std::floor(clones))
+            throw std::invalid_argument("s9 bench sweep: clones must be an integer in [1, 64]");
+        if (!std::isfinite(log10_cond) || log10_cond < 0.0 || log10_cond > 15.0)
+            throw std::invalid_argument("s9 bench sweep: log10_cond must be in [0, 15]");
+        const auto n = static_cast<std::size_t>(clones);
         State<double> s(0.1);
         for (std::size_t c = 0; c < n; ++c)
             s.clones.push_back({{}, {{0.3 * double(c), 0.0, 0.0}}, double(c)});
-        s.cov.P = correlated_spd(s.dim(), p.at("log10_cond"));
+        s.cov.P = correlated_spd(s.dim(), log10_cond);
         const auto in = decode_input<T>(encode_input(Input<double>{s, 0}));
         Output<T> out;
         const double us = detail::best_time_us([&] { out = run<T>(in, kShipped); }, 3);
@@ -347,21 +364,42 @@ private:
         return n;
     }
 
-    /// Ground truth: the kept clones' positions (m) against the injected truth.
+    /// Ground truth: the kept clones' positions (m) and rotations (rad) against
+    /// the injected truth. The rotation error is the angle of q_trueᶜ ⊗ q,
+    /// 2·atan2(‖v‖, |w|), which stays accurate near zero (unlike acos of a dot).
     template <class T>
-    [[nodiscard]] static inv::InvariantResult truth_check(const State<T>& after, const json& truth) {
-        double worst = after.clones.size() == truth.size() ? 0.0 : inv::detail::kInf;
+    [[nodiscard]] static std::vector<inv::InvariantResult> truth_check(const State<T>& after, const json& truth) {
+        const bool same_size = after.clones.size() == truth.size();
+        double worst_p = same_size ? 0.0 : inv::detail::kInf;
+        double worst_r = same_size ? 0.0 : inv::detail::kInf;
         for (std::size_t c = 0; c < std::min(after.clones.size(), truth.size()); ++c) {
             const auto p = unpack_fixed<double, 3>(truth[c].at("p"));
             for (std::size_t i = 0; i < 3; ++i)
-                worst = std::max(worst, std::abs(static_cast<double>(after.clones[c].p[i]) - p[i]));
+                worst_p = std::max(worst_p, std::abs(static_cast<double>(after.clones[c].p[i]) - p[i]));
+            const auto qt = unpack_fixed<double, 4>(truth[c].at("R"));
+            const auto& qa = after.clones[c].R.quaternion();
+            const double a0 = static_cast<double>(qa[0]), a1 = static_cast<double>(qa[1]);
+            const double a2 = static_cast<double>(qa[2]), a3 = static_cast<double>(qa[3]);
+            // q_rel = conj(qt) ⊗ qa (Hamilton product).
+            const double w = qt[0] * a0 + qt[1] * a1 + qt[2] * a2 + qt[3] * a3;
+            const double x = qt[0] * a1 - qt[1] * a0 - qt[2] * a3 + qt[3] * a2;
+            const double y = qt[0] * a2 + qt[1] * a3 - qt[2] * a0 - qt[3] * a1;
+            const double z = qt[0] * a3 - qt[1] * a2 + qt[2] * a1 - qt[3] * a0;
+            const double angle = 2.0 * std::atan2(std::sqrt(x * x + y * y + z * z), std::abs(w));
+            worst_r = std::max(worst_r, std::isfinite(angle) ? angle : inv::detail::kInf);
         }
-        return inv::check_scalar(worst,
-                                 inv::arithmetic_tolerance<T>(3, 10.0),
-                                 inv::Bound::Upper,
-                                 kInvStage,
-                                 "truth.kept_clone_position",
-                                 "m");
+        return {inv::check_scalar(worst_p,
+                                  inv::arithmetic_tolerance<T>(3, 10.0),
+                                  inv::Bound::Upper,
+                                  kInvStage,
+                                  "truth.kept_clone_position",
+                                  "m"),
+                inv::check_scalar(worst_r,
+                                  inv::arithmetic_tolerance<T>(4, 1.0),
+                                  inv::Bound::Upper,
+                                  kInvStage,
+                                  "truth.kept_clone_rotation",
+                                  "rad")};
     }
 
     struct Sequence {

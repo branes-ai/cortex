@@ -165,3 +165,54 @@ TEST_CASE("bench variant selection", "[tools][bench]") {
     REQUIRE(bn::select_variants(all, "direct_gather").front().name == "direct_gather");
     REQUIRE_THROWS_AS(bn::select_variants(all, "nope"), std::invalid_argument);
 }
+
+// ── PR #463 review hardening ────────────────────────────────────────────────
+
+TEST_CASE("bench rejects malformed rotations, sweep values and non-finite known answers", "[tools][bench]") {
+    // A non-unit or non-canonical quaternion is a fixture error, not an assert.
+    REQUIRE_THROWS_AS(bn::unpack_so3<double>(bn::json::array({1.0, 0.5, 0.0, 0.0})), std::invalid_argument);
+    REQUIRE_THROWS_AS(bn::unpack_so3<double>(bn::json::array({-1.0, 0.0, 0.0, 0.0})), std::invalid_argument);
+    REQUIRE_THROWS_AS(bn::unpack_so3<double>(bn::json::array({"nan", 0.0, 0.0, 0.0})), std::invalid_argument);
+    REQUIRE(bn::unpack_so3<double>(bn::json::array({1.0, 0.0, 0.0, 0.0})).quaternion()[0] == 1.0);
+
+    // Sweep values must be finite; the S9 sweep's clone count must be a small integer.
+    bn::Sweep sw;
+    REQUIRE_THROWS_AS(sw.axis_spec("x=1,nan"), std::invalid_argument);
+    REQUIRE_THROWS_AS(sw.axis_spec("x=inf"), std::invalid_argument);
+    REQUIRE_THROWS_AS(Bench::sweep_point<double>({{"clones", 2.5}, {"log10_cond", 0.0}}), std::invalid_argument);
+    REQUIRE_THROWS_AS(Bench::sweep_point<double>({{"clones", 0.0}, {"log10_cond", 0.0}}), std::invalid_argument);
+
+    // A known answer containing NaN never passes the residual check.
+    auto ka = Bench::known_answer();
+    ka.expected.at("state").at("P").at("data")[3] = "nan";
+    const auto run = bn::run_fixture<Bench>({"nan_answer", ka}, bn::kShipped, bn::DefaultTypes{}, {"double"});
+    REQUIRE_FALSE(run.pass());
+    REQUIRE(run.types[0].report.first_failure()->name == "known_answer.residual");
+}
+
+TEST_CASE("bench ground truth checks kept-clone rotations as well as positions", "[tools][bench][s9]") {
+    auto gt = Bench::ground_truth();
+    // Rotate the first kept clone's truth by ~0.1 rad about z: canonical, unit, but wrong.
+    gt.truth[0]["R"] = bn::json::array({std::cos(0.05), 0.0, 0.0, std::sin(0.05)});
+    const auto run = bn::run_fixture<Bench>({"wrong_truth_rotation", gt}, bn::kShipped, bn::DefaultTypes{}, {"double"});
+    REQUIRE_FALSE(run.pass());
+    REQUIRE(run.types[0].report.first_failure()->name == "truth.kept_clone_rotation");
+}
+
+TEST_CASE("bench CSV escapes text fields; an empty selection fails the bench", "[tools][bench]") {
+    REQUIRE(bn::csv_field("plain") == "plain");
+    REQUIRE(bn::csv_field("a,b") == "\"a,b\"");
+    REQUIRE(bn::csv_field("say \"hi\"") == "\"say \"\"hi\"\"\"");
+    bn::CsvTable t({"x,y", "z"});
+    t.row({1.0, 2.0});
+    std::ostringstream out;
+    t.write(out);
+    REQUIRE(out.str().rfind("\"x,y\",z\n", 0) == 0);
+
+    // --types naming no known type runs nothing: exit code 1, never a vacuous PASS.
+    std::vector<std::string> args{"s9_marginalization_bench", "--types", "bogus"};
+    std::vector<char*> argv;
+    for (auto& a : args)
+        argv.push_back(a.data());
+    REQUIRE(bn::bench_main<Bench>(static_cast<int>(argv.size()), argv.data()) == 1);
+}

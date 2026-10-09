@@ -20,6 +20,7 @@
 #ifndef BRANES_TOOLS_BENCH_SWEEP_HPP
 #define BRANES_TOOLS_BENCH_SWEEP_HPP
 
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -62,9 +63,10 @@ public:
         std::string item;
         while (std::getline(ss, item, ',')) {
             std::size_t used = 0;
-            values.push_back(std::stod(item, &used));
-            if (used != item.size())
+            const double v = std::stod(item, &used);
+            if (used != item.size() || !std::isfinite(v))
                 throw std::invalid_argument("sweep: bad value '" + item + "'");
+            values.push_back(v);
         }
         if (values.empty())
             throw std::invalid_argument("sweep: axis '" + std::string(spec.substr(0, eq)) + "' has no values");
@@ -104,6 +106,21 @@ private:
     std::vector<std::pair<std::string, std::vector<double>>> axes_;
 };
 
+/// A CSV text field (RFC 4180): quoted when it holds a comma, a double quote or a
+/// line break, with embedded double quotes doubled.
+[[nodiscard]] inline std::string csv_field(std::string_view s) {
+    if (s.find_first_of(",\"\r\n") == std::string_view::npos)
+        return std::string(s);
+    std::string out = "\"";
+    for (const char c : s) {
+        if (c == '"')
+            out += '"';
+        out += c;
+    }
+    out += '"';
+    return out;
+}
+
 /// A CSV table with a fixed header; numbers are written in round-trip precision.
 class CsvTable {
 public:
@@ -121,7 +138,7 @@ public:
 
     void write(std::ostream& out) const {
         for (std::size_t i = 0; i < header_.size(); ++i)
-            out << (i ? "," : "") << header_[i];
+            out << (i ? "," : "") << csv_field(header_[i]);
         out << '\n' << std::setprecision(std::numeric_limits<double>::max_digits10);
         for (const auto& r : rows_) {
             for (std::size_t i = 0; i < r.size(); ++i)

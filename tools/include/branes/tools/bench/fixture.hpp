@@ -186,9 +186,25 @@ template <math::Scalar T>
     return pack(r.quaternion());
 }
 
+/// Restore a rotation exactly. The stored quaternion must be canonical (w ≥ 0)
+/// and unit-norm to the precision of T; anything else is a malformed fixture
+/// (rejected here, never handed to SO3::from_unit_quaternion's precondition).
 template <math::Scalar T>
 [[nodiscard]] math::lie::SO3<T> unpack_so3(const json& j) {
-    return math::lie::SO3<T>::from_unit_quaternion(unpack_fixed<T, 4>(j));
+    const auto q = unpack_fixed<T, 4>(j);
+    double n2 = 0.0;
+    for (std::size_t i = 0; i < 4; ++i) {
+        const double x = static_cast<double>(q[i]);
+        if (!std::isfinite(x))
+            throw std::invalid_argument("fixture: rotation quaternion is not finite");
+        n2 += x * x;
+    }
+    const double eps = static_cast<double>(std::numeric_limits<T>::epsilon());
+    if (std::abs(std::sqrt(n2) - 1.0) > 64.0 * eps)
+        throw std::invalid_argument("fixture: rotation quaternion is not unit-norm");
+    if (static_cast<double>(q[0]) < 0.0)
+        throw std::invalid_argument("fixture: rotation quaternion is not canonical (w < 0)");
+    return math::lie::SO3<T>::from_unit_quaternion(q);
 }
 
 // ── The MSCKF state (full covariance) ───────────────────────────────────────
