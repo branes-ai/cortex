@@ -4,12 +4,16 @@
 // transformation on the backend side (issue #452,
 // docs/arch/vio-pipeline-canonical.md §S4).
 //
+//   track(frontend state, image, params)               → (state', observations, diagnostics)
 //   apply(tracks, t, frame observations, S0 normalize) → (tracks', diagnostics: ended tracks)
 //   assemble(track records, state)                     → FeatureTrack for S5/S6
 //
-// The image-domain tracking (KLT, outlier rejection) runs in the front end
-// (cv/klt.hpp via VioEstimator) and hands the backend per-frame pixel
-// observations. This stage is that hand-off: each observation is normalized by
+// `track` is the image-domain front end (#456): pyramidal KLT of the existing
+// tracks into the new frame, the optional forward-backward gate, and FAST
+// replenishment up to the target count — producing one pixel observation per
+// surviving track with a stable id. VioEstimator runs it per frame.
+//
+// `apply` is the hand-off to the backend: each observation is normalized by
 // S0_sensor_model and appended to its feature's track, keyed by the clone TIME it
 // was taken at (clone indices shift on marginalization; times do not). A
 // feature not observed in this frame has ended; its id is released, in feature-id
@@ -20,6 +24,10 @@
 #ifndef BRANES_SDK_MSCKF_STAGES_S4_FRONTEND_HPP
 #define BRANES_SDK_MSCKF_STAGES_S4_FRONTEND_HPP
 
+#include <branes/cv/fast.hpp>
+#include <branes/cv/image.hpp>
+#include <branes/cv/klt.hpp>
+#include <branes/cv/pyramid.hpp>
 #include <branes/sdk/msckf/camera_updater.hpp>
 #include <branes/sdk/msckf/state.hpp>
 #include <branes/sdk/vio_backend.hpp>
@@ -32,7 +40,163 @@
 #include <unordered_set>
 #include <vector>
 
+namespace branes::sdk {
+
+/// Front-end tuning. Defaults target a ~480p grayscale stream.
+struct FrontendParams {
+    int pyramid_levels = 3;
+    double fast_threshold = 20.0;        ///< FAST-9 contrast threshold
+    std::size_t target_features = 150;   ///< re-detect when tracked count drops below
+    double min_feature_distance = 15.0;  ///< px; suppress detections near existing tracks
+    /// S4 forward-backward gate: re-track each survivor back to the previous frame
+    /// and drop it if the round-trip error exceeds this (px). Rejects tracks that
+    /// drifted to a confidently-wrong location before they reach the backend.
+    /// **Default 0 (disabled)**: enabling it (e.g. ~1 px) doubles the KLT cost and
+    /// should be validated end-to-end before being turned on.
+    double fb_max_residual = 0.0;
+    cv::KltParams klt{};
+};
+
+}  // namespace branes::sdk
+
 namespace branes::sdk::msckf::stages::s4_frontend {
+
+using Pixel = std::uint8_t;
+
+/// One live image-domain track: a stable id and its current pixel position.
+struct FrontendTrack {
+    std::uint64_t id = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+/// The front end's state between frames: the previous frame's pyramid and the
+/// live tracks, with the next id to assign.
+struct FrontendState {
+    cv::Pyramid<Pixel> prev_pyramid{};
+    bool have_prev = false;
+    std::vector<FrontendTrack> tracks;
+    std::uint64_t next_id = 0;
+};
+
+struct TrackDiagnostics {
+    std::size_t tracks_in = 0;    ///< live tracks entering the frame
+    std::size_t klt_lost = 0;     ///< lost or out of bounds in forward KLT
+    std::size_t fb_rejected = 0;  ///< failed the forward-backward gate (when enabled)
+    std::size_t detected = 0;     ///< new tracks from FAST replenishment
+    std::size_t tracks_out = 0;   ///< live tracks after the frame (= observations)
+};
+
+template <math::Scalar T>
+struct TrackResult {
+    std::vector<FrontendObservation<T>> observations;  ///< one per surviving track, camera 0
+    TrackDiagnostics diag;
+};
+
+namespace detail {
+// Add the strongest FAST corners that are far enough from every existing
+// track, up to the target count.
+inline std::size_t detect_new(FrontendState& st, cv::Image<const Pixel> level0, const FrontendParams& fe) {
+    auto kps = cv::detect_fast(level0, fe.fast_threshold);
+    std::sort(
+        kps.begin(), kps.end(), [](const cv::KeyPoint& a, const cv::KeyPoint& b) { return a.response > b.response; });
+    const double min_d2 = fe.min_feature_distance * fe.min_feature_distance;
+    std::size_t added = 0;
+    for (const auto& kp : kps) {
+        if (st.tracks.size() >= fe.target_features)
+            break;
+        bool too_close = false;
+        for (const auto& t : st.tracks) {
+            const double dx = static_cast<double>(kp.x) - t.x;
+            const double dy = static_cast<double>(kp.y) - t.y;
+            if (dx * dx + dy * dy < min_d2) {
+                too_close = true;
+                break;
+            }
+        }
+        if (!too_close) {
+            st.tracks.push_back(FrontendTrack{st.next_id++, kp.x, kp.y});
+            ++added;
+        }
+    }
+    return added;
+}
+}  // namespace detail
+
+/// Track the live features into `image`, replenish with new FAST detections,
+/// and return one observation per surviving track.
+template <math::Scalar T>
+TrackResult<T> track(FrontendState& st, cv::Image<const Pixel> image, const FrontendParams& fe) {
+    TrackResult<T> out;
+    out.diag.tracks_in = st.tracks.size();
+    // At least one level, so level(0) is always valid even if a caller sets a
+    // non-positive pyramid_levels.
+    cv::Pyramid<Pixel> next(image, std::max(1, fe.pyramid_levels));
+
+    if (st.have_prev && !st.tracks.empty()) {
+        std::vector<cv::KeyPoint> pts;
+        pts.reserve(st.tracks.size());
+        for (const auto& t : st.tracks)
+            pts.push_back(cv::KeyPoint{t.x, t.y, 0.0f});
+        const auto res = cv::track_klt_pyramidal(st.prev_pyramid, next, pts, fe.klt);
+
+        // Forward-backward consistency: re-track the forward survivors back to
+        // the previous frame; a self-consistent track returns to its origin.
+        std::vector<cv::KeyPoint> back_pts;
+        std::vector<cv::KltResult> back;
+        if (fe.fb_max_residual > 0.0) {
+            back_pts.reserve(res.size());
+            for (const auto& rr : res)
+                back_pts.push_back(cv::KeyPoint{rr.x, rr.y, 0.0f});
+            back = cv::track_klt_pyramidal(next, st.prev_pyramid, back_pts, fe.klt);
+        }
+        const double fb2 = fe.fb_max_residual * fe.fb_max_residual;
+
+        std::vector<FrontendTrack> kept;
+        kept.reserve(st.tracks.size());
+        for (std::size_t i = 0; i < res.size(); ++i) {
+            if (res[i].status != cv::TrackStatus::Tracked) {
+                ++out.diag.klt_lost;
+                continue;
+            }
+            if (fe.fb_max_residual > 0.0) {
+                if (back[i].status != cv::TrackStatus::Tracked) {
+                    ++out.diag.fb_rejected;
+                    continue;  // can't verify the round trip → drop
+                }
+                const double dx = static_cast<double>(back[i].x) - pts[i].x;
+                const double dy = static_cast<double>(back[i].y) - pts[i].y;
+                if (dx * dx + dy * dy > fb2) {
+                    ++out.diag.fb_rejected;
+                    continue;  // failed forward-backward → drop the outlier
+                }
+            }
+            FrontendTrack t = st.tracks[i];
+            t.x = res[i].x;
+            t.y = res[i].y;
+            kept.push_back(t);
+        }
+        st.tracks = std::move(kept);
+    }
+
+    if (st.tracks.size() < fe.target_features)
+        out.diag.detected = detail::detect_new(st, next.level(0), fe);
+
+    out.observations.reserve(st.tracks.size());
+    for (const auto& t : st.tracks) {
+        FrontendObservation<T> o;
+        o.feature_id = t.id;
+        o.camera_id = 0;
+        o.u = static_cast<T>(t.x);
+        o.v = static_cast<T>(t.y);
+        out.observations.push_back(o);
+    }
+    out.diag.tracks_out = st.tracks.size();
+
+    st.prev_pyramid = std::move(next);
+    st.have_prev = true;
+    return out;
+}
 
 /// One stored observation of a feature, tagged by the clone time it was taken at.
 template <math::Scalar T>
