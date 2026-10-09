@@ -52,6 +52,18 @@ public:
         return q_;
     }
 
+    /// Construct from a quaternion that is already unit-norm and canonical
+    /// (w ≥ 0) — e.g. one read back from another rotation's `quaternion()` —
+    /// WITHOUT renormalizing. Renormalization is not bit-idempotent, so exact
+    /// deserialization (captured bench fixtures replayed bit-for-bit) needs
+    /// this. Precondition (unchecked in release): |‖q‖ − 1| at roundoff, w ≥ 0.
+    [[nodiscard]] static SO3 from_unit_quaternion(const Quaternion& q) {
+        assert(!(q[0] < T{0}) && "SO3::from_unit_quaternion: quaternion must be canonical (w >= 0)");
+        SO3 r;
+        r.q_ = q;
+        return r;
+    }
+
     // ── exp / log ────────────────────────────────────────────────────
 
     /// Exponential map so(3) -> SO(3): rotation vector to rotation.
