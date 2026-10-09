@@ -439,6 +439,21 @@ public:
         return out;
     }
 
+    // Probe seam: the observing camera's pose in the world for observation `o`
+    // (world ← camera rotation and the optical center), with the same
+    // extrinsics the projection uses. Lets alternative S5 triangulators share
+    // the updater's camera model instead of re-deriving it.
+    struct CameraPose {
+        Mat3 R_wc{};
+        Vec3 center{};
+    };
+    template <class Cov>
+    CameraPose camera_pose(const State<T, Cov>& s, const CameraObservation<T>& o) const {
+        const auto& cl = s.clones[o.clone_index];
+        const Extrinsics ex = extrinsic_of(s, o.camera_index);
+        return CameraPose{(cl.R * ex.R_imu_cam).matrix(), cl.p + cl.R.matrix() * ex.p_imu_cam};
+    }
+
     // Linear (ray-perpendicular) triangulation, then a few Gauss-Newton
     // reprojection refinements. Solves Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C.
     // Public so the S5 stage probe (eval/triangulation_probe.hpp) can drive the

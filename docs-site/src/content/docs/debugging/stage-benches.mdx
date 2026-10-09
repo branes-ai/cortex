@@ -9,8 +9,7 @@ import { Aside } from '@astrojs/starlight/components';
   The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
   S9_marginalization bench as its worked example. The S0–S3 benches
   ([#454](https://github.com/branes-ai/cortex/issues/454), [#455](https://github.com/branes-ai/cortex/issues/455))
-  are merged and the S4–S5 benches ([#456](https://github.com/branes-ai/cortex/issues/456)) are in
-  review; the remaining stages follow in [#457](https://github.com/branes-ai/cortex/issues/457)–[#458](https://github.com/branes-ai/cortex/issues/458).
+  and the S4–S5 benches ([#456](https://github.com/branes-ai/cortex/issues/456)) are merged; the remaining stages follow in [#457](https://github.com/branes-ai/cortex/issues/457)–[#458](https://github.com/branes-ai/cortex/issues/458).
   The developer reference is `docs/arch/stage-benches.md`.
 </Aside>
 
@@ -147,12 +146,38 @@ The S4 and S5 benches (#456) found four more:
 - **Border churn in the front end.** KLT drops features whose window doesn't fit at the coarsest
   pyramid level, a ≈24 px border band at the defaults, but FAST detects up to the edge. On the bench's
   frames about 85% of new detections die on their first tracked frame and are re-detected under new
-  ids.
+  ids ([#474](https://github.com/branes-ai/cortex/issues/474)).
 - **The forward-backward gate is off by default**, so drifted tracks reach the backend. The bench
   measures them, and its `fb_gate_1px` variant enforces the contract.
 - **The camera updater didn't compile for posits:** qualified `std::acos`/`std::sqrt` calls, now ADL.
 - **The synthetic world steps from rest to ≈1 m/s** at the end of its warm-up, a velocity jump no
-  IMU stream can produce. Pure IMU propagation from rest is off by ≈1 m/s after one frame.
+  IMU stream can produce. Pure IMU propagation from rest is off by ≈1 m/s after one frame
+  ([#475](https://github.com/branes-ai/cortex/issues/475)).
+
+### Comparing alternative methods: S5 triangulation
+
+A bench variant can run a different algorithm, not just different parameters. The S5 bench runs
+three alternatives to the shipped ray-perpendicular solve with Gauss-Newton refinement: the two-view
+midpoint, the DLT, and anchored inverse depth with Gauss-Newton. All four pass every fixture in every
+type, and the sweep shows where they differ (mean depth error in m, feature at 5 m):
+
+| parallax | px noise | shipped | midpoint | DLT | inverse depth |
+|---|---|---|---|---|---|
+| 0.25° | 0.5 | 2.38 | fails | 1.60 | 2.41 |
+| 5° | 1 | 0.140 | 0.168 | 0.147 | 0.140 |
+| 15° | 1 | 0.0455 | 0.0553 | 0.0465 | 0.0455 |
+
+- **Inverse depth gives the shipped answer.** Both minimize the reprojection error, so the
+  parameterization changes the path, not the answer.
+- **The DLT is biased toward the cameras.** It wins where depth is barely observable and costs ≈5%
+  where it is observable.
+- **The midpoint is the worst.** It is also the only one that loses precision with exact
+  observations: its closed form cancels catastrophically at low parallax in float.
+- No method recovers a depth the geometry doesn't hold. Below about 1° the parallax gate is the
+  answer, not the solver.
+
+The S4 inspector, which draws the front end's tracks on EuRoC frames, now calls the extracted stage
+too. What it shows is what the estimator does.
 
 ## Writing a bench
 

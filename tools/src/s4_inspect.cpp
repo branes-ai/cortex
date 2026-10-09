@@ -5,8 +5,9 @@
 // frontend, run with full instrumentation → an enriched per-frame JSONL the
 // image-domain overlay renderer (docs-site/scripts/gen-overlay.mjs) draws.
 //
-// It runs the real cv/ frontend operator directly (S4FrontendInspector mirrors
-// VioEstimator::track_frame) so it can expose what production hides: per-track
+// It runs the S4_frontend stage itself (S4FrontendInspector calls
+// msckf::stages::s4_frontend::track, the function VioEstimator runs per frame)
+// and derives around it what production hides: per-track
 // forward-backward residual, status, age; the FAST detections added each frame;
 // the pyramid geometry; and a spatial-coverage grid.
 //

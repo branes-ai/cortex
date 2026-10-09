@@ -21,11 +21,14 @@
 //                  clone poses, observations through S0, recorded
 //
 // Variants: "shipped" (linear + 5 Gauss-Newton steps, no gate), "linear_only"
-// (no refinement), "parallax_gate_2deg" (reject below 2° of parallax).
+// (no refinement), "parallax_gate_2deg" (reject below 2° of parallax), and the
+// alternative methods of stages::s5_triangulation::Method — "midpoint_two_view"
+// (best-conditioned pair, common-perpendicular midpoint), "dlt_linear" (inhomogeneous
+// DLT), "inverse_depth_gn" (anchored inverse depth, Gauss-Newton).
 //
-// Sweep: parallax × pixel noise → depth error, normal-matrix κ, and the share
-// the 2° gate rejects (the S5 probe's finding: 0.1–5° features admitted at full
-// weight).
+// Sweep: parallax × pixel noise → depth error per method, normal-matrix κ, and
+// the share the 2° gate rejects (the S5 probe's finding: 0.1–5° features
+// admitted at full weight).
 //
 // Header-only, C++20.
 
@@ -79,7 +82,10 @@ struct S5TriangulationBench {
     [[nodiscard]] static std::vector<Variant> variants() {
         return {{"shipped", "linear ray-perpendicular solve + 5 Gauss-Newton steps, no parallax gate"},
                 {"linear_only", "the linear solve without refinement"},
-                {"parallax_gate_2deg", "reject tracks with less than 2 deg of parallax"}};
+                {"parallax_gate_2deg", "reject tracks with less than 2 deg of parallax"},
+                {"midpoint_two_view", "midpoint of the common perpendicular of the best-conditioned pair of rays"},
+                {"dlt_linear", "inhomogeneous DLT: algebraic least squares over every view"},
+                {"inverse_depth_gn", "anchored inverse depth seeded by the DLT, Gauss-Newton on reprojection"}};
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
@@ -139,8 +145,20 @@ struct S5TriangulationBench {
         else if (variant == "parallax_gate_2deg")
             opts.min_parallax_deg = T{2};
         const sdk::msckf::CameraUpdater<T> upd(std::vector<sdk::msckf::CameraExtrinsics<T>>{in.extrinsics}, opts);
-        const auto r = sdk::msckf::stages::s5_triangulation::apply(in.state, upd, in.track);
+        const auto r = sdk::msckf::stages::s5_triangulation::apply(in.state, upd, in.track, method(variant));
         return Output<T>{r.ok ? 1 : 0, r.ok ? r.p_f : Vec3<T>{}, static_cast<double>(opts.min_parallax_deg)};
+    }
+
+    /// The triangulation method a variant runs.
+    [[nodiscard]] static sdk::msckf::stages::s5_triangulation::Method method(std::string_view variant) {
+        using M = sdk::msckf::stages::s5_triangulation::Method;
+        if (variant == "midpoint_two_view")
+            return M::Midpoint;
+        if (variant == "dlt_linear")
+            return M::Dlt;
+        if (variant == "inverse_depth_gn")
+            return M::InverseDepth;
+        return M::Shipped;
     }
 
     template <class T>
@@ -271,11 +289,17 @@ struct S5TriangulationBench {
         return sw;
     }
     [[nodiscard]] static std::vector<std::string> sweep_columns() {
-        return {"depth_err_m", "kappa", "gate_2deg_rejected"};
+        return {"depth_err_m",
+                "kappa",
+                "gate_2deg_rejected",
+                "depth_err_midpoint_m",
+                "depth_err_dlt_m",
+                "depth_err_inverse_depth_m"};
     }
     /// Four clones whose outermost rays subtend `parallax_deg` at a feature 5 m
     /// away, pixel noise `px_noise` (EuRoC fx); the mean depth error over 16
-    /// deterministic noise draws, κ, and whether the 2° gate rejects.
+    /// deterministic noise draws (shipped, then each alternative method; ∞ when
+    /// a method fails any draw), κ, and the share the 2° gate rejects.
     template <class T>
     [[nodiscard]] static std::vector<double> sweep_point(const Point& p) {
         const double par = p.at("parallax_deg"), px = p.at("px_noise");
@@ -287,6 +311,8 @@ struct S5TriangulationBench {
         const double sigma = px / 458.654;
         const Vec3<double> F{{0.0, 0.0, depth}};
         double err = 0.0, kappa = 0.0, rejected = 0.0;
+        const char* alts[] = {"midpoint_two_view", "dlt_linear", "inverse_depth_gn"};
+        double alt_err[3] = {0.0, 0.0, 0.0};
         const int draws = 16;
         for (int d = 0; d < draws; ++d) {
             Input<double> in;
@@ -304,10 +330,14 @@ struct S5TriangulationBench {
             const auto gated = run<T>(inT, "parallax_gate_2deg");
             err += out.ok ? std::abs(static_cast<double>(out.p_f[2]) - depth) : inv::detail::kInf;
             rejected += gated.ok ? 0.0 : 1.0;
+            for (std::size_t a = 0; a < 3; ++a) {
+                const auto o = run<T>(inT, alts[a]);
+                alt_err[a] += o.ok ? std::abs(static_cast<double>(o.p_f[2]) - depth) : inv::detail::kInf;
+            }
             if (d == 0)
                 kappa = inv::report_condition_number(geometry(inT, out.p_f).normal, kInvStage).value;
         }
-        return {err / draws, kappa, rejected / draws};
+        return {err / draws, kappa, rejected / draws, alt_err[0] / draws, alt_err[1] / draws, alt_err[2] / draws};
     }
 
 private:

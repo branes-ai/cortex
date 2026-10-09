@@ -152,3 +152,33 @@ TEST_CASE("S4 inspector: FB gate off measures without culling; report serializes
         }
     }
 }
+
+TEST_CASE("S4 inspector: observes the stage, it does not reimplement it", "[tools][s4_inspect]") {
+    namespace s4 = branes::sdk::msckf::stages::s4_frontend;
+    for (const double gate : {0.0, 1.0}) {
+        branes::sdk::FrontendParams fe;
+        fe.fb_max_residual = gate;
+        bt::S4FrontendInspector insp(fe);
+        s4::FrontendState direct;
+        for (int k = 0; k < 5; ++k) {
+            const auto img = textured(2 * k);
+            const auto rep = insp.step(std::as_const(img).view(), 1.0 + 0.05 * k, "f.png");
+            const auto res = s4::track<double>(direct, std::as_const(img).view(), fe);
+            // The same tracks, ids and pixels as the stage run on its own.
+            REQUIRE(rep.tracks.size() == res.observations.size());
+            for (std::size_t i = 0; i < rep.tracks.size(); ++i) {
+                REQUIRE(rep.tracks[i].id == res.observations[i].feature_id);
+                REQUIRE(rep.tracks[i].u == res.observations[i].u);
+                REQUIRE(rep.tracks[i].v == res.observations[i].v);
+            }
+            REQUIRE(rep.n_new == res.diag.detected);
+            REQUIRE(rep.n_lost == res.diag.klt_lost);
+            REQUIRE(rep.n_fb_culled == res.diag.fb_rejected);
+            // With the gate on, every displayed survivor passed it.
+            if (gate > 0.0)
+                for (const auto& t : rep.tracks)
+                    if (t.status == "tracked")
+                        REQUIRE(t.fb_residual <= gate);
+        }
+    }
+}
