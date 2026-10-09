@@ -164,14 +164,18 @@ compression (S6c) against the normal equations, the gate (S6d) against χ², and
 against K·r and P − K S Kᵀ. Each sub-step's fixtures come from running the ones before it, so a
 failure points at one sub-step. The S6 benches (#457) found:
 
-- **The update isn't the leak.** At the estimated state as much as at the true one, the projected
-  Jacobian annihilates the unobservable directions (global position, yaw) to ≈1e-16, and the update
-  adds no information along them. The over-confidence of #212 has to come from linearization points
-  drifting apart across stages, not from S6.
+- **The update adds no information along the unobservable directions.** At the estimated state as
+  much as at the true one, the projected Jacobian annihilates them (global position, yaw) to ≈1e-16.
+  That rules out this mechanism inside S6; it doesn't rule out other sources of the #212
+  over-confidence. The yaw leak the S2 bench measures in propagation is an identified one, and
+  [#480](https://github.com/branes-ai/cortex/issues/480) attributes the leak stage by stage.
 - **The shipped χ² gate is loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
-  5-per-dof gate admits 59–70% of measurements biased by 2σ, against 22–44% for a 95% χ² gate.
-- **The square-root update is the less precise one in posits:** ≈330× further from its double
-  result than the Joseph form in posit32.
+  5-per-dof gate admits 59–70% of measurements biased by 2σ, against 22–44% for a 95% χ² gate
+  ([#481](https://github.com/branes-ai/cortex/issues/481)).
+- **A square-root filter must carry its factor.** Re-factoring the covariance in float or posit32
+  zeroes the clone blocks' tiny pivots (36 of 51) and represents a different covariance; measured that
+  way the square-root update looked ≈330× worse than Joseph. With the factor carried, the two agree
+  within 2.3× in every type ([#482](https://github.com/branes-ai/cortex/issues/482)).
 - **Posits are precise near 1, not near 1e-17.** Residuals at the true state and covariance entries
   near σ² sit where a posit has few fraction bits, so checks on them use T's precision at that
   magnitude (`safety_at`), not its ε at 1.

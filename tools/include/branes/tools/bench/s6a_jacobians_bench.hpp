@@ -12,7 +12,7 @@
 //   • reported: the residual RMS in normalized image units.
 //
 // Fixtures:
-//   known_answer   three clones on a 1 m baseline, identity attitudes and
+//   known_answer   three clones 1 m apart (a 2 m baseline), identity attitudes and
 //                  extrinsics, a feature at 4 m: H_f, H_x in closed form, r = 0
 //   ground_truth   a synthetic-world track at the true poses with exact
 //                  observations and the true landmark: r = 0

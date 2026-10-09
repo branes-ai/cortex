@@ -24,7 +24,8 @@
 //   captured       the same at the S2/S3 estimated state — recorded
 //
 // Variants: "shipped" (Joseph form, dense P), "sqrt_array" (the square-root
-// covariance's QR array update).
+// covariance's QR array update, from chol(P) computed in double and rounded
+// to T, as a filter that carries its factor would hold it).
 //
 // Sweep: pixel noise × calibration rotation uncertainty (the S10 coupling) →
 // covariance reduction, information along N, ‖δx‖ and NIS per dof.
@@ -59,6 +60,10 @@ struct S6eEkfUpdateBench {
         s6::Options<T> options{};
         s6::Projected<T> projected{};
         s6::Mat<T> unobservable{};  ///< n×4 unobservable basis, or empty
+        /// The square-root filter's own state: chol(P) of the fixture's (double)
+        /// covariance, rounded to T — not a re-factorization of P in T. Derived
+        /// on decode, not serialized. Empty when P has no square-root form.
+        s6::Mat<T> factor{};
     };
     template <class T>
     struct Output {
@@ -90,6 +95,18 @@ struct S6eEkfUpdateBench {
             throw std::invalid_argument("s6e bench: H columns != state dimension");
         if (in.unobservable.rows != 0 && in.unobservable.rows != in.state.dim())
             throw std::invalid_argument("s6e bench: unobservable basis rows != state dimension");
+        // A square-root filter carries its factor; it never re-factors P. Factor
+        // the fixture's covariance in double, then round the factor to T, as the
+        // dense variant gets P rounded to T. (Factoring P in a narrow T instead
+        // zeroes the clone blocks' small Schur-complement pivots — 36 of 51 in
+        // float and posit32 — and represents a different covariance.)
+        s6::Mat<double> Ld;
+        if (psd_factor(unpack_state<double>(j.at("state")).cov.P, Ld)) {
+            in.factor = s6::Mat<T>(Ld.rows, Ld.cols);
+            for (std::size_t i = 0; i < Ld.rows; ++i)
+                for (std::size_t c = 0; c < Ld.cols; ++c)
+                    in.factor(i, c) = T(Ld(i, c));
+        }
         return in;
     }
     template <class T>
@@ -124,14 +141,13 @@ struct S6eEkfUpdateBench {
             sq.calib.push_back({c.R_imu_cam, c.p_imu_cam});
         for (const auto& c : in.state.clones)
             sq.clones.push_back({c.R, c.p, c.timestamp});
-        s6::Mat<T> L;
-        if (!psd_factor(in.state.cov.P, L)) {
-            // Not PSD in T: no square-root form exists.
+        if (in.factor.rows != in.state.dim()) {
+            // No square-root form of this covariance.
             out.dx.assign(in.state.dim(), T(std::numeric_limits<double>::quiet_NaN()));
             out.p_plus = in.state.cov.P;
             return out;
         }
-        sq.cov.S = L;
+        sq.cov.S = in.factor;
         out.dx = s6e::apply(sq, upd, in.projected).dx;
         out.p_plus = sq.covariance();
         return out;
@@ -173,12 +189,18 @@ struct S6eEkfUpdateBench {
         const auto y = m::cholesky_solve(L, s6::as_col(in.projected.r));  // S⁻¹ r
         const auto dx_ref = m::mul(PHt, y);                               // K r
 
-        // δx against K·r: their difference is the solves' error, ∝ κ(S)·|K r|.
+        // δx against K·r = (P Hᵀ)·(S⁻¹ r). Two backward-stable evaluations differ
+        // by ε·κ(S) times the product's componentwise size Σⱼ |(P Hᵀ)ᵢⱼ|·|yⱼ| — not
+        // |K r|, which at the true state is a near-total cancellation of far
+        // larger terms (r ≈ 0, so δx ≈ 1e-17).
         double worst = out.dx.size() == n ? 0.0 : inv::detail::kInf, scale = 0.0;
         for (std::size_t i = 0; i < std::min(n, out.dx.size()); ++i) {
             const double a = static_cast<double>(out.dx[i]), b = static_cast<double>(dx_ref(i, 0));
             worst = std::isfinite(a) ? std::max(worst, std::abs(a - b)) : inv::detail::kInf;
-            scale = std::max(scale, std::abs(b));
+            double row = 0.0;
+            for (std::size_t j = 0; j < y.rows; ++j)
+                row += std::abs(static_cast<double>(PHt(i, j))) * std::abs(static_cast<double>(y(j, 0)));
+            scale = std::max(scale, row);
         }
         r.push_back(inv::check_scalar(worst,
                                       tolerance_vs_double<T>(n, kappa * std::max(scale, 1e-300), safety_at<T>(scale)),

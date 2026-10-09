@@ -5,8 +5,9 @@
 // shipped variants); the update carries no information along the unobservable
 // directions at a consistent linearization point, estimated or true; Givens and
 // Householder null spaces give the same normal equations; QR compression of a
-// stacked system keeps n + 1 rows; the shipped χ² gate is loose at low dof; the
-// square-root update loses precision against the Joseph form in posit32; and the
+// stacked system keeps n + 1 rows; the shipped χ² gate is loose at low dof; a
+// square-root filter that carries its factor matches the Joseph form in posit32,
+// while re-factoring P in a narrow type loses the clone directions; and the
 // committed fixture files replay.
 
 #include <branes/tools/bench/s6a_jacobians_bench.hpp>
@@ -128,7 +129,7 @@ TEST_CASE("S6d sweep: inliers are chi-square consistent; the shipped gate is loo
     REQUIRE(out[2] < out[1] - 0.3);  // a 95% chi-square gate admits far fewer
 }
 
-TEST_CASE("S6e: the square-root update loses precision against Joseph in posit32", "[tools][bench][s6]") {
+TEST_CASE("S6e: a square-root filter that carries its factor matches Joseph in posit32", "[tools][bench][s6]") {
     // One run per variant and type (the full fixture run, with timing reps and
     // every invariant, is minutes of software posit arithmetic at -O0).
     const auto f = S6e::captured();
@@ -139,14 +140,36 @@ TEST_CASE("S6e: the square-root update loses precision against Joseph in posit32
         const auto got = S6e::flatten(S6e::run<bn::Posit32>(in_p, variant));
         REQUIRE(ref.size() == got.size());
         double worst = 0.0;
-        for (std::size_t i = 0; i < ref.size(); ++i)
+        for (std::size_t i = 0; i < ref.size(); ++i) {
+            REQUIRE(std::isfinite(ref[i]));
+            REQUIRE(std::isfinite(got[i]));
             worst = std::max(worst, std::abs(got[i] - ref[i]));
+        }
         return worst;
     };
     const double dj = gap("shipped"), ds = gap("sqrt_array");
     INFO("Joseph " << dj << ", sqrt array " << ds);
     REQUIRE(dj < 1e-7);
-    REQUIRE(ds > 100.0 * dj);
+    REQUIRE(ds < 4.0 * dj);
+}
+
+TEST_CASE("S6e: re-factoring the covariance in a narrow type loses the clone directions", "[tools][bench][s6]") {
+    // The clone blocks are almost perfectly correlated with the IMU pose: their
+    // Schur-complement pivots are below float's resolution of P. Factoring P
+    // in float zeroes them — a different covariance — where double zeroes only
+    // the 6 exact ones cloning makes. A square-root filter must carry its factor.
+    const auto in_d = S6e::decode_input<double>(S6e::captured().input);
+    const auto in_f = S6e::decode_input<float>(S6e::captured().input);
+    auto zero_pivots = [](const auto& P) {
+        std::decay_t<decltype(P)> L;
+        REQUIRE(bn::psd_factor(P, L));
+        std::size_t z = 0;
+        for (std::size_t j = 0; j < L.rows; ++j)
+            z += L(j, j) == 0 ? 1 : 0;
+        return z;
+    };
+    REQUIRE(zero_pivots(in_d.state.cov.P) == 6);
+    REQUIRE(zero_pivots(in_f.state.cov.P) > 30);
 }
 
 TEST_CASE("S6 bench codecs reject malformed inputs", "[tools][bench][s6]") {

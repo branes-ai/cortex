@@ -257,18 +257,24 @@ The benches build on what is already there rather than replacing it at once:
 
 ## What the S6 benches found (#457)
 
-- **The update is not where yaw and global position gain information.** The projected Jacobian
-  annihilates the four unobservable directions to ≈1e-16 at the S2/S3-estimated state as well as at
-  the true one, and the update's information-form correction Hᵀ S⁻¹ r has no component along them. A
-  camera update evaluated at one consistent point is consistent by construction; the over-confidence
-  of #212 has to come from linearization points that drift apart across stages (S2's Φ), not from S6.
-- **The shipped χ² gate is loose at low dof.** It accepts γ ≤ 5·dof. Inliers are χ²-consistent
-  (NIS/dof inside the band at every dof), but at 1–3 dof the gate admits 59–70% of measurements biased
-  by 2σ, where a 95% χ² gate admits 22–44%. At 9 dof and above both reject them.
-- **The square-root update loses precision against Joseph in posits.** On the captured fixture the
-  QR array update lands 2.3e-6 from its double result in posit32 where the Joseph form lands 6.9e-9
-  (≈330×), and 0.038 against 3.4e-4 in posit16. In IEEE types both agree with K·r and P − K S Kᵀ to
-  roundoff.
+- **The update adds no information along yaw and global position at a consistent linearization
+  point.** The projected Jacobian annihilates the four unobservable directions to ≈1e-16 at the
+  S2/S3-estimated state as well as at the true one, and the update's information-form correction
+  Hᵀ S⁻¹ r has no component along them. That rules out this mechanism inside S6 on these fixtures; it
+  does not rule out other sources of the #212 over-confidence. Linearization points drifting apart
+  across stages are an identified one: the S2 bench measures a yaw leak in Φ (#455). Per-stage
+  attribution on a real run is #480.
+- **The shipped χ² gate is loose at low dof (#481).** It accepts γ ≤ 5·dof. Inliers are
+  χ²-consistent (NIS/dof inside the band at every dof), but at 1–3 dof the gate admits 59–70% of
+  measurements biased by 2σ, where a 95% χ² gate admits 22–44%. At 9 dof and above both reject them.
+- **A square-root filter must carry its factor (#482).** The clone blocks are almost perfectly
+  correlated with the IMU pose, so their Schur-complement pivots are below float's (and posit32's)
+  resolution of P: factoring P in those types zeroes 36 of 51 pivots, where double zeroes the 6 exact
+  ones cloning makes, and represents a different covariance. Measured that way, the square-root update
+  looked ≈330× less precise than Joseph in posit32. The `sqrt_array` variant therefore factors the
+  fixture's covariance in double and rounds the factor to T, as a filter that carried its factor
+  would hold it; then it lands within 1.3–2.3× of Joseph in every type. The S2 and S3 benches'
+  square-root variants still re-factor P in T (#482).
 - **Givens and Householder null spaces agree** (the same HᵀH to 1e-13), and **QR compression** of a
   72-row stack keeps n + 1 = 52 rows with the normal equations preserved to 1e-16: batched updates are
   numerically safe.

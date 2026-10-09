@@ -69,7 +69,8 @@ number fails. Epic #444 replaces it as the debugging instrument.
 		stage whose output moves between `double`, `posit<32,2>` and `float` is numerically fragile.
 		The bench framework already runs a stage in several types, today for the S0–S3, S5, S6 and
 		S9 benches (the S4 front end is not yet generic); S10's bench (#458) is planned. The S6 benches
-		found the square-root update losing ≈330× more precision than the Joseph form in posit32.
+		found that a square-root filter must carry its factor: re-factoring the covariance in float or
+		posit32 drops the clone directions.
 		[#448–#451](/debugging/mixed-precision/)
 	</Card>
 </CardGrid>
@@ -121,6 +122,7 @@ number fails. Epic #444 replaces it as the debugging instrument.
 | 4 | [#458](https://github.com/branes-ai/cortex/issues/458) | Stage benches: S9–S10 | planned; the S9 example bench is in place |
 | — | [#471](https://github.com/branes-ai/cortex/issues/471), [#472](https://github.com/branes-ai/cortex/issues/472) | Follow-ups: S2 invariant-propagator and higher-order Φ variants; S1 SfM front-end variants | planned |
 | — | [#474](https://github.com/branes-ai/cortex/issues/474), [#475](https://github.com/branes-ai/cortex/issues/475) | Found by the S4–S5 benches: KLT border churn; the synthetic world's velocity step | open |
+| — | [#480](https://github.com/branes-ai/cortex/issues/480), [#481](https://github.com/branes-ai/cortex/issues/481), [#482](https://github.com/branes-ai/cortex/issues/482) | Found by the S6 benches: attribute the #212 leak to S2/S3; the loose low-dof χ² gate; square-root variants must carry their factor | open |
 | 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | planned |
 | 6 | [#447](https://github.com/branes-ai/cortex/issues/447) | Composition benches, trajectory-level consistency, live-assertion mode | planned |
 | 7–9 | [#448](https://github.com/branes-ai/cortex/issues/448), [#449](https://github.com/branes-ai/cortex/issues/449), [#450](https://github.com/branes-ai/cortex/issues/450) | MTL5 port per stage; genericity over non-IEEE types; per-stage precision characterization | planned |
