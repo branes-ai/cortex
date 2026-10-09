@@ -37,6 +37,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -88,6 +89,10 @@ struct Fixture {
     std::string source;                 ///< generator, dataset + frame, or capture site
     std::uint64_t seed = 0;
     std::string description;
+    /// The variant the `expected` output was produced by or is valid for; ""
+    /// means every variant must reproduce it (an implementation-independent
+    /// known answer). A captured fixture records the variant that ran.
+    std::string variant;
     json input;
     json expected;
     json truth;
@@ -199,7 +204,10 @@ template <math::Scalar T>
             throw std::invalid_argument("fixture: rotation quaternion is not finite");
         n2 += x * x;
     }
-    const double eps = static_cast<double>(std::numeric_limits<T>::epsilon());
+    // Fixture numbers pass through double, so the norm is only unit to double
+    // precision even when T is wider (long double): floor ε at double's.
+    const double eps =
+        std::max(static_cast<double>(std::numeric_limits<T>::epsilon()), std::numeric_limits<double>::epsilon());
     if (std::abs(std::sqrt(n2) - 1.0) > 64.0 * eps)
         throw std::invalid_argument("fixture: rotation quaternion is not unit-norm");
     if (static_cast<double>(q[0]) < 0.0)
@@ -259,6 +267,8 @@ template <math::Scalar T>
     j["source"] = f.source;
     j["seed"] = f.seed;
     j["description"] = f.description;
+    if (!f.variant.empty())
+        j["variant"] = f.variant;
     j["input"] = f.input;
     if (!f.expected.is_null())
         j["expected"] = f.expected;
@@ -277,6 +287,7 @@ template <math::Scalar T>
     f.source = j.value("source", "");
     f.seed = j.value("seed", std::uint64_t{0});
     f.description = j.value("description", "");
+    f.variant = j.value("variant", "");
     f.input = j.at("input");
     f.expected = j.value("expected", json());
     f.truth = j.value("truth", json());
@@ -306,14 +317,19 @@ inline void save(const Fixture& f, const std::filesystem::path& path) {
 /// Build a captured fixture from a stage boundary: the stage's input and the
 /// output it produced, recorded in `arithmetic` (a type_name<T>()). This is the writer #446 calls
 /// from the running pipeline; benches call it to capture from a synthetic run.
-[[nodiscard]] inline Fixture
-capture(std::string stage, std::string arithmetic, std::string source, json input, json output) {
+[[nodiscard]] inline Fixture capture(std::string stage,
+                                     std::string arithmetic,
+                                     std::string source,
+                                     json input,
+                                     json output,
+                                     std::string variant = "shipped") {
     Fixture f;
     f.stage = std::move(stage);
     f.kind = FixtureKind::Captured;
     f.arithmetic = std::move(arithmetic);
     f.source = std::move(source);
     f.description = "captured stage boundary";
+    f.variant = std::move(variant);
     f.input = std::move(input);
     f.expected = std::move(output);
     return f;

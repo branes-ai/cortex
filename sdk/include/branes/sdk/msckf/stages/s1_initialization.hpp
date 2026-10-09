@@ -122,7 +122,9 @@ void seed_from_imu(State<T, Cov>& s,
     diag.method = method;
     diag.t_s = t;
     diag.up_body = g_meas > T{0} ? am * (T{1} / g_meas) : DVec3{};
-    diag.gravity_residual = (g_meas > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_meas - g_cfg) / g_cfg : T{1};
+    // Explicit narrowing: the diagnostic is double telemetry, T may be a posit.
+    diag.gravity_residual =
+        static_cast<double>((g_meas > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_meas - g_cfg) / g_cfg : T{1});
     diag.gyro_bias = res.gyro_bias;
     diag.accel_bias = res.accel_bias;
 }
@@ -157,7 +159,9 @@ void seed_from_alignment(State<T, Cov>& s,
     diag.method = InitMethod::Dynamic;
     diag.t_s = t;
     diag.up_body = s.R.inverse() * up_world;  // "up" in the current body frame
-    diag.gravity_residual = (g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1};
+    // Explicit narrowing: the diagnostic is double telemetry, T may be a posit.
+    diag.gravity_residual =
+        static_cast<double>((g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1});
     diag.gyro_bias = r.gyro_bias;
     diag.accel_bias = DVec3{};
     // Roll/pitch sanity: how far the seed's up disagrees with the mean

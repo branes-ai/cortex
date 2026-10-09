@@ -29,8 +29,10 @@ struct TypeList {};
 /// The default set: the reference first, then the types under study.
 using DefaultTypes = TypeList<double, float, Posit32>;
 
-/// Every type a bench knows how to name (for `--types` selection).
-using AllTypes = TypeList<double, float, Posit32, Posit16>;
+/// Every type a bench knows how to name (for `--types` selection). `long double`
+/// is the wider-than-double reference (80-bit extended on x86; equal to double
+/// on MSVC, where it still runs but adds no precision).
+using AllTypes = TypeList<double, float, Posit32, Posit16, long double>;
 
 /// Stable, CLI-friendly name of an arithmetic type ("double", "posit32", …).
 template <class T>
@@ -50,6 +52,10 @@ template <>
 template <>
 [[nodiscard]] constexpr std::string_view type_name<Posit16>() {
     return "posit16";
+}
+template <>
+[[nodiscard]] constexpr std::string_view type_name<long double>() {
+    return "long_double";
 }
 
 /// Call `f.template operator()<T>()` for each T in the list, in order.
