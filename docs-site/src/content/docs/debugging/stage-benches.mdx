@@ -6,7 +6,7 @@ description: The stage test-bench framework (#453) — one small executable per 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status">
-  The framework is in review in [PR #463](https://github.com/branes-ai/cortex/pull/463), with the
+  The framework is merged ([PR #463](https://github.com/branes-ai/cortex/pull/463)), with the
   S9_marginalization bench as its worked example. Benches for the other stages follow in
   [#454](https://github.com/branes-ai/cortex/issues/454)–[#458](https://github.com/branes-ai/cortex/issues/458).
   The developer reference is `docs/arch/stage-benches.md`.
@@ -93,7 +93,8 @@ type. This is real output:
 
 The same fixture in `float` reports `max |output − double output| ≈ 2e-7`, and every invariant
 still passes, because each threshold scaled to `float`'s ε. The bench exits non-zero on any failure,
-so it can gate CI.
+so it can gate CI. A run that executes nothing, for example an unknown `--types`, also fails rather
+than reporting a vacuous pass.
 
 ## A characterization sweep
 
