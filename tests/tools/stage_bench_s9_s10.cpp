@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -119,4 +120,28 @@ TEST_CASE("S9 and S10 committed fixture files load and pass", "[tools][bench][s9
             require_pass<S9>(
                 {name, bn::load(dir / "s9_marginalization" / (std::string(name) + ".json"))}, v.name, {"double"});
         }
+}
+
+TEST_CASE("captured fixtures replay bit-identically only on the platform that recorded them", "[tools][bench]") {
+    auto f = S10::captured();
+    REQUIRE(f.platform == bn::current_platform());
+    // save / load keeps the platform.
+    REQUIRE(bn::from_json(bn::to_json(f)).platform == f.platform);
+
+    // Same platform: the bit-identity contract.
+    auto same = bn::run_fixture<S10>({"same", f}, bn::kShipped, bn::bench_types<S10>(), {"double"});
+    REQUIRE(value_of(same, "replay.bit_identical") == 0.0);
+
+    // Another platform's recording, one value off by an ulp: reported, not failed.
+    f.platform = "elsewhere";
+    auto& q = f.expected.at("nis_sum");
+    q = bn::pack_num(std::nextafter(bn::unpack_num(q), 1e300));
+    const auto other = bn::run_fixture<S10>({"other", f}, bn::kShipped, bn::bench_types<S10>(), {"double"});
+    REQUIRE(other.pass());
+    REQUIRE(value_of(other, "replay.cross_platform_max_diff") > 0.0);
+    REQUIRE(value_of(other, "replay.same_shape_and_finiteness") == 0.0);
+
+    // ... but a value that is finite on one platform and not the other fails.
+    q = "nan";
+    REQUIRE_FALSE(bn::run_fixture<S10>({"nan", f}, bn::kShipped, bn::bench_types<S10>(), {"double"}).pass());
 }

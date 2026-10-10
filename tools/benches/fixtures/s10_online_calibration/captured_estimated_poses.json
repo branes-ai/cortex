@@ -7331,6 +7331,7 @@
   "trans_sigma": 0.02
  },
  "kind": "captured",
+ "platform": "glibc",
  "schema": "branes.vio.fixture/1",
  "seed": 0,
  "source": "synthetic_world (default config), S10 then S2/S3 estimated state; extrinsic 1 deg, 1 cm off",

@@ -166,8 +166,10 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
     // variant, when the fixture leaves `variant` empty).
     if (!f.expected.is_null() && binds_variant(f.variant, variant)) {
         const std::vector<double> want = B::template flatten<T>(B::template decode_output<T>(f.expected));
-        if (f.kind == FixtureKind::Captured && f.arithmetic == tr.type) {
-            // A captured fixture must replay to exactly the output it recorded.
+        if (f.kind == FixtureKind::Captured && f.arithmetic == tr.type &&
+            (f.platform.empty() || f.platform == current_platform())) {
+            // A captured fixture must replay to exactly the output it recorded —
+            // on the platform it was recorded on.
             std::size_t mismatched = want.size() == flat.size() ? 0 : std::max(want.size(), flat.size());
             if (want.size() == flat.size())
                 for (std::size_t i = 0; i < flat.size(); ++i)
@@ -178,6 +180,30 @@ run_type(const Fixture& f, std::string_view variant, const std::vector<double>& 
                                             B::kInvStage,
                                             "replay.bit_identical",
                                             "count"));
+        } else if (f.kind == FixtureKind::Captured && f.arithmetic == tr.type) {
+            // Recorded on another platform: its math library rounds sin, cos,
+            // exp … differently, so bit-identity is not the contract there. The
+            // invariants still run; the replay difference is reported.
+            double worst = 0.0;
+            std::size_t broken = want.size() == flat.size() ? 0 : std::max(want.size(), flat.size());
+            if (want.size() == flat.size())
+                for (std::size_t i = 0; i < flat.size(); ++i) {
+                    const double d = std::abs(flat[i] - want[i]);
+                    if (std::isfinite(d))
+                        worst = std::max(worst, d);
+                    else
+                        broken += std::isfinite(flat[i]) == std::isfinite(want[i]) ? 0 : 1;
+                }
+            // A shape change, or a value finite on one platform and not the
+            // other, is a failure anywhere.
+            tr.report.add(inv::check_scalar(static_cast<double>(broken),
+                                            0.0,
+                                            inv::Bound::Upper,
+                                            B::kInvStage,
+                                            "replay.same_shape_and_finiteness",
+                                            "count"));
+            tr.report.add(inv::check_scalar(
+                worst, 0.0, inv::Bound::Report, B::kInvStage, "replay.cross_platform_max_diff", "output units"));
         } else if (f.kind == FixtureKind::KnownAnswer) {
             double worst = want.size() == flat.size() ? 0.0 : inv::detail::kInf, scale = 1.0;
             if (want.size() == flat.size())

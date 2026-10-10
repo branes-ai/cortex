@@ -95,7 +95,11 @@ template <math::Scalar T>
     const Vec3t up_body_true = R_true.inverse() * Vec3t{{T{0}, T{0}, T{1}}};
 
     std::mt19937_64 rng(seed);
-    std::normal_distribution<T> na(T{0}, accel_noise_std), ng(T{0}, gyro_noise_std);
+    // Standard draws scaled by σ: identical to N(0, σ) for σ > 0, and valid for a
+    // noise-free run (σ = 0), which N(0, 0) is not (σ > 0 is its precondition).
+    std::normal_distribution<T> n01a(T{0}, T{1}), n01g(T{0}, T{1});
+    auto na = [&](auto& g) { return accel_noise_std * n01a(g); };
+    auto ng = [&](auto& g) { return gyro_noise_std * n01g(g); };
     std::vector<Vec3t> gyro(n), accel(n);
     const Vec3t sf = R_true.inverse() * (-g_world);  // stationary specific force
     for (std::size_t k = 0; k < n; ++k) {
@@ -182,7 +186,8 @@ make_dynamic_keyframes(const Vec3<T>& a_w, T scale_true, std::size_t n, T imu_no
     auto p_at = [&](T t) { return v0 * t + a_w * (T{0.5} * t * t); };
 
     std::mt19937_64 rng(seed);
-    std::normal_distribution<T> nz(T{0}, imu_noise);
+    std::normal_distribution<T> n01(T{0}, T{1});  // scaled by σ: valid for σ = 0
+    auto nz = [&](auto& g) { return imu_noise * n01(g); };
 
     SynthDyn<T> sd;
     sd.g_world = g_world;
