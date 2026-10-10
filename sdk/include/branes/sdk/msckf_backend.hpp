@@ -41,6 +41,7 @@
 #include <branes/sdk/imu_init.hpp>
 #include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
+#include <branes/sdk/msckf/stage_tap.hpp>
 #include <branes/sdk/msckf/stages.hpp>
 #include <branes/sdk/sfm/init_window.hpp>
 #include <branes/sdk/vio_backend.hpp>
@@ -49,6 +50,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -159,7 +161,7 @@ public:
             const double dt = imu.timestamp_s - last_imu_time_;
             if (!(dt > 0.0))
                 return;  // drop out-of-order / duplicate samples — don't touch filter time
-            msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, static_cast<T>(dt));
+            propagate(gyro, accel, static_cast<T>(dt));
         }
         last_imu_time_ = imu.timestamp_s;
         have_last_time_ = true;
@@ -190,10 +192,13 @@ public:
             if (dt < 0.0)
                 return;
             if (dt > 0.0) {
-                msckf::stages::s2_propagation::apply(state_, prop_, last_gyro_, last_accel_, static_cast<T>(dt));
+                propagate(last_gyro_, last_accel_, static_cast<T>(dt));
                 last_imu_time_ = timestamp_s;
             }
         }
+
+        if (stage_tap_)
+            stage_tap_->on_frame(timestamp_s);
 
         // S6 + S9: keep the window bounded — update with, then marginalize, the
         // oldest clone(s) before adding the new one.
@@ -201,7 +206,13 @@ public:
             marginalize_oldest();
 
         // S3: clone the (now frame-time) pose into the window.
-        msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+        if (wants(msckf::TapStage::S3_augmentation)) {
+            const auto before = state_;
+            const auto d = msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+            stage_tap_->on_s3(before, timestamp_s, d, state_);
+        } else {
+            msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+        }
 
         // S0 + S4: normalize this frame's observations onto their tracks.
         const auto ingest = msckf::stages::s4_frontend::apply<T>(
@@ -276,6 +287,15 @@ public:
                                               const msckf::DynMat<T>& cov_before)>;
     void set_update_observer(UpdateObserver observer) {
         update_observer_ = std::move(observer);
+    }
+
+    /// The stage-boundary tap (#446): the boundaries it wants (S0, S2, S3, S6,
+    /// S9) are reported with the state before and after. Non-owning — the tap
+    /// must outlive its use; nullptr (the default) turns it off, at the cost of
+    /// one null test per boundary.
+    using StageTap = msckf::StageTap<T, Cov>;
+    void set_stage_tap(StageTap* tap) noexcept {
+        stage_tap_ = tap;
     }
 
 private:
@@ -483,10 +503,27 @@ private:
         if (cam_id >= cameras_.size())
             return false;  // unknown camera — reject rather than alias to camera 0
         const auto n = msckf::stages::s0_sensor_model::apply(cameras_[cam_id].intrinsics, u, v);
+        if (wants(msckf::TapStage::S0_sensor_model))
+            stage_tap_->on_s0(cam_id, u, v, n);
         if (!n.valid)
             return false;  // the ray is not in front of the camera
         out = n.xy;
         return true;
+    }
+
+    [[nodiscard]] bool wants(msckf::TapStage stage) const {
+        return stage_tap_ != nullptr && stage_tap_->wants(stage);
+    }
+
+    // S2: one propagation step, reported to the tap when it asks.
+    void propagate(const DVec3& gyro, const DVec3& accel, T dt) {
+        if (wants(msckf::TapStage::S2_propagation)) {
+            const auto before = state_;
+            msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
+            stage_tap_->on_s2(before, prop_, gyro, accel, dt, state_);
+            return;
+        }
+        msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
     }
 
     // S4 → S5 → S6e: assemble feature `id`'s track from the observations whose
@@ -502,7 +539,12 @@ private:
             msckf::DynMat<T> cov_before;
             if (update_observer_)
                 cov_before = state_.covariance();
+            std::optional<msckf::State<T, Cov>> before;  // the tap's copy, only when it asks
+            if (wants(msckf::TapStage::S6_msckf_update))
+                before.emplace(state_);
             const auto upd = msckf::stages::s6_msckf_update::apply(state_, updater_, track);
+            if (before)
+                stage_tap_->on_s6(*before, updater_, id, track, upd, state_);
             if (upd.nis.valid) {  // record the innovation NIS even if it was gated out
                 nis_.add(static_cast<double>(upd.nis.value), static_cast<int>(upd.nis.dof));
                 innov_.add(static_cast<double>(upd.nis.innov_sum), upd.nis.dof);
@@ -521,7 +563,13 @@ private:
         const double old_time = state_.clones.front().timestamp;
         for (const std::uint64_t id : msckf::stages::s9_marginalization::tracks_touching(tracks_, old_time))
             update_and_erase(id);
-        msckf::stages::s9_marginalization::apply(state_, 0);
+        if (wants(msckf::TapStage::S9_marginalization)) {
+            const auto before = state_;
+            const auto d = msckf::stages::s9_marginalization::apply(state_, 0);
+            stage_tap_->on_s9(before, 0, d, state_);
+        } else {
+            msckf::stages::s9_marginalization::apply(state_, 0);
+        }
         msckf::stages::s9_marginalization::purge(tracks_, old_time);
     }
 
@@ -530,6 +578,7 @@ private:
     eval::ConsistencyAccumulator nis_{};            // per-update NIS, accumulated over the run
     eval::InnovationWhitenessAccumulator innov_{};  // per-update innovation mean/whiteness
     UpdateObserver update_observer_{};              // optional per-update inspector hook (#380); unset in production
+    StageTap* stage_tap_ = nullptr;                 // optional stage-boundary tap (#446); unset in production
     msckf::Propagator<T> prop_{};
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};

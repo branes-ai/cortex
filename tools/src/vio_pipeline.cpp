@@ -18,6 +18,8 @@
 //   ./vio_pipeline --sweep --out DIR               # noise level → robustness curve
 //   ./vio_pipeline --video --out DIR               # + per-frame scene + overlay data
 //   ./vio_pipeline --source euroc --dataset ROOT --video --out DIR
+//   ./vio_pipeline --source euroc --dataset ROOT --capture DIR --capture-nis 5
+//                                                  # stage boundaries → bench fixtures (#446)
 
 // stb_image_write generates its implementation in this TU; the define must
 // immediately precede the include (guard it so include-sorting can't split them).
@@ -34,6 +36,7 @@
 #include <branes/sdk/msckf_backend.hpp>
 #include <branes/sdk/sfm/init_window.hpp>  // so3_from_matrix
 #include <branes/sdk/vio_estimator.hpp>
+#include <branes/tools/bench/stage_recorder.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
 
 #include <cmath>
@@ -42,10 +45,13 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <numbers>
+#include <optional>
 #include <random>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -99,7 +105,42 @@ struct Args {
     std::string robot = "default";
     bool invariant = false;
     bool help = false;
+    // Stage capture (#446): fixtures written to capture_dir/<stage>/<name>.json.
+    std::string capture_dir;
+    branes::tools::bench::CaptureOptions capture;
 };
+
+/// A frame number: decimal digits only (std::stoull would accept "-1" and "13x").
+std::uint64_t parse_frame(std::string_view s) {
+    if (s.find_first_not_of("0123456789") != std::string_view::npos)
+        throw std::invalid_argument("--capture-frames: '" + std::string(s) + "' is not a frame number");
+    return std::stoull(std::string(s));
+}
+
+/// "A:B" → [A, B] (either side may be empty: open-ended).
+void parse_frame_range(std::string_view r, branes::tools::bench::CaptureOptions& c) {
+    const auto colon = r.find(':');
+    const auto a = r.substr(0, colon);
+    const auto b = colon == std::string_view::npos ? a : r.substr(colon + 1);
+    if (!a.empty())
+        c.first_frame = parse_frame(a);
+    if (!b.empty())
+        c.last_frame = parse_frame(b);
+}
+
+/// "S2_propagation,S6d_gating" → the stage list.
+std::vector<std::string> split_commas(std::string_view list) {
+    std::vector<std::string> out;
+    while (!list.empty()) {
+        const auto comma = list.find(',');
+        if (comma != 0)
+            out.emplace_back(list.substr(0, comma));
+        if (comma == std::string_view::npos)
+            break;
+        list.remove_prefix(comma + 1);
+    }
+    return out;
+}
 
 Args parse(int argc, char** argv) {
     Args a;
@@ -128,8 +169,49 @@ Args parse(int argc, char** argv) {
             }
         } else if (v == "--robot" && next_is_value())
             a.robot = argv[++i];
+        else if (v == "--capture" && next_is_value())
+            a.capture_dir = argv[++i];
+        else if (v == "--capture-stages" && next_is_value())
+            a.capture.stages = split_commas(argv[++i]);
+        else if (v == "--capture-frames" && next_is_value())
+            parse_frame_range(argv[++i], a.capture);
+        else if (v == "--capture-nis" && next_is_value())
+            a.capture.nis_per_dof_above = std::stod(argv[++i]);
+        else if (v == "--capture-first-violation")
+            a.capture.first_violation = true;
+        else if (v == "--capture-max" && next_is_value())
+            a.capture.max_fixtures = std::stoull(argv[++i]);
     }
     return a;
+}
+
+using Recorder = branes::tools::bench::StageRecorder<T>;
+
+/// The stage recorder for a run, or null when --capture is not set. EuRoC and
+/// the synthetic world both use a 752×480 image.
+std::unique_ptr<Recorder>
+make_recorder(const Args& args, std::string source, const branes::math::cameras::PinholeRadtanCamera<T>& camera) {
+    if (args.capture_dir.empty())
+        return nullptr;
+    auto opt = args.capture;
+    opt.source = std::move(source);
+    return std::make_unique<Recorder>(
+        opt, std::vector{Recorder::intrinsics_of(camera, 752.0, 480.0)}, Recorder::write_to(args.capture_dir));
+}
+
+void report_capture(const Recorder* rec, const std::string& dir) {
+    if (!rec)
+        return;
+    const auto& st = rec->stats();
+    std::cout << "  capture         : " << st.fixtures << " fixtures from " << st.boundaries << " boundaries -> " << dir
+              << "/<stage>/";
+    if (st.first_violation_frame)
+        std::cout << "  (first invariant violation at frame " << *st.first_violation_frame << ")";
+    if (st.chain_mismatches)
+        std::cout << "\n  WARNING: " << st.chain_mismatches << " S6 boundaries did not reproduce the run";
+    if (st.skipped)
+        std::cout << "\n  skipped         : " << st.skipped << " S6 boundaries (multi-camera)";
+    std::cout << "\n";
 }
 
 double norm3(const Vec3& a) {
@@ -413,7 +495,8 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
                         const Args& args,
                         std::ofstream* traj,
                         std::ofstream* stream,
-                        std::ofstream* frames) {
+                        std::ofstream* frames,
+                        Recorder* rec = nullptr) {
     using Cal = MsckfBackend<T>::CameraCalibration;
     Cal cal;
     cal.intrinsics = w.camera;
@@ -421,6 +504,7 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
     cal.extrinsics.p_imu_cam = w.p_imu_cam;
     MsckfBackend<T> backend(std::vector<Cal>{cal});
     backend.initialize(cfg);
+    backend.set_stage_tap(rec);
 
     const double imu_dt = 1.0 / 200.0;
     const double sg = cfg.gyro_noise_density / std::sqrt(imu_dt) * ns;
@@ -487,7 +571,12 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
 
 // ── EuRoC source (real images through the KLT front end) ───────────────────
 // Gated: returns false (with a hint) when the dataset is absent/unreadable.
-bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofstream* stream, std::ofstream* frames) {
+bool run_euroc(const Args& args,
+               const VioConfig& cfg,
+               RunResult& out,
+               std::ofstream* stream,
+               std::ofstream* frames,
+               Recorder* rec = nullptr) {
     using Backend = MsckfBackend<T>;
     using Estimator = branes::sdk::VioEstimator<T, Backend>;
 
@@ -518,6 +607,7 @@ bool run_euroc(const Args& args, const VioConfig& cfg, RunResult& out, std::ofst
     Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
     est.configure(cfg);
     est.activate();
+    est.backend().set_stage_tap(rec);
 
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
@@ -662,7 +752,13 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
 }  // namespace
 
 int main(int argc, char** argv) {
-    const Args args = parse(argc, argv);
+    Args args;
+    try {
+        args = parse(argc, argv);
+    } catch (const std::exception& e) {  // a malformed --capture-* number
+        std::cerr << "vio_pipeline: bad argument: " << e.what() << "\n";
+        return 2;
+    }
     if (args.help) {
         std::cout
             << "vio_pipeline — end-to-end VIO noise->robustness demo\n"
@@ -673,9 +769,18 @@ int main(int argc, char** argv) {
                "  --sweep                    noise level -> robustness curve (synthetic)\n"
                "  --video                    emit per-frame scene + overlay data (frames.jsonl)\n"
                "  --invariant                use the Right-Invariant EKF (R-IEKF) backend instead of standard MSCKF\n"
-               "  --robot ground|drone       motion aggressiveness (synthetic)\n";
+               "  --robot ground|drone       motion aggressiveness (synthetic)\n"
+               "  --capture DIR              capture MSCKF stage boundaries as bench fixtures (DIR/<stage>/)\n"
+               "  --capture-stages LIST      comma-separated fixture stages (default: all capturable)\n"
+               "  --capture-frames A:B       post-init frame range, inclusive (default: all)\n"
+               "  --capture-nis X            trigger: capture S6 updates with NIS/dof above X\n"
+               "  --capture-first-violation  trigger: capture the first boundary failing its bench\n"
+               "  --capture-max N            stop after N fixtures (default 100000)\n";
         return 0;
     }
+    if (!args.capture_dir.empty() && (args.invariant || args.sweep))
+        std::cerr
+            << "vio_pipeline: --capture taps the MSCKF backend's single run; ignored with --invariant / --sweep\n";
     // Create the output directory up front — otherwise ofstream::open() fails
     // silently and no artifacts are written.
     if (!args.out.empty()) {
@@ -700,8 +805,13 @@ int main(int argc, char** argv) {
         auto stream = open("run.jsonl");
         auto frames = args.video ? open("frames.jsonl") : std::ofstream{};
         RunResult r;
-        const bool ok = args.invariant ? run_euroc_invariant(args, VioConfig{}, r, &stream)
-                                       : run_euroc(args, VioConfig{}, r, &stream, args.video ? &frames : nullptr);
+        const auto rec =
+            args.invariant ? nullptr : make_recorder(args, "EuRoC " + args.dataset, euroc_cam0().intrinsics);
+        const bool ok = args.invariant
+                            ? run_euroc_invariant(args, VioConfig{}, r, &stream)
+                            : run_euroc(args, VioConfig{}, r, &stream, args.video ? &frames : nullptr, rec.get());
+        if (rec)
+            rec->finish();
         if (!ok)
             return 0;
         const char* backend = args.invariant ? "euroc [R-IEKF]" : "euroc [MSCKF]";
@@ -716,6 +826,7 @@ int main(int argc, char** argv) {
         std::cout << "\n";
         if (args.video && !args.invariant)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
+        report_capture(rec.get(), args.capture_dir);
         return 0;
     }
 
@@ -748,17 +859,30 @@ int main(int argc, char** argv) {
             traj << "t,gt_x,gt_y,gt_z,est_x,est_y,est_z,pos_err,n_feat\n";
         auto stream = open("run.jsonl");
         auto frames = args.video ? open("frames.jsonl") : std::ofstream{};
+        std::ostringstream src;
+        src << "synthetic_world (robot=" << args.robot << ", noise x" << args.noise << ", seed 0xC0FFEE)";
+        const auto rec = args.invariant ? nullptr : make_recorder(args, src.str(), world.camera);
         const RunResult r =
-            args.invariant
-                ? run_synthetic_invariant(
-                      world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr)
-                : run_synthetic(world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr);
+            args.invariant ? run_synthetic_invariant(
+                                 world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr)
+                           : run_synthetic(world,
+                                           cfg,
+                                           args.noise,
+                                           0xC0FFEE,
+                                           args,
+                                           &traj,
+                                           &stream,
+                                           args.video ? &frames : nullptr,
+                                           rec.get());
+        if (rec)
+            rec->finish();
         std::cout << "\n  noise scale     : " << args.noise << "\n  frames tracked  : " << r.frames
                   << "\n  mean features   : " << r.mean_features << "\n  ATE (RMS pos)   : " << r.ate_rms_m
                   << " m\n  final pos error : " << r.final_err_m << " m\n  NIS (normalized): " << r.nis_normalized
                   << "  (1 = consistent)\n";
         if (args.video)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
+        report_capture(rec.get(), args.capture_dir);
     }
     if (!args.out.empty())
         std::cout << "\n  artifacts in " << args.out << "/\n";

@@ -55,9 +55,9 @@ number fails. Epic #444 replaces it as the debugging instrument.
 		[#453](/debugging/stage-benches/)
 	</Card>
 	<Card title="Real runs become fixtures" icon="document">
-		*Planned.* Any moment of a real EuRoC run will be capturable at a stage boundary and
-		replayable bit for bit in that stage's bench. The fixture format and its bit-exact replay
-		check already exist. [#446](/debugging/capture-and-composition/)
+		Any moment of a run, synthetic or EuRoC, is capturable at a stage boundary (by stage, frame
+		range, NIS spike or first invariant violation) and replays bit for bit in that stage's bench.
+		[#446](/debugging/capture-and-composition/)
 	</Card>
 	<Card title="The loop is checked as a loop" icon="random">
 		*Planned.* Composition benches and trajectory-level checks will confirm that a fix fixes the
@@ -119,11 +119,11 @@ number fails. Epic #444 replaces it as the debugging instrument.
 | 4 | [#455](https://github.com/branes-ai/cortex/issues/455) | Stage benches: S2–S3 (propagation, augmentation) | **done**: [PR #470](https://github.com/branes-ai/cortex/pull/470) |
 | 4 | [#456](https://github.com/branes-ai/cortex/issues/456) | Stage benches: S4–S5 (frontend, triangulation) | **done**: [PR #473](https://github.com/branes-ai/cortex/pull/473) |
 | 4 | [#457](https://github.com/branes-ai/cortex/issues/457) | Stage benches: S6a–S6e (the MSCKF update) | **done**: [PR #479](https://github.com/branes-ai/cortex/pull/479) |
-| 4 | [#458](https://github.com/branes-ai/cortex/issues/458) | Stage benches: S9 policies, S10 (online calibration) | **in review** |
+| 4 | [#458](https://github.com/branes-ai/cortex/issues/458) | Stage benches: S9 policies, S10 (online calibration) | **done**: [PR #484](https://github.com/branes-ai/cortex/pull/484) |
 | — | [#471](https://github.com/branes-ai/cortex/issues/471), [#472](https://github.com/branes-ai/cortex/issues/472) | Follow-ups: S2 invariant-propagator and higher-order Φ variants; S1 SfM front-end variants | planned |
 | — | [#474](https://github.com/branes-ai/cortex/issues/474), [#475](https://github.com/branes-ai/cortex/issues/475) | Found by the S4–S5 benches: KLT border churn; the synthetic world's velocity step | open |
 | — | [#480](https://github.com/branes-ai/cortex/issues/480), [#481](https://github.com/branes-ai/cortex/issues/481), [#482](https://github.com/branes-ai/cortex/issues/482) | Found by the S6 benches: attribute the #212 leak to S2/S3; the loose low-dof χ² gate; square-root variants must carry their factor | open |
-| 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | planned |
+| 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | **in review** |
 | 6 | [#447](https://github.com/branes-ai/cortex/issues/447) | Composition benches, trajectory-level consistency, live-assertion mode | planned |
 | 7–9 | [#448](https://github.com/branes-ai/cortex/issues/448), [#449](https://github.com/branes-ai/cortex/issues/449), [#450](https://github.com/branes-ai/cortex/issues/450) | MTL5 port per stage; genericity over non-IEEE types; per-stage precision characterization | planned |
 | 10 | [#451](https://github.com/branes-ai/cortex/issues/451) | MTL5 gap register, gaps filed upstream | planned |

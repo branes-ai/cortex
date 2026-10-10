@@ -68,7 +68,7 @@ A fixture is a stage's input plus whatever its output is judged against. There a
 |---|---|---|---|
 | `known_answer` | synthetic | `expected`: an analytic output, computed independently of the stage | by hand, in the bench |
 | `ground_truth` | built with truth injected upstream (#266) | `truth`: the true values the output must reproduce | a synthetic world run with the mean reset to truth |
-| `captured` | a recorded stage boundary | `expected`: the output the stage produced in that run | `capture(...)` at the boundary; from real runs via #446 |
+| `captured` | a recorded stage boundary | `expected`: the output the stage produced in that run | `capture(...)` at the boundary; from any run via the stage recorder (#446, below) |
 
 The runner adds two checks to the stage's own invariants:
 
@@ -296,6 +296,53 @@ The benches build on what is already there rather than replacing it at once:
 - Fixture expected outputs can now bind a list of variants (`"shipped,direct_gather"`), and the S9
   ground truth lists every clone's pose keyed by time, so policy variants are checked against it.
 - The filter has no time-offset state, so the issue's t_d sweep has nothing to vary.
+
+## Capturing fixtures from a running filter (#446)
+
+`MsckfBackend<T>::set_stage_tap(tap)` reports the boundaries a `msckf::StageTap<T, Cov>`
+(`sdk/include/branes/sdk/msckf/stage_tap.hpp`) asks for: S0 per pixel, S2 per step, S3, S6 per
+feature track, S9. Each report carries the state before, the stage's inputs and diagnostics, and the
+state after. The tap is non-owning; unset, each boundary costs one null test. Only a boundary the tap
+`wants` copies the state.
+
+`bench::StageRecorder<T>` (`tools/include/branes/tools/bench/stage_recorder.hpp`) is the tap that
+writes fixtures:
+
+- **S0, S2, S3, S9:** one captured fixture per boundary (S0: one per frame and camera). The expected
+  output is the run's own (the state after, the bearings).
+- **S6:** the recorder recomputes the track's chain on the state before with the same stage
+  functions. That yields fixtures for S5, S6a, S6b, S6c, S6d and S6e, as far as the track got. S6d
+  records the run's gate decision and NIS; S6e records the run's covariance after. The recomputed
+  outcome, NIS and state after are compared with the run's bit for bit. A mismatch is counted in
+  `stats().chain_mismatches`.
+- **Selection** (`CaptureOptions`): stages, a post-init frame range, and triggers (`nis_per_dof_above`,
+  `first_violation`). With a trigger set, only boundaries it fires on are captured. First-violation
+  evaluation runs each candidate's fixtures through their benches in T, so it is slow and opt-in.
+- **Sink:** fixtures are kept in memory (`fixtures()`), or written as `DIR/<stage>/<name>.json`
+  (`write_to(DIR)`). Names are `f<frame>_<stage>[_<tag>]`; `source` names the run, frame, time and
+  feature.
+
+`vio_pipeline --capture DIR [--capture-stages LIST] [--capture-frames A:B] [--capture-nis X]
+[--capture-first-violation] [--capture-max N]` wires it into the synthetic and EuRoC MSCKF runs.
+`tests/tools/stage_capture.cpp` covers the following:
+
+- every captured fixture replays bit-identically;
+- written files load;
+- the triggers select exactly what they name;
+- a tap that captures nothing, or everything, leaves the run bit-identical.
+
+Not tapped: S1, S4 (`asl_trace` covers S4), S10; multi-camera S6 boundaries are skipped.
+
+**Found by capture.**
+
+- **S5's `triangulation.resolved` treats a correct rejection as a violation.** In the synthetic run
+  with 0.5 px noise, the first violation, within three frames of initialization, is a two-view edge
+  track (0.74° parallax). Its rays meet 6 cm behind the cameras, and every S5 method rejects it.
+- **The S6d `innovation.symmetric` tolerance was scaled by |S|.** H·P·Hᵀ cancels, so its rounding
+  follows |H|·|P|·|H|ᵀ. It is now scaled by that magnitude; a captured update showed a 3.8e-18
+  asymmetry against a 3.6e-19 bound.
+- S0 capture runs into the synthetic camera's 1000× p₂ (#467). The recorder takes the backend's
+  camera through `intrinsics_of`, never a copy of EuRoC's values.
 
 ## Alternative triangulation methods (S5)
 

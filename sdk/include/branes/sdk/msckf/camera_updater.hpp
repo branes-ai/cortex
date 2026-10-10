@@ -326,6 +326,11 @@ public:
         return opts_;
     }
 
+    /// The per-camera extrinsics the updater was built with (indexed by camera id).
+    [[nodiscard]] const std::vector<Extrinsics>& cameras() const noexcept {
+        return cameras_;
+    }
+
     /// Update with a batch of tracks, returning how many were applied.
     template <class Cov>
     std::size_t update_all(State<T, Cov>& s, std::span<const FeatureTrack<T>> tracks) const {
