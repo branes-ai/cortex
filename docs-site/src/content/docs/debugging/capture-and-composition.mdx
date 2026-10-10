@@ -125,9 +125,9 @@ turned up two things the stage benches' own fixtures had not:
   with |H|·|P|·|H|ᵀ instead; a real update showed 3.8e-18. The bench now scales the tolerance by the
   products' magnitude.
 
-It also showed that the synthetic world's EuRoC camera carries a tangential coefficient
-p₂ = 0.0176, 1000× EuRoC's 1.76e-5. The world and the filter share that camera, so synthetic runs
-are self-consistent, but they are not EuRoC's distortion.
+S0 capture also runs into the synthetic camera's p₂, which is 1000× EuRoC's
+([#467](https://github.com/branes-ai/cortex/issues/467)). The recorder therefore takes the
+backend's camera through `intrinsics_of`, never a copy of EuRoC's values.
 
 ## The loop is checked as a loop (#447)
 

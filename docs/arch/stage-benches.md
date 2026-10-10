@@ -341,8 +341,8 @@ Not tapped: S1, S4 (`asl_trace` covers S4), S10; multi-camera S6 boundaries are 
 - **The S6d `innovation.symmetric` tolerance was scaled by |S|.** H·P·Hᵀ cancels, so its rounding
   follows |H|·|P|·|H|ᵀ. It is now scaled by that magnitude; a captured update showed a 3.8e-18
   asymmetry against a 3.6e-19 bound.
-- **The synthetic world's camera has p₂ = 176187114 / 1e10 = 0.0176**, 1000× EuRoC's 1.76e-5. The
-  world and the filter share it, so synthetic runs stay self-consistent.
+- S0 capture runs into the synthetic camera's 1000× p₂ (#467). The recorder takes the backend's
+  camera through `intrinsics_of`, never a copy of EuRoC's values.
 
 ## Alternative triangulation methods (S5)
 
