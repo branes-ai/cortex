@@ -344,6 +344,64 @@ Not tapped: S1, S4 (`asl_trace` covers S4), S10; multi-camera S6 boundaries are 
 - S0 capture runs into the synthetic camera's 1000× p₂ (#467). The recorder takes the backend's
   camera through `intrinsics_of`, never a copy of EuRoC's values.
 
+## The loop: composition bench, live assertion, trajectory report (#447)
+
+**Composition bench.** `c_filter_loop_bench` (`tools/include/branes/tools/bench/c_filter_loop_bench.hpp`)
+runs a tape of `Op`s (S2 step, S3 clone, S6 track, S9 index), recorded in backend order from a
+starting state, through the shipped stage functions.
+
+- **Per-operation checks:** each op's stage-bench invariants are evaluated on the loop's own input
+  and output for that op, reported as `<stage>.<invariant>`. The first violation leads the report,
+  and its op index is `loop.first_violating_op`.
+- **Loop results:**
+  - final covariance symmetric and PSD;
+  - `loop.unobservable_leak_{max,mean}`: per applied update, ‖H₀N̂‖²/‖H₀‖² with N̂ the orthonormalized
+    unobservable basis at its linearization point;
+  - `loop.nis_per_dof`;
+  - ground truth: `truth.nav_nees` on the final nav state (bound χ²₀.₉₉₉(15) = 37.7).
+- **Fixtures** (`tools/benches/fixtures/c_filter_loop/`):
+  - known answer: constant velocity, exact observations, P₀ = 0, Q = 0, so P stays 0 and NIS is 0;
+  - ground truth: a synthetic tape over post-init frames 16–18, its mean reset to truth;
+  - captured: the same tape, replayed bit for bit.
+- **Types:** all pass in double, float, posit32 and long double.
+- **Fault variants:** `fault_s3_clone_jacobian` and `fault_s6a_jacobian` are caught first at
+  `S3_augmentation.augmentation.blocks` and `S6a_jacobians.jacobian.state_vs_fd`.
+- **Capturing a loop:** `LoopTape<T>` (a `StageTap`) records a tape from any run;
+  `vio_pipeline --capture DIR --capture-loop A:B` writes `DIR/C_filter_loop/loop.json`. The bench's
+  stage name is `C_filter_loop`; it is a composition, not a pipeline stage.
+- **Several taps at once:** `StageTapFanout<T>` sets several taps on one backend.
+
+**Live assertion.** `vio_pipeline --live-assert [--capture DIR]` uses the stage recorder's
+first-violation trigger. It reports `CaptureStats::first_violation`: stage, frame, time, invariant,
+value and bound. The tap is never set in normal builds, whose outputs are byte-identical to `main`
+(synthetic `trajectory.csv`, `run.jsonl`, stdout). On V1_01 and on the synthetic world, the first
+violation is #487.
+
+**Trajectory report.** `vio_trajectory_report --dataset <mav0> --label NAME --out DIR` writes
+`NAME_report.json` and `NAME_windows.csv` (10 s windows):
+
+- NEES, gauge-anchored, overall and per block;
+- NIS;
+- the update leak, with H₀ recomputed from the S6 tap's state before;
+- position-σ growth and the fraction of frames beyond 3σ;
+- ATE, and RPE over 1 s.
+
+| | V1_01 | MH_05 | V2_03 |
+|---|---|---|---|
+| ATE / RPE(1 s), m | 0.289 / 0.093 | 0.755 / 0.246 | 0.269 / 0.117 |
+| NEES/dof (attitude, position, velocity blocks) | 436 (993, 3.96, 19.9) | 42.8 (73.1, 55.2, 47.5) | 140 (214, 9.71, 63.6) |
+| NIS/dof | 1.51 | 2.16 | 14.7 |
+| update leak, max | 9.0e-32 | 6.5e-32 | 1.0e-31 |
+| position error > 3σ | 15 % | 81 % | 50 % |
+
+**Found.**
+
+- **No camera update adds information along the unobservable directions** (0 of 79 866 updates above
+  1e-6). This confirms #480 on EuRoC: the over-confidence is not created by S6. The composition bench
+  puts S2's `observability.yaw_leak` at up to about 2e-6 per step.
+- **S6d `nis.matches_direct` was |S|-scaled.** The filter forms its own S, so it is now scaled by the
+  products |H|·|P|·|H|ᵀ (3.6e-15 against 2.2e-15 on a captured loop).
+
 ## Alternative triangulation methods (S5)
 
 `stages::s5_triangulation::apply(state, updater, track, method)` runs a candidate instead of the

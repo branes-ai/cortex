@@ -60,8 +60,9 @@ number fails. Epic #444 replaces it as the debugging instrument.
 		[#446](/debugging/capture-and-composition/)
 	</Card>
 	<Card title="The loop is checked as a loop" icon="random">
-		*Planned.* Composition benches and trajectory-level checks will confirm that a fix fixes the
-		*system*, because over-confidence is a property of the cycle.
+		The filter loop is benched as a tape of stage operations, every boundary is checked live in a
+		full run, and a trajectory report measures NEES, NIS and the update leak against EuRoC ground
+		truth, because over-confidence is a property of the cycle.
 		[#447](/debugging/capture-and-composition/)
 	</Card>
 	<Card title="Mixed precision is a diagnostic" icon="seti:config">
@@ -123,8 +124,9 @@ number fails. Epic #444 replaces it as the debugging instrument.
 | — | [#471](https://github.com/branes-ai/cortex/issues/471), [#472](https://github.com/branes-ai/cortex/issues/472) | Follow-ups: S2 invariant-propagator and higher-order Φ variants; S1 SfM front-end variants | planned |
 | — | [#474](https://github.com/branes-ai/cortex/issues/474), [#475](https://github.com/branes-ai/cortex/issues/475) | Found by the S4–S5 benches: KLT border churn; the synthetic world's velocity step | open |
 | — | [#480](https://github.com/branes-ai/cortex/issues/480), [#481](https://github.com/branes-ai/cortex/issues/481), [#482](https://github.com/branes-ai/cortex/issues/482) | Found by the S6 benches: attribute the #212 leak to S2/S3; the loose low-dof χ² gate; square-root variants must carry their factor | open |
-| 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | **in review** |
-| 6 | [#447](https://github.com/branes-ai/cortex/issues/447) | Composition benches, trajectory-level consistency, live-assertion mode | planned |
+| 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | **done**: [PR #486](https://github.com/branes-ai/cortex/pull/486) |
+| 6 | [#447](https://github.com/branes-ai/cortex/issues/447) | Composition benches, trajectory-level consistency, live-assertion mode | **in review** |
+| — | [#487](https://github.com/branes-ai/cortex/issues/487) | Found by capture: S5 counts a correct triangulation rejection as a violation | open |
 | 7–9 | [#448](https://github.com/branes-ai/cortex/issues/448), [#449](https://github.com/branes-ai/cortex/issues/449), [#450](https://github.com/branes-ai/cortex/issues/450) | MTL5 port per stage; genericity over non-IEEE types; per-stage precision characterization | planned |
 | 10 | [#451](https://github.com/branes-ai/cortex/issues/451) | MTL5 gap register, gaps filed upstream | planned |
 | — | [#461](https://github.com/branes-ai/cortex/issues/461) | sqrt-covariance update overflow, found by the method | open |

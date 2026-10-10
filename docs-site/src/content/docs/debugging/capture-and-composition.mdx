@@ -6,13 +6,15 @@ description: Turning moments of real runs into replayable stage fixtures (#446),
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status">
-  Capture ([#446](https://github.com/branes-ai/cortex/issues/446)) is **done**: a running MSCKF
-  writes stage-boundary fixtures that replay bit for bit in their benches. Composition
-  ([#447](https://github.com/branes-ai/cortex/issues/447)) is planned.
+  Both steps are **done**: capture ([#446](https://github.com/branes-ai/cortex/issues/446)) and the
+  loop checks ([#447](https://github.com/branes-ai/cortex/issues/447)). A running MSCKF writes
+  stage-boundary fixtures that replay bit for bit. The loop is benched as a tape of stage operations,
+  checked live, and reported against EuRoC ground truth.
 </Aside>
 
 Stage benches localize a fault. Two things were missing: real data inside the benches, and
-evidence that a fix localized in a bench also fixes the system. Capture supplies the first.
+evidence that a fix localized in a bench also fixes the system. Capture supplies the first; the
+loop checks supply the second.
 
 ## Real runs become fixtures (#446)
 
@@ -131,38 +133,130 @@ backend's camera through `intrinsics_of`, never a copy of EuRoC's values.
 
 ## The loop is checked as a loop (#447)
 
-Some failures only emerge from stages running together. The over-confidence is the main example.
-S0 and S2 pass in isolation, and the leading suspects are properties of the loop:
+Some failures only emerge from stages running together, and over-confidence is the main example.
+The stage benches localize a fault; this layer confirms that a fix fixes the system. It has three
+parts: the composition bench, live assertion, and a trajectory-level report.
 
-- the S6 update;
-- S10 calibration;
-- observability over repeated cycles.
+### The composition bench
 
-So a thin composition and trajectory-level layer sits above the stage benches. **The benches
-localize faults; this layer confirms a fix fixes the system.**
+`c_filter_loop_bench` runs the loop itself: a **tape** of stage operations in the order the backend
+ran them, from a starting state, through the shipped stage functions.
 
-- **Composition benches** run the filter loop on fixed fixtures, propagate → augment → update →
-  marginalize, for a single cycle and for N cycles. Stage and loop invariants are checked at every
-  boundary.
-- **Trajectory-level checks** cover:
-  - NEES and NIS over windows (#264);
-  - the 4-dimensional unobservable subspace preserved across whole runs;
-  - ATE and RPE.
-- **Live-assertion mode** is a debug-instrumented build that evaluates the
-  [invariants](/debugging/invariants/) at every stage boundary during a full run. It reports the
-  first violating stage and frame (`InvariantReport::first_failure`), and can trigger a capture of
-  exactly that boundary as a fixture.
+```text
+S2 … S2 → [S6 per track on the oldest clone → S9] → S3 → S6 per ended track → S2 …
+```
+
+At every operation, that operation's own stage contract is checked: the stage bench's invariants,
+evaluated on the loop's input and output for it. A fault is therefore attributed to the stage that
+introduced it. The report names each result `<stage>.<invariant>`, puts the first violation first,
+and gives its operation index (`loop.first_violating_op`).
+
+Loop-level results cover what no single stage owns:
+
+| Result | What it is |
+|---|---|
+| `loop.covariance_symmetric`, `loop.covariance_psd` | the covariance the loop ends with |
+| `loop.unobservable_leak_max`, `_mean` | per applied update, the share of the information it adds along the four unobservable directions, ‖H₀N̂‖²/‖H₀‖² |
+| `loop.nis_per_dof` | over the loop's updates |
+| `truth.nav_nees` | ground truth: the final nav state's NEES (15 dof), bound χ²₀.₉₉₉ = 37.7 |
+
+Its fixtures are the three kinds every bench has:
+
+| Fixture | Input | Judged against |
+|---|---|---|
+| `known_answer_constant_velocity` | constant velocity, exact observations, P₀ = 0, Q = 0: 68 operations through S2, S3, S5–S6e and S9 | the mean follows the motion exactly, P stays 0, every NIS is 0 |
+| `ground_truth_synthetic_three_frames` | a synthetic run's tape (post-init frames 16–18), its starting mean reset to truth | NEES of the final nav state |
+| `captured_synthetic_three_frames` | the same tape from the run's own state | the run's final state and per-update NIS, bit for bit |
+
+All three pass in double, float, `posit<32,2>` and long double. The sweep runs 1 to 16 cycles.
+
+**Injected faults are caught where they are injected.** Two variants inject a defect into one stage:
+
+- `fault_s3_clone_jacobian` perturbs the new clone's cross-covariance. The first violation is
+  `S3_augmentation.augmentation.blocks`, at the first S3 operation.
+- `fault_s6a_jacobian` scales a clone-rotation block of H_x by 1.5. The first violation is
+  `S6a_jacobians.jacobian.state_vs_fd`, the finite-difference check, at the first S6 operation.
+
+**Capture a loop from any run.** `LoopTape<T>` is a stage tap (#446) that records the tape:
+
+```bash
+./build/tools/vio_pipeline --source euroc --dataset .../V1_01_easy/mav0 --capture cap/ --capture-loop 100:102
+./build/tools/c_filter_loop_bench --fixture cap/C_filter_loop/loop.json
+```
+
+A V1_01 loop over frames 100–102 (38 operations) replays bit for bit and satisfies every stage and
+loop invariant.
+
+### Live assertion
+
+`vio_pipeline --live-assert` checks every stage boundary of a full run against its bench, as it
+happens. It reports the first violation: stage, frame, invariant, value and bound. With `--capture`
+it also writes that boundary as a fixture.
+
+```text
+live assertion  : FIRST VIOLATION S5_triangulation, frame 4 (t=1.40372e+09 s), triangulation.resolved = 0 (bound 1)
+```
+
+It is the stage recorder (#446) with the first-violation trigger, so nothing new runs on the
+filter's path. A normal build never sets a tap, and its outputs are byte-identical to `main`. On
+V1_01 and on the synthetic world, the first violation is the S5 contract problem filed as
+[#487](https://github.com/branes-ai/cortex/issues/487): a two-view track whose rays diverge,
+correctly rejected and still counted as a failure. Until #487 is fixed, live assertion stops there.
+
+A test checks the attribution on a running filter. A fault injected into S3 at post-init frame 0
+is reported as `S3_augmentation`, frame 0.
+
+### Trajectory-level consistency on EuRoC
+
+`vio_trajectory_report --dataset <mav0> --label NAME --out DIR` runs the MSCKF over a sequence and
+writes `NAME_report.json` and per-window `NAME_windows.csv`. It reports:
+
+- **NEES**, gauge-anchored at the first post-init frame, overall and per block;
+- **NIS** over all updates;
+- **the update leak**, using the stage tap to recompute each applied update's H₀;
+- **position-σ growth**, and how often the position error exceeds 3σ;
+- **ATE, and RPE over 1 s segments.**
+
+| | V1_01_easy | MH_05_difficult | V2_03_difficult |
+|---|---|---|---|
+| frames (init) | 2907 (static) | 2267 (static) | 1889 (static) |
+| ATE | 0.289 m | 0.755 m | 0.269 m |
+| RPE, 1 s | 0.093 m | 0.246 m | 0.117 m |
+| NEES / dof | **436** | **42.8** | **140** |
+| NEES per block: attitude, position, velocity | 993, 3.96, 19.9 | 73.1, 55.2, 47.5 | 214, 9.71, 63.6 |
+| NIS / dof | 1.51 | 2.16 | 14.7 |
+| update leak ‖H₀N̂‖²/‖H₀‖²: max | 9.0e-32 | 6.5e-32 | 1.0e-31 |
+| updates with a leak above 1e-6 | 0 of 35 686 | 0 of 27 915 | 0 of 16 265 |
+| position σ, start → end | 0.18 → 0.26 m | 0.29 → 0.42 m | 0.17 → 0.25 m |
+| position error beyond 3σ | 15 % of frames | 81 % | 50 % |
+
+**What it says.** The filter is over-confident on all three sequences, worst in attitude on V1_01.
+That is the #212 finding, now per sequence and per block. Across all 79 866 updates on three
+sequences, **no camera update adds information along the unobservable directions**: the largest
+share is 1e-31, rounding. That confirms [#480](https://github.com/branes-ai/cortex/issues/480) on
+real data: the update is not where the filter learns what it cannot observe. The composition bench
+reports S2's `observability.yaw_leak` (Φ against the yaw direction) at up to about 2e-6 per IMU
+step, on synthetic and EuRoC loops alike. Over a run that is the remaining candidate, along with the IMU noise model.
+
+### What the composition bench found
+
+- **The S6d `nis.matches_direct` tolerance was too tight**, for the same reason as the symmetry
+  check in #446. The filter forms its own S = H·P·Hᵀ + σ²I, and the two S's differ by rounding
+  that scales with |H|·|P|·|H|ᵀ, not |S|. A captured loop showed 3.6e-15 against a 2.2e-15 bound.
+  The tolerance now scales with the products.
+- **#487 shows up in the loop too.** The built-in tapes use post-init frames 16–18; frames 13–15
+  and 20–22 hold a diverging-ray track.
 
 ## The resulting workflow
 
 ```text
-EuRoC run ──live assertions──▶ first violation: S6e_ekf_update, frame 1742, no_update_along_unobservable
+EuRoC run ──vio_pipeline --live-assert --capture cap/──▶ first violation: <stage>, frame F, <invariant>
+     │                                                    + cap/<stage>/f<F>_<stage>_….json
+     ├──<stage>_bench --fixture cap/<stage>/….json        (seconds, every type, every variant)
      │
-     └──vio_pipeline --capture … --capture-frames 1742:1742 --capture-stages S6e_ekf_update──▶ fixture.json
-                                                   │
-                         s6e_ekf_update_bench --fixture fixture.json    (seconds, every type, every variant)
-                                                   │
-                                        fix the stage in the filter (sdk/), re-run its bench
-                                        and the composition benches, confirm NEES/NIS on the
-                                        full run
+     ├──vio_pipeline --capture cap/ --capture-loop F-2:F──▶ cap/C_filter_loop/loop.json
+     │    c_filter_loop_bench --fixture …/loop.json        (the loop around it, every stage checked)
+     │
+     └──fix the stage in the filter (sdk/), re-run its bench and the composition bench, then
+        confirm on the whole run: vio_trajectory_report (NEES, NIS, update leak, ATE/RPE)
 ```

@@ -34,9 +34,10 @@
 #include <branes/sdk/eval/trajectory_metrics.hpp>
 #include <branes/sdk/msckf/invariant_vio_backend.hpp>
 #include <branes/sdk/msckf_backend.hpp>
-#include <branes/sdk/sfm/init_window.hpp>  // so3_from_matrix
 #include <branes/sdk/vio_estimator.hpp>
+#include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/stage_recorder.hpp>
+#include <branes/tools/euroc_cam0.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
 
 #include <cmath>
@@ -45,6 +46,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -69,30 +71,10 @@ using branes::sdk::ImuMeasurement;
 using branes::sdk::MsckfBackend;
 using branes::sdk::VioConfig;
 
-// EuRoC cam0 calibration (pinhole-radtan intrinsics + cam↔IMU extrinsic). Shared
-// by the standard (MSCKF) and right-invariant (R-IEKF) EuRoC runs so the two
-// backends are always driven from byte-identical calibration — any drift between
-// the paths would silently invalidate the MSCKF-vs-R-IEKF comparison.
-struct EurocCam0 {
-    branes::math::cameras::PinholeRadtanCamera<T> intrinsics;
-    branes::math::lie::SO3<T> R_imu_cam;
-    Vec3 p_imu_cam;
-};
-inline EurocCam0 euroc_cam0() {
-    branes::math::lie::detail::Mat<T, 3, 3> R{};
-    R(0, 0) = 0.0148655429818;
-    R(0, 1) = -0.999880929698;
-    R(0, 2) = 0.00414029679422;
-    R(1, 0) = 0.999557249008;
-    R(1, 1) = 0.0149672133247;
-    R(1, 2) = 0.025715529948;
-    R(2, 0) = -0.0257744366974;
-    R(2, 1) = 0.00375618835797;
-    R(2, 2) = 0.999660727178;
-    return EurocCam0{branes::math::cameras::PinholeRadtanCamera<T>(
-                         458.654, 457.296, 367.215, 248.375, -0.28340811, 0.07395907, 0.00019359, 1.76187114e-05),
-                     branes::sdk::sfm::so3_from_matrix<T>(R),
-                     Vec3{{-0.0216401454975, -0.064676986768, 0.00981073058949}}};
+// EuRoC cam0 calibration: shared with every EuRoC tool (branes/tools/euroc_cam0.hpp)
+// so the MSCKF and R-IEKF runs are driven from byte-identical calibration.
+inline branes::tools::EurocCam0<T> euroc_cam0() {
+    return branes::tools::euroc_cam0<T>();
 }
 
 struct Args {
@@ -108,6 +90,11 @@ struct Args {
     // Stage capture (#446): fixtures written to capture_dir/<stage>/<name>.json.
     std::string capture_dir;
     branes::tools::bench::CaptureOptions capture;
+    // Live-assertion mode (#447): every boundary checked against its bench; the
+    // first violation is reported (and captured, with --capture).
+    bool live_assert = false;
+    // Composition capture (#447): the loop over post-init frames [first, last].
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
 
 /// A frame number: decimal digits only (std::stoull would accept "-1" and "13x").
@@ -179,9 +166,28 @@ Args parse(int argc, char** argv) {
             a.capture.nis_per_dof_above = std::stod(argv[++i]);
         else if (v == "--capture-first-violation")
             a.capture.first_violation = true;
-        else if (v == "--capture-max" && next_is_value())
+        else if (v == "--live-assert") {
+            a.live_assert = true;
+            a.capture.first_violation = true;
+        } else if (v == "--capture-loop" && next_is_value()) {
+            branes::tools::bench::CaptureOptions range;
+            parse_frame_range(argv[++i], range);
+            if (range.last_frame == std::numeric_limits<std::uint64_t>::max())
+                throw std::invalid_argument("--capture-loop needs a closed range A:B");
+            a.capture_loop = std::make_pair(range.first_frame, range.last_frame);
+        } else if (v == "--capture-max" && next_is_value())
             a.capture.max_fixtures = std::stoull(argv[++i]);
     }
+    // Validate every capture option here, inside main's argument try: the
+    // recorder and the loop tape would otherwise throw mid-run.
+    if (a.capture_loop) {
+        if (a.capture_dir.empty())
+            throw std::invalid_argument("--capture-loop needs --capture DIR");
+        if (a.capture_loop->first > a.capture_loop->second)
+            throw std::invalid_argument("--capture-loop: A > B");
+    }
+    if (!a.capture_dir.empty() || a.live_assert)
+        (void)branes::tools::bench::StageRecorder<double>(a.capture);  // throws on a bad stage, range or threshold
     return a;
 }
 
@@ -191,18 +197,69 @@ using Recorder = branes::tools::bench::StageRecorder<T>;
 /// the synthetic world both use a 752×480 image.
 std::unique_ptr<Recorder>
 make_recorder(const Args& args, std::string source, const branes::math::cameras::PinholeRadtanCamera<T>& camera) {
-    if (args.capture_dir.empty())
+    if (args.capture_dir.empty() && !args.live_assert)
         return nullptr;
     auto opt = args.capture;
     opt.source = std::move(source);
-    return std::make_unique<Recorder>(
-        opt, std::vector{Recorder::intrinsics_of(camera, 752.0, 480.0)}, Recorder::write_to(args.capture_dir));
+    // Live assertion without --capture checks every boundary but writes nothing.
+    auto sink = args.capture_dir.empty() ? Recorder::Sink([](const branes::tools::bench::NamedFixture&) {})
+                                         : Recorder::write_to(args.capture_dir);
+    return std::make_unique<Recorder>(opt, std::vector{Recorder::intrinsics_of(camera, 752.0, 480.0)}, std::move(sink));
 }
 
-void report_capture(const Recorder* rec, const std::string& dir) {
+/// The stage recorder and the loop tape a run asked for, on one tap.
+struct RunTaps {
+    std::unique_ptr<Recorder> recorder;
+    std::unique_ptr<branes::tools::bench::LoopTape<T>> loop;
+    branes::tools::bench::StageTapFanout<T> fanout;
+    std::string source;
+
+    [[nodiscard]] msckf::StageTap<T, msckf::FullCovariance<T>>* tap() {
+        return fanout.empty() ? nullptr : &fanout;
+    }
+    /// Close the run: flush S0, write the loop fixture.
+    void finish(const std::string& dir) {
+        if (recorder)
+            recorder->finish();
+        if (loop && loop->started()) {
+            const auto path = std::filesystem::path(dir) / "C_filter_loop" / "loop.json";
+            branes::tools::bench::save(loop->fixture(source), path);
+            std::cout << "  loop capture    : " << loop->input().ops.size() << " operations -> " << path.string()
+                      << "\n";
+        } else if (loop) {
+            std::cout << "  loop capture    : the run never reached the requested frames\n";
+        }
+    }
+};
+
+/// Heap-held: the fan-out holds pointers into it, so it must not move after wiring.
+std::unique_ptr<RunTaps>
+make_taps(const Args& args, std::string source, const branes::math::cameras::PinholeRadtanCamera<T>& camera) {
+    auto t = std::make_unique<RunTaps>();
+    t->source = source;
+    t->recorder = make_recorder(args, source, camera);
+    if (args.capture_loop)
+        t->loop =
+            std::make_unique<branes::tools::bench::LoopTape<T>>(args.capture_loop->first, args.capture_loop->second);
+    t->fanout.add(t->recorder.get());
+    t->fanout.add(t->loop.get());
+    return t;
+}
+
+void report_capture(const Recorder* rec, const std::string& dir, bool live) {
     if (!rec)
         return;
     const auto& st = rec->stats();
+    if (live) {
+        if (const auto& v = st.first_violation)
+            std::cout << "  live assertion  : FIRST VIOLATION " << v->stage << ", frame " << v->frame << " (t=" << v->t
+                      << " s), " << v->invariant << " = " << v->value << " (bound " << v->threshold
+                      << (v->threshold_hi != 0.0 ? ", " + std::to_string(v->threshold_hi) : std::string()) << ")\n";
+        else
+            std::cout << "  live assertion  : every checked boundary satisfied its bench\n";
+        if (dir.empty())
+            return;
+    }
     std::cout << "  capture         : " << st.fixtures << " fixtures from " << st.boundaries << " boundaries -> " << dir
               << "/<stage>/";
     if (st.first_violation_frame)
@@ -496,7 +553,7 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
                         std::ofstream* traj,
                         std::ofstream* stream,
                         std::ofstream* frames,
-                        Recorder* rec = nullptr) {
+                        msckf::StageTap<T, msckf::FullCovariance<T>>* tap = nullptr) {
     using Cal = MsckfBackend<T>::CameraCalibration;
     Cal cal;
     cal.intrinsics = w.camera;
@@ -504,7 +561,7 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
     cal.extrinsics.p_imu_cam = w.p_imu_cam;
     MsckfBackend<T> backend(std::vector<Cal>{cal});
     backend.initialize(cfg);
-    backend.set_stage_tap(rec);
+    backend.set_stage_tap(tap);
 
     const double imu_dt = 1.0 / 200.0;
     const double sg = cfg.gyro_noise_density / std::sqrt(imu_dt) * ns;
@@ -576,7 +633,7 @@ bool run_euroc(const Args& args,
                RunResult& out,
                std::ofstream* stream,
                std::ofstream* frames,
-               Recorder* rec = nullptr) {
+               msckf::StageTap<T, msckf::FullCovariance<T>>* tap = nullptr) {
     using Backend = MsckfBackend<T>;
     using Estimator = branes::sdk::VioEstimator<T, Backend>;
 
@@ -607,7 +664,7 @@ bool run_euroc(const Args& args,
     Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
     est.configure(cfg);
     est.activate();
-    est.backend().set_stage_tap(rec);
+    est.backend().set_stage_tap(tap);
 
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
@@ -775,10 +832,12 @@ int main(int argc, char** argv) {
                "  --capture-frames A:B       post-init frame range, inclusive (default: all)\n"
                "  --capture-nis X            trigger: capture S6 updates with NIS/dof above X\n"
                "  --capture-first-violation  trigger: capture the first boundary failing its bench\n"
-               "  --capture-max N            stop after N fixtures (default 100000)\n";
+               "  --capture-max N            stop after N fixtures (default 100000)\n"
+               "  --capture-loop A:B         capture the filter loop over frames A..B (DIR/C_filter_loop/loop.json)\n"
+               "  --live-assert              check every boundary against its bench; report the first violation\n";
         return 0;
     }
-    if (!args.capture_dir.empty() && (args.invariant || args.sweep))
+    if ((!args.capture_dir.empty() || args.live_assert) && (args.invariant || args.sweep))
         std::cerr
             << "vio_pipeline: --capture taps the MSCKF backend's single run; ignored with --invariant / --sweep\n";
     // Create the output directory up front — otherwise ofstream::open() fails
@@ -805,13 +864,13 @@ int main(int argc, char** argv) {
         auto stream = open("run.jsonl");
         auto frames = args.video ? open("frames.jsonl") : std::ofstream{};
         RunResult r;
-        const auto rec =
-            args.invariant ? nullptr : make_recorder(args, "EuRoC " + args.dataset, euroc_cam0().intrinsics);
+        const auto taps = args.invariant ? std::make_unique<RunTaps>()
+                                         : make_taps(args, "EuRoC " + args.dataset, euroc_cam0().intrinsics);
+        const auto& rec = taps->recorder;
         const bool ok = args.invariant
                             ? run_euroc_invariant(args, VioConfig{}, r, &stream)
-                            : run_euroc(args, VioConfig{}, r, &stream, args.video ? &frames : nullptr, rec.get());
-        if (rec)
-            rec->finish();
+                            : run_euroc(args, VioConfig{}, r, &stream, args.video ? &frames : nullptr, taps->tap());
+        taps->finish(args.capture_dir);
         if (!ok)
             return 0;
         const char* backend = args.invariant ? "euroc [R-IEKF]" : "euroc [MSCKF]";
@@ -826,7 +885,7 @@ int main(int argc, char** argv) {
         std::cout << "\n";
         if (args.video && !args.invariant)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
-        report_capture(rec.get(), args.capture_dir);
+        report_capture(rec.get(), args.capture_dir, args.live_assert);
         return 0;
     }
 
@@ -861,7 +920,8 @@ int main(int argc, char** argv) {
         auto frames = args.video ? open("frames.jsonl") : std::ofstream{};
         std::ostringstream src;
         src << "synthetic_world (robot=" << args.robot << ", noise x" << args.noise << ", seed 0xC0FFEE)";
-        const auto rec = args.invariant ? nullptr : make_recorder(args, src.str(), world.camera);
+        const auto taps = args.invariant ? std::make_unique<RunTaps>() : make_taps(args, src.str(), world.camera);
+        const auto& rec = taps->recorder;
         const RunResult r =
             args.invariant ? run_synthetic_invariant(
                                  world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr)
@@ -873,16 +933,15 @@ int main(int argc, char** argv) {
                                            &traj,
                                            &stream,
                                            args.video ? &frames : nullptr,
-                                           rec.get());
-        if (rec)
-            rec->finish();
+                                           taps->tap());
+        taps->finish(args.capture_dir);
         std::cout << "\n  noise scale     : " << args.noise << "\n  frames tracked  : " << r.frames
                   << "\n  mean features   : " << r.mean_features << "\n  ATE (RMS pos)   : " << r.ate_rms_m
                   << " m\n  final pos error : " << r.final_err_m << " m\n  NIS (normalized): " << r.nis_normalized
                   << "  (1 = consistent)\n";
         if (args.video)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
-        report_capture(rec.get(), args.capture_dir);
+        report_capture(rec.get(), args.capture_dir, args.live_assert);
     }
     if (!args.out.empty())
         std::cout << "\n  artifacts in " << args.out << "/\n";
