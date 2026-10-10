@@ -39,7 +39,7 @@ one small executable, so an edit to a stage costs seconds to re-check, not a EuR
 |---|---|---|---|
 | `known_answer` | synthetic | an analytic expected output, computed independently of the stage | hand, in the bench |
 | `ground_truth` | built with truth injected upstream (#266) | the true values the output must reproduce | a synthetic-world run with the mean reset to truth |
-| `captured` | a recorded stage boundary | the output the stage produced in that run | `capture(...)`; from real runs via #446 |
+| `captured` | a recorded stage boundary | the output the stage produced in that run | `capture(...)`; from any run with `vio_pipeline --capture` ([#446](/debugging/capture-and-composition/)) |
 
 The runner adds two checks to every stage's own invariants:
 
