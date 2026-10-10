@@ -178,6 +178,16 @@ Args parse(int argc, char** argv) {
         } else if (v == "--capture-max" && next_is_value())
             a.capture.max_fixtures = std::stoull(argv[++i]);
     }
+    // Validate every capture option here, inside main's argument try: the
+    // recorder and the loop tape would otherwise throw mid-run.
+    if (a.capture_loop) {
+        if (a.capture_dir.empty())
+            throw std::invalid_argument("--capture-loop needs --capture DIR");
+        if (a.capture_loop->first > a.capture_loop->second)
+            throw std::invalid_argument("--capture-loop: A > B");
+    }
+    if (!a.capture_dir.empty() || a.live_assert)
+        (void)branes::tools::bench::StageRecorder<double>(a.capture);  // throws on a bad stage, range or threshold
     return a;
 }
 
@@ -225,8 +235,6 @@ struct RunTaps {
 /// Heap-held: the fan-out holds pointers into it, so it must not move after wiring.
 std::unique_ptr<RunTaps>
 make_taps(const Args& args, std::string source, const branes::math::cameras::PinholeRadtanCamera<T>& camera) {
-    if (args.capture_loop && args.capture_dir.empty())
-        throw std::invalid_argument("--capture-loop needs --capture DIR");
     auto t = std::make_unique<RunTaps>();
     t->source = source;
     t->recorder = make_recorder(args, source, camera);

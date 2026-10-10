@@ -21,7 +21,9 @@
 //                   error exceeds 3σ.
 //
 // The S6 boundaries come from the stage tap (#446); everything else from the
-// estimator's public state. Writes report.json and windows.csv to --out.
+// estimator's public state. Writes report.json and windows.csv to --out. A metric
+// with nothing to measure (no ground-truth match, no applied update) is NaN, which
+// JSON writes as null.
 //
 //   ./vio_trajectory_report --dataset .../V1_01_easy/mav0 --label V1_01 --out DIR [--window 10]
 
@@ -308,11 +310,13 @@ int main(int argc, char** argv) {
     const double leak_mean = applied ? leak_sum / static_cast<double>(applied) : std::nan("");
 
     const auto& init = est.backend().init_diagnostics();
+    const double growth = std::isfinite(sigma_first) && sigma_first > 0.0 ? sigma_last / sigma_first : std::nan("");
     json report{{"sequence", args.label},
                 {"dataset", args.dataset},
                 {"init_method", std::string(to_string(init.method))},
                 {"frames_tracked", traj.size()},
                 {"frames_with_truth", frames},
+                {"frames_without_truth", traj.size() - frames},  // no ground-truth state within 10 ms
                 {"ate_m", ate},
                 {"rpe_1s_m", rpe},
                 {"nees", band(nees_all)},
@@ -325,7 +329,7 @@ int main(int argc, char** argv) {
                 {"updates_with_leak_above_1e-6", leaking},
                 {"position_sigma_start_m", sigma_first},
                 {"position_sigma_end_m", sigma_last},
-                {"position_sigma_growth", sigma_last / sigma_first},
+                {"position_sigma_growth", growth},
                 {"position_error_beyond_3sigma_fraction", frames ? static_cast<double>(beyond) / frames : 0.0}};
     json blocks;
     for (std::size_t b = 0; b < ev::kNumNavBlocks; ++b)
@@ -343,19 +347,33 @@ int main(int argc, char** argv) {
               << "]   updates " << applied << "\n    unobservable leak |H0 N|^2/|H0|^2: mean " << leak_mean
               << ", median " << leak_median << ", max " << leak_max << "; above 1e-6 in " << leaking << " of "
               << applied << " updates\n"
-              << "    position sigma " << sigma_first << " m -> " << sigma_last << " m (x" << sigma_last / sigma_first
+              << "    position sigma " << sigma_first << " m -> " << sigma_last << " m (x" << growth
               << "); error beyond 3 sigma in " << 100.0 * report["position_error_beyond_3sigma_fraction"].get<double>()
               << " % of frames\n";
 
     if (!args.out.empty()) {
-        std::filesystem::create_directories(args.out);
-        std::ofstream(std::filesystem::path(args.out) / (args.label + "_report.json")) << report.dump(2) << "\n";
-        std::ofstream csv(std::filesystem::path(args.out) / (args.label + "_windows.csv"));
+        const std::filesystem::path dir(args.out);
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        std::ofstream js(dir / (args.label + "_report.json"));
+        std::ofstream csv(dir / (args.label + "_windows.csv"));
+        if (ec || !js || !csv) {
+            std::cerr << "vio_trajectory_report: cannot write to " << args.out
+                      << (ec ? " (" + ec.message() + ")" : std::string()) << "\n";
+            return 1;
+        }
+        js << report.dump(2) << "\n";
         csv << "t0_s,frames,nees_per_dof,nis_per_dof,unobservable_leak_mean,beyond_3sigma_fraction\n";
         for (const auto& w : windows)
             csv << w.t0 - t_first << ',' << w.frames << ',' << normalized(w.nees) << ',' << normalized(w.nis) << ','
                 << (w.leak_n ? w.leak_sum / static_cast<double>(w.leak_n) : 0.0) << ','
                 << (w.frames ? static_cast<double>(w.beyond_3sigma) / w.frames : 0.0) << '\n';
+        js.close();
+        csv.close();
+        if (!js || !csv) {
+            std::cerr << "vio_trajectory_report: writing the report to " << args.out << " failed\n";
+            return 1;
+        }
         std::cout << "    wrote " << args.out << "/" << args.label << "_{report.json,windows.csv}\n";
     }
     return 0;

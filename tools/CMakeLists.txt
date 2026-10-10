@@ -18,6 +18,9 @@ target_link_libraries(branes_tools INTERFACE branes::stb_image)
 # The inter-stage trace bus (vio_trace.hpp, #372) serializes per-stage I/O to
 # JSONL and reads it back; nlohmann/json supplies the parser the inspectors need.
 target_link_libraries(branes_tools INTERFACE nlohmann_json::nlohmann_json)
+# The composition bench instantiates every stage bench in one translation unit;
+# MSVC's default COFF section limit is too small for that (C1128).
+target_compile_options(branes_tools INTERFACE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
 
 # Stage test benches (#453): one small executable per bench, tools/benches/*.cpp,
 # each including only its stage's headers. Fixture files live next to them; the
