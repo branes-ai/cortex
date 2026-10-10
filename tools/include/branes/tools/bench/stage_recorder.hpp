@@ -196,7 +196,9 @@ public:
     }
 
     void on_s0(std::uint32_t cam, T u, T v, const sdk::msckf::stages::s0_sensor_model::Result<T>& out) override {
-        if (cam >= intr_.size())
+        // Before the first frame the backend is still initializing (its
+        // dynamic-init buffer normalizes pixels too): no frame to file them under.
+        if (cam >= intr_.size() || next_frame_ == 0)
             return;
         auto& fr = s0_[cam];
         fr.in.intr = intr_[cam];

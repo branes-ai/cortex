@@ -51,6 +51,7 @@
 #include <random>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -109,15 +110,22 @@ struct Args {
     branes::tools::bench::CaptureOptions capture;
 };
 
+/// A frame number: decimal digits only (std::stoull would accept "-1" and "13x").
+std::uint64_t parse_frame(std::string_view s) {
+    if (s.find_first_not_of("0123456789") != std::string_view::npos)
+        throw std::invalid_argument("--capture-frames: '" + std::string(s) + "' is not a frame number");
+    return std::stoull(std::string(s));
+}
+
 /// "A:B" → [A, B] (either side may be empty: open-ended).
 void parse_frame_range(std::string_view r, branes::tools::bench::CaptureOptions& c) {
     const auto colon = r.find(':');
     const auto a = r.substr(0, colon);
     const auto b = colon == std::string_view::npos ? a : r.substr(colon + 1);
     if (!a.empty())
-        c.first_frame = std::stoull(std::string(a));
+        c.first_frame = parse_frame(a);
     if (!b.empty())
-        c.last_frame = std::stoull(std::string(b));
+        c.last_frame = parse_frame(b);
 }
 
 /// "S2_propagation,S6d_gating" → the stage list.

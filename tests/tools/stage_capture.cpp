@@ -12,9 +12,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -141,7 +143,10 @@ TEST_CASE("captured fixtures replay bit-identically through their stage benches"
 }
 
 TEST_CASE("captured fixtures written to disk load and replay", "[tools][capture]") {
-    const auto dir = std::filesystem::temp_directory_path() / "branes_stage_capture_test";
+    // Unique per run: gcc and clang ctest (or CI jobs) may share the temp directory.
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("branes_stage_capture_test_" + std::to_string(std::random_device{}()) + "_" +
+                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::remove_all(dir);
     bn::CaptureOptions opt;
     opt.stages = {"S3_augmentation", "S6e_ekf_update", "S9_marginalization"};
@@ -267,6 +272,25 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
         }
     INFO(first_failing);
     REQUIRE(std::find(captured.begin(), captured.end(), first_failing) != captured.end());
+}
+
+TEST_CASE("S0 capture starts at the first initialized frame", "[tools][capture]") {
+    // While initializing, the backend normalizes pixels for its dynamic-init
+    // buffer before any on_frame; those must not be filed under frame 0.
+    bn::CaptureOptions opt;
+    opt.stages = {"S0_sensor_model"};
+    Recorder rec(opt, intrinsics());
+    REQUIRE(rec.wants(sdk::msckf::TapStage::S0_sensor_model));
+    const auto cam = world().camera;
+    auto s0 = [&](double u, double v) { rec.on_s0(0, u, v, sdk::msckf::stages::s0_sensor_model::apply(cam, u, v)); };
+    s0(100.0, 100.0);  // pre-init
+    s0(200.0, 150.0);  // pre-init
+    rec.on_frame(1.0);
+    s0(300.0, 250.0);  // frame 0
+    rec.finish();
+    REQUIRE(rec.fixtures().size() == 1);
+    REQUIRE(rec.fixtures().front().fixture.input.at("pixels").size() == 1);
+    REQUIRE(value_of(replay(rec.fixtures().front()), "replay.bit_identical") == 0.0);
 }
 
 TEST_CASE("capture options are validated", "[tools][capture]") {
