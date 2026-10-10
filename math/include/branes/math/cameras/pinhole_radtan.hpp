@@ -64,6 +64,23 @@ public:
         return Jdn;
     }
 
+    /// The parameters (for serialization and inspection).
+    [[nodiscard]] T fx() const noexcept {
+        return fx_;
+    }
+    [[nodiscard]] T fy() const noexcept {
+        return fy_;
+    }
+    [[nodiscard]] T cx() const noexcept {
+        return cx_;
+    }
+    [[nodiscard]] T cy() const noexcept {
+        return cy_;
+    }
+    [[nodiscard]] const detail::RadTan<T>& radtan() const noexcept {
+        return dist_;
+    }
+
 private:
     T fx_{1}, fy_{1}, cx_{0}, cy_{0};
     detail::RadTan<T> dist_{};

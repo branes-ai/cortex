@@ -186,6 +186,7 @@ struct QStructureResult {
 template <math::Scalar T>
 [[nodiscard]] QStructureResult<T> q_structure(const msckf::ImuNoise<T>& noise, T dt) {
     using namespace pp_detail;
+    using pp_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     const auto Qc = qd_cortex(noise, dt);
     const auto Qk = qd_canonical(noise, dt);
     QStructureResult<T> r;
@@ -241,6 +242,7 @@ template <math::Scalar T>
                                             std::size_t samples = 60) {
     using namespace pp_detail;
     using msckf::State;
+    using pp_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     CovGrowthResult<T> out;
 
     State<T> s(T{0});  // P0 = 0: isolate the process-noise growth
@@ -338,6 +340,7 @@ template <math::Scalar T>
 [[nodiscard]] GtInjectionPoint<T> gt_injection(T dt, T duration_s = T{2}) {
     using namespace pp_detail;
     using msckf::State;
+    using pp_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     const Vec3<T> g_world{{T{0}, T{0}, T{-9.81}}};
     const Vec3<T> w_b{{T{0.3}, T{-0.2}, T{0.5}}};  // tumbling body rate
     const Vec3<T> f_b{{T{0.6}, T{0.4}, T{9.2}}};   // body-frame specific force
@@ -401,6 +404,7 @@ template <math::Scalar T>
                                            std::uint64_t seed = 0x5723) {
     using namespace pp_detail;
     using msckf::State;
+    using pp_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     NeesResult<T> out;
     out.trials = trials;
     const Vec3<T> g_world{{T{0}, T{0}, T{-9.81}}};
@@ -485,7 +489,8 @@ template <math::Scalar T>
 [[nodiscard]] NullspaceResult<T>
 nullspace_position(const pp_detail::Vec3<T>& gyro, const pp_detail::Vec3<T>& accel, T dt = T{1} / T{200}) {
     using namespace pp_detail;
-    const SO3<T> R{};  // representative orientation
+    using pp_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
+    const SO3<T> R{};       // representative orientation
     const DynMat<T> F = imu_F(R, gyro, accel, dt);
     using std::sqrt;
     T leak{0};

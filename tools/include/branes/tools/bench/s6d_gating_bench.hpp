@@ -150,7 +150,15 @@ struct S6dGatingBench {
         for (std::size_t i = 0; i < S.rows; ++i)
             smin = std::min(smin, std::abs(static_cast<double>(S(i, i))));
         const double safety = safety_at<T>(smin);
-        r.push_back(inv::check_symmetric(S, kInvStage, "innovation.symmetric", safety));
+        // H·P·Hᵀ cancels: its rounding scales with |H|·|P|·|H|ᵀ, which can far
+        // exceed |S| (a captured EuRoC-like update: 3.8e-18 asymmetry against a
+        // max|S|-scaled bound). Hold symmetry to the products' magnitude.
+        double s_max = 0.0;
+        for (const T& x : S.d)
+            s_max = std::max(s_max, std::abs(static_cast<double>(x)));
+        const double products = magnitude_of_products(pm.H, in.state.cov.P) + static_cast<double>(var);
+        const double sym_safety = s_max > 0.0 ? safety * std::max(1.0, products / s_max) : safety;
+        r.push_back(inv::check_symmetric(S, kInvStage, "innovation.symmetric", sym_safety));
         r.push_back(inv::check_spd(S, kInvStage, "innovation.spd", safety_vs_double<T>()));
         const auto kappa = inv::report_condition_number(S, kInvStage, "innovation.condition_number");
         r.push_back(kappa);
@@ -287,6 +295,22 @@ struct S6dGatingBench {
         }
         const auto rep = acc.report(0.05);
         return {nis_sum / draws, acc_ship / draws, acc_chi / draws, rep.lower, rep.upper};
+    }
+
+    /// max over (i, j) of (|H|·|P|·|H|ᵀ)ᵢⱼ, in double: the magnitude the terms
+    /// of H·P·Hᵀ reach before they cancel.
+    template <class T>
+    [[nodiscard]] static double magnitude_of_products(const s6::Mat<T>& H, const s6::Mat<T>& P) {
+        s6::Mat<double> h(H.rows, H.cols), p(P.rows, P.cols);
+        for (std::size_t i = 0; i < H.d.size(); ++i)
+            h.d[i] = std::abs(static_cast<double>(H.d[i]));
+        for (std::size_t i = 0; i < P.d.size(); ++i)
+            p.d[i] = std::abs(static_cast<double>(P.d[i]));
+        const auto m = sdk::msckf::mul(sdk::msckf::mul(h, p), sdk::msckf::transpose(h));
+        double worst = 0.0;
+        for (const double x : m.d)
+            worst = std::max(worst, x);
+        return worst;
     }
 
 private:
