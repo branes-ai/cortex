@@ -2798,5 +2798,6 @@
  "schema": "branes.vio.fixture/1",
  "seed": 0,
  "source": "synthetic_world (default config), S2/S3/S9 stage sequence, frame 6",
- "stage": "S9_marginalization"
+ "stage": "S9_marginalization",
+ "variant": "shipped"
 }

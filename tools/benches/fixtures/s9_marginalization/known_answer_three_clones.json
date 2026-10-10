@@ -1978,5 +1978,6 @@
  "schema": "branes.vio.fixture/1",
  "seed": 0,
  "source": "s9_marginalization_bench: correlated_spd(33), remove clone 1",
- "stage": "S9_marginalization"
+ "stage": "S9_marginalization",
+ "variant": "shipped,direct_gather"
 }

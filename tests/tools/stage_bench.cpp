@@ -193,14 +193,15 @@ TEST_CASE("bench rejects malformed rotations, sweep values and non-finite known 
 TEST_CASE("bench ground truth checks kept-clone rotations as well as positions", "[tools][bench][s9]") {
     auto gt = Bench::ground_truth();
     // Rotate the first kept clone's truth by ~0.1 rad about z: canonical, unit, but wrong.
-    gt.truth[0]["R"] = bn::json::array({std::cos(0.05), 0.0, 0.0, std::sin(0.05)});
+    // (The truth lists every clone, oldest first; the shipped fixture removes the oldest.)
+    gt.truth[1]["R"] = bn::json::array({std::cos(0.05), 0.0, 0.0, std::sin(0.05)});
     const auto run = bn::run_fixture<Bench>({"wrong_truth_rotation", gt}, bn::kShipped, bn::DefaultTypes{}, {"double"});
     REQUIRE_FALSE(run.pass());
     REQUIRE(run.types[0].report.first_failure()->name == "truth.kept_clone_rotation");
 
     // A NaN truth position never passes the position check.
     auto gt_nan = Bench::ground_truth();
-    gt_nan.truth[0]["p"][1] = "nan";
+    gt_nan.truth[1]["p"][1] = "nan";
     const auto nan_run = bn::run_fixture<Bench>({"nan_truth", gt_nan}, bn::kShipped, bn::DefaultTypes{}, {"double"});
     REQUIRE_FALSE(nan_run.pass());
     REQUIRE(nan_run.types[0].report.first_failure()->name == "truth.kept_clone_position");

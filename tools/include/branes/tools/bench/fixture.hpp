@@ -81,6 +81,23 @@ enum class FixtureKind { KnownAnswer, GroundTruth, Captured };
     throw std::invalid_argument("fixture: unknown kind '" + std::string(s) + "'");
 }
 
+/// The toolchain's floating-point platform, as far as bit-identical replay is
+/// concerned: the C math library. IEEE +, −, ×, ÷ and sqrt are correctly
+/// rounded everywhere, but sin, cos, exp, atan2 … are not, and glibc and the
+/// MSVC runtime can differ by an ulp — which a stage that box-plusses rotations
+/// spreads through its whole output. gcc and clang on Linux share glibc.
+[[nodiscard]] constexpr std::string_view current_platform() noexcept {
+#if defined(_MSC_VER)
+    return "msvc";
+#elif defined(__APPLE__)
+    return "apple";
+#elif defined(__GLIBC__)
+    return "glibc";
+#else
+    return "other";
+#endif
+}
+
 /// One stage fixture. `expected` (known_answer, captured) and `truth`
 /// (ground_truth) are null when the kind does not carry them.
 struct Fixture {
@@ -94,6 +111,9 @@ struct Fixture {
     /// means every variant must reproduce it (an implementation-independent
     /// known answer). A captured fixture records the variant that ran.
     std::string variant;
+    /// The platform a captured fixture was recorded on (`current_platform()`);
+    /// bit-identical replay is enforced there. "" (older fixtures): everywhere.
+    std::string platform;
     json input;
     json expected;
     json truth;
@@ -356,6 +376,8 @@ template <math::Scalar T>
     j["description"] = f.description;
     if (!f.variant.empty())
         j["variant"] = f.variant;
+    if (!f.platform.empty())
+        j["platform"] = f.platform;
     j["input"] = f.input;
     if (!f.expected.is_null())
         j["expected"] = f.expected;
@@ -375,6 +397,7 @@ template <math::Scalar T>
     f.seed = j.value("seed", std::uint64_t{0});
     f.description = j.value("description", "");
     f.variant = j.value("variant", "");
+    f.platform = j.value("platform", "");
     f.input = j.at("input");
     f.expected = j.value("expected", json());
     f.truth = j.value("truth", json());
@@ -417,6 +440,7 @@ inline void save(const Fixture& f, const std::filesystem::path& path) {
     f.source = std::move(source);
     f.description = "captured stage boundary";
     f.variant = std::move(variant);
+    f.platform = std::string(current_platform());
     f.input = std::move(input);
     f.expected = std::move(output);
     return f;

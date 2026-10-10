@@ -34,6 +34,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <numbers>
 #include <stdexcept>
 #include <vector>
@@ -180,8 +181,12 @@ struct Scene {
 };
 
 /// Build the scene (see the header comment). `m` clones from frame `f0`;
-/// at most `max_features` tracks.
-[[nodiscard]] inline Scene build_scene(bool true_poses, std::size_t m = 6, std::size_t max_features = 16) {
+/// at most `max_features` tracks. `init`, if set, runs on the fresh state before
+/// any propagation or clone (S10_online_calibration must run there).
+[[nodiscard]] inline Scene build_scene(bool true_poses,
+                                       std::size_t m = 6,
+                                       std::size_t max_features = 16,
+                                       const std::function<void(State<double>&)>& init = {}) {
     namespace st = sdk::msckf::stages;
     const auto world = sdk::eval::generate_world<double>(sdk::eval::SyntheticConfig<double>{});
     const std::size_t f0 = 4;
@@ -198,6 +203,8 @@ struct Scene {
     s.p = world.gt[1].p;
     s.v = world.gt[1].v;
     s.timestamp = world.gt[1].t;
+    if (init)
+        init(s);
     std::size_t k = 0;
     while (k < world.imu.size() && world.imu[k].timestamp_s <= s.timestamp)
         ++k;

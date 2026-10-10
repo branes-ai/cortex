@@ -10,8 +10,8 @@ import { Aside } from '@astrojs/starlight/components';
   S9_marginalization bench as its worked example. The S0–S3 benches
   ([#454](https://github.com/branes-ai/cortex/issues/454), [#455](https://github.com/branes-ai/cortex/issues/455))
   and the S4–S5 benches ([#456](https://github.com/branes-ai/cortex/issues/456)) are merged, and the
-  S6 sub-step benches ([#457](https://github.com/branes-ai/cortex/issues/457)) are in review; S10
-  follows in [#458](https://github.com/branes-ai/cortex/issues/458).
+  S6 sub-step benches ([#457](https://github.com/branes-ai/cortex/issues/457)) are merged; the S9
+  policies and the S10 bench ([#458](https://github.com/branes-ai/cortex/issues/458)) are in review.
   The developer reference is `docs/arch/stage-benches.md`.
 </Aside>
 
@@ -179,6 +179,17 @@ failure points at one sub-step. The S6 benches (#457) found:
 - **Posits are precise near 1, not near 1e-17.** Residuals at the true state and covariance entries
   near σ² sit where a posit has few fraction bits, so checks on them use T's precision at that
   magnitude (`safety_at`), not its ε at 1.
+
+### Calibration as known, as noise, or as state: S10
+
+The S10 bench applies the online-calibration stage to a fresh state with a believed extrinsic off
+from the world's true one, runs the filter, and then updates a window of tracks three ways: with the
+extrinsic estimated (shipped), trusted as fixed, or trusted with its prior folded into the
+measurement noise. Over one window, a 5° extrinsic rotation error raises NIS only to ≈0.002 per dof:
+the projected update absorbs a constant rotation almost entirely, so a wrong calibration is
+invisible to NIS and to the gate. Estimated, the extrinsic moves toward the truth with a consistent
+covariance, but by under 30% per window. A calibration error is something the filter has to be told
+about, not something it will notice.
 
 ### Comparing alternative methods: S5 triangulation
 
