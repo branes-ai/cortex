@@ -145,3 +145,13 @@ TEST_CASE("captured fixtures replay bit-identically only on the platform that re
     q = "nan";
     REQUIRE_FALSE(bn::run_fixture<S10>({"nan", f}, bn::kShipped, bn::bench_types<S10>(), {"double"}).pass());
 }
+
+TEST_CASE("S9 bench rejects a window with no clone at the index to remove", "[tools][bench][s9]") {
+    auto in = S9::decode_input<double>(S9::known_answer().input);
+    in.clone_index = in.state.clones.size();
+    REQUIRE_THROWS_AS(S9::run<double>(in, bn::kShipped), std::invalid_argument);
+    in.state = branes::sdk::msckf::State<double>(0.1);  // no clones at all
+    in.clone_index = 0;
+    for (const auto& v : S9::variants())
+        REQUIRE_THROWS_AS(S9::run<double>(in, v.name), std::invalid_argument);
+}

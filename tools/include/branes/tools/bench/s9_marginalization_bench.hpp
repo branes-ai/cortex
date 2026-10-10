@@ -117,6 +117,10 @@ struct S9MarginalizationBench {
     [[nodiscard]] static Output<T> run(const Input<T>& in, std::string_view variant) {
         Output<T> out{in.state, {}, index_for(in, variant)};
         const std::size_t idx = out.removed_index;
+        // S9's precondition (idx < clones): an empty window or a bad fixture
+        // index is an input error, not a run to report on.
+        if (idx >= in.state.clones.size())
+            throw std::invalid_argument("s9 bench: no clone at the index to remove (empty window or bad clone_index)");
         if (variant == "direct_gather") {
             auto& s = out.state;
             const std::size_t d = s.dim(), off = s.clone_offset(idx);
