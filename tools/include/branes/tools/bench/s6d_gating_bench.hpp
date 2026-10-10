@@ -170,14 +170,17 @@ struct S6dGatingBench {
         } catch (const std::exception&) {}
         const double nis = static_cast<double>(out.nis);
         // Both are rᵀS⁻¹r through a Cholesky of S: their difference is the
-        // solves' error, ∝ κ(S)·γ.
-        r.push_back(
-            inv::check_scalar(std::abs(nis - direct),
-                              tolerance_vs_double<T>(pm.H.rows, std::max(1.0, kappa.value) * std::max(nis, 1e-30)),
-                              inv::Bound::Upper,
-                              kInvStage,
-                              "nis.matches_direct",
-                              "dimensionless"));
+        // solves' error, ∝ κ(S)·γ — and, since the filter forms its own S, the two
+        // S's rounding, which scales with the products as above (a captured loop:
+        // 3.6e-15 against a |S|-scaled 2.2e-15).
+        const double formed = s_max > 0.0 ? std::max(1.0, products / s_max) : 1.0;
+        r.push_back(inv::check_scalar(
+            std::abs(nis - direct),
+            tolerance_vs_double<T>(pm.H.rows, std::max(1.0, kappa.value) * formed * std::max(nis, 1e-30)),
+            inv::Bound::Upper,
+            kInvStage,
+            "nis.matches_direct",
+            "dimensionless"));
         const bool want = out.threshold == 0.0 || (out.valid && nis <= out.threshold);
         r.push_back(inv::check_scalar(want == (out.accepted != 0) ? 0.0 : 1.0,
                                       0.0,
