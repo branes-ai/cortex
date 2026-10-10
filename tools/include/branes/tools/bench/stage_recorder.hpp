@@ -95,12 +95,26 @@ struct CaptureOptions {
     std::string source = "run";               ///< recorded in each fixture's `source`, with frame and time
 };
 
+/// The first boundary that failed its bench (live-assertion mode, #447): where,
+/// which invariant, its value and bound.
+struct Violation {
+    std::string stage;  ///< e.g. "S6a_jacobians"
+    std::uint64_t frame = 0;
+    double t = 0.0;
+    std::string fixture;  ///< the boundary's fixture name
+    std::string invariant;
+    double value = 0.0;
+    double threshold = 0.0;
+    double threshold_hi = 0.0;  ///< a band's upper edge
+};
+
 struct CaptureStats {
     std::size_t fixtures = 0;          ///< fixtures handed to the sink
     std::size_t boundaries = 0;        ///< boundaries captured
     std::size_t chain_mismatches = 0;  ///< S6 boundaries examined whose recomputed chain differs from the run
     std::size_t skipped = 0;           ///< selected boundaries the recorder cannot express (see `on_s6`)
     std::optional<std::uint64_t> first_violation_frame;  ///< the frame the first-violation trigger fired on
+    std::optional<Violation> first_violation;            ///< …and what failed there
 };
 
 template <math::Scalar T>
@@ -347,7 +361,8 @@ private:
         double t;
         std::optional<std::uint64_t> feature;
         std::vector<NamedFixture> fixtures;
-        std::vector<bool (*)(const NamedFixture&)> violates;  ///< per fixture: fails its bench in T
+        std::vector<std::optional<inv::InvariantResult> (*)(const NamedFixture&)>
+            violates;  ///< per fixture: its first failure in T
     };
 
     /// Add a fixture of bench B. `expected` null: the bench's own output on
@@ -368,10 +383,10 @@ private:
         g.violates.push_back(&fails<B>);
     }
 
-    /// Whether a fixture fails its bench (invariants and replay) in T.
+    /// A fixture's first failure in its bench (invariants and replay) in T.
     template <class B>
-    [[nodiscard]] static bool fails(const NamedFixture& nf) {
-        return !run_fixture<B>(nf, kShipped, TypeList<T>{}).pass();
+    [[nodiscard]] static std::optional<inv::InvariantResult> fails(const NamedFixture& nf) {
+        return run_fixture<B>(nf, kShipped, TypeList<T>{}).types.front().report.first_failure();
     }
 
     [[nodiscard]] static std::string frame_name(std::uint64_t f) {
@@ -398,10 +413,18 @@ private:
         take = take || nis_fired;
         if (!take && opt_.first_violation && armed_) {
             for (std::size_t i = 0; i < g.fixtures.size(); ++i)
-                if (g.violates[i](g.fixtures[i])) {
+                if (const auto bad = g.violates[i](g.fixtures[i])) {
                     take = true;
                     armed_ = false;
                     stats_.first_violation_frame = g.frame;
+                    stats_.first_violation = Violation{g.fixtures[i].fixture.stage,
+                                                       g.frame,
+                                                       g.t,
+                                                       g.fixtures[i].name,
+                                                       std::string(bad->name),
+                                                       bad->value,
+                                                       bad->threshold,
+                                                       bad->threshold_hi};
                     break;
                 }
         }
@@ -445,6 +468,71 @@ private:
     double frame_t_ = 0.0;
     std::size_t s2_step_ = 0;
     std::map<std::uint32_t, S0Frame> s0_;
+};
+
+/// Several taps on one backend: each boundary goes to every tap that wants it.
+template <math::Scalar T, class Cov = sdk::msckf::FullCovariance<T>>
+class StageTapFanout final : public sdk::msckf::StageTap<T, Cov> {
+public:
+    using Base = sdk::msckf::StageTap<T, Cov>;
+    using St = typename Base::St;
+    using Vec3 = typename Base::Vec3;
+
+    void add(Base* tap) {
+        if (tap)
+            taps_.push_back(tap);
+    }
+    [[nodiscard]] bool empty() const noexcept {
+        return taps_.empty();
+    }
+
+    void on_frame(double t) override {
+        for (auto* x : taps_)
+            x->on_frame(t);
+    }
+    [[nodiscard]] bool wants(sdk::msckf::TapStage stage) const override {
+        return std::any_of(taps_.begin(), taps_.end(), [&](const Base* x) { return x->wants(stage); });
+    }
+    void on_s0(std::uint32_t cam, T u, T v, const sdk::msckf::stages::s0_sensor_model::Result<T>& out) override {
+        each(sdk::msckf::TapStage::S0_sensor_model, [&](Base* x) { x->on_s0(cam, u, v, out); });
+    }
+    void on_s2(const St& before,
+               const sdk::msckf::Propagator<T>& p,
+               const Vec3& g,
+               const Vec3& a,
+               T dt,
+               const St& after) override {
+        each(sdk::msckf::TapStage::S2_propagation, [&](Base* x) { x->on_s2(before, p, g, a, dt, after); });
+    }
+    void on_s3(const St& before,
+               double t,
+               const sdk::msckf::stages::s3_augmentation::Diagnostics& d,
+               const St& after) override {
+        each(sdk::msckf::TapStage::S3_augmentation, [&](Base* x) { x->on_s3(before, t, d, after); });
+    }
+    void on_s6(const St& before,
+               const sdk::msckf::CameraUpdater<T>& upd,
+               std::uint64_t feature,
+               const sdk::msckf::FeatureTrack<T>& track,
+               const sdk::msckf::stages::s6_msckf_update::Diagnostics<T>& d,
+               const St& after) override {
+        each(sdk::msckf::TapStage::S6_msckf_update, [&](Base* x) { x->on_s6(before, upd, feature, track, d, after); });
+    }
+    void on_s9(const St& before,
+               std::size_t index,
+               const sdk::msckf::stages::s9_marginalization::Diagnostics& d,
+               const St& after) override {
+        each(sdk::msckf::TapStage::S9_marginalization, [&](Base* x) { x->on_s9(before, index, d, after); });
+    }
+
+private:
+    template <class F>
+    void each(sdk::msckf::TapStage stage, F&& f) {
+        for (auto* x : taps_)
+            if (x->wants(stage))
+                f(x);
+    }
+    std::vector<Base*> taps_;
 };
 
 }  // namespace branes::tools::bench
