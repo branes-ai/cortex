@@ -27,6 +27,7 @@
 #include <mtl/operation/trsm.hpp>
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -93,10 +94,12 @@ template <math::Scalar T>
     std::size_t nnz = 0;
     for (const T& x : a.d)
         nnz += x == T{0} ? 0 : 1;
-    // x − x is zero exactly when x is finite (NaN, ±inf and NaR give NaN/NaR).
+    // Classified, not computed (no x − x, which traps on NaR or FE_INVALID).
+    // Unqualified, so a Universal type's own isfinite is found by ADL.
     const auto all_finite = [](const DynMat<T>& m) {
+        using std::isfinite;
         for (const T& x : m.d)
-            if (!(x - x == T{0}))
+            if (!isfinite(x))
                 return false;
         return true;
     };
