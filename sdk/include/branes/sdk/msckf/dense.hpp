@@ -5,6 +5,12 @@
 // the EKF update grow/shrink at runtime, so the fixed-size math-layer
 // matrices don't fit). Row-major, type-generic, header-only. Not a
 // general BLAS — just what the State/Propagator/StateHelper need.
+//
+// The arithmetic is moving onto MTL5 (#448) one family at a time: `DynMat`
+// keeps its storage and its interface, and a ported operation runs an MTL5
+// kernel over zero-copy `mtl::mat::dense2D` views of that storage
+// (`mtl_view`). Each family is held to the pre-port results by the stage
+// benches and the EuRoC trajectories (tools/src/bench_snapshot.cpp).
 
 #ifndef BRANES_SDK_MSCKF_DENSE_HPP
 #define BRANES_SDK_MSCKF_DENSE_HPP
@@ -111,6 +117,12 @@ void symmetrize(DynMat<T>& a) {
 
 /// Cholesky factor (lower L with A = L Lᵀ). Returns false if A is not
 /// positive-definite to working precision.
+///
+/// Kept local, not MTL5's `cholesky_factor` (#448): that one forms each entry
+/// as a − (Σ products) where this one subtracts term by term. Both are
+/// backward stable, but the bits differ, and on EuRoC V2_03 that flips 2 of
+/// ~16k update decisions and the trajectory diverges. The port waits on a
+/// term-by-term ordering in MTL5 (stillwater-sc/mtl5#556).
 template <math::Scalar T>
 [[nodiscard]] bool cholesky(const DynMat<T>& a, DynMat<T>& L) {
     assert(a.rows == a.cols && "DynMat::cholesky: matrix must be square");
