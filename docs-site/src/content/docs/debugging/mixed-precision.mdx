@@ -6,11 +6,9 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
-  The equivalence gate for the port is in place. The first family (products and the covariance
-  sandwiches) is waiting on an MTL5 kernel fix,
-  [mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). In the second family the triangular
-  solves run on MTL5, and the Cholesky factor stays local until
-  [mtl5#556](https://github.com/stillwater-sc/mtl5/issues/556). The issues:
+  The equivalence gate for the port is in place. Two families run on MTL5 5.14: the products and
+  sums, and the Cholesky factor with its SPD solves. Both are bit-identical. QR and the null
+  space are next. The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -36,20 +34,22 @@ in a wider and a narrower type on the same fixture, and see whether its invarian
 
 ## Today vs the port
 
-Today the pipeline makes no `mtl::` calls. Its only MTL5 touchpoint is the `mtl::Scalar` concept
-behind `math::Scalar`, and its linear algebra is hand-rolled:
+Before the port the pipeline made no `mtl::` calls. Its only MTL5 touchpoint was the `mtl::Scalar`
+concept behind `math::Scalar`, and its linear algebra was hand-rolled. `DynMat` stays as the
+storage, and each family below moves its operations onto MTL5 views of it:
 
-| Today (hand-rolled) | MTL5 replacement |
-|---|---|
-| `msckf::DynMat<T>`, a row-major `std::vector` holding P, F, G, H, S, K | `mtl::mat::dense2D<T>` |
-| GEMM/GEMV, transpose, add | `mat/operators.hpp`, `operation/mult.hpp`, `trans.hpp` |
-| A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` |
-| Cholesky, SPD solve | `operation/cholesky.hpp`, multi-RHS via `trsm.hpp`; `ldlt.hpp` for semidefinite S |
-| Householder QR (R only), retriangularize | `qr.hpp`, `lq.hpp` |
-| Triangular solves (square-root form) | `lower_trisolve.hpp`, `upper_trisolve.hpp`, `trsv.hpp` |
-| MSCKF left null space | `householder.hpp` + `apply_householder_left` |
-| Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` |
-| Principal-submatrix gather | `mat/view/map_view.hpp` |
+| Hand-rolled | MTL5 replacement | Status |
+|---|---|---|
+| `msckf::DynMat<T>`, a row-major `std::vector` holding P, F, G, H, S, K | zero-copy `mtl::mat::dense2D<T>` views | done |
+| GEMM, add | `operation/mult.hpp` (dense, and CRS × dense for sparse left operands), `mat/operators.hpp` | done |
+| Cholesky, SPD solve | `cholesky_factor` (term-by-term order), two `trsm` calls | done |
+| GEMV, transpose | `operation/mult.hpp`, `trans.hpp` | |
+| A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` | on `mult` through `mul`; a symmetric primitive is a gap |
+| Householder QR (R only), retriangularize | `qr.hpp`, `lq.hpp` | |
+| Triangular solves (square-root form) | `lower_trisolve.hpp`, `upper_trisolve.hpp`, `trsv.hpp` | |
+| MSCKF left null space | `householder.hpp` + `apply_householder_left` | |
+| Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` | |
+| Principal-submatrix gather | `mat/view/map_view.hpp` | |
 
 ## How the port is gated
 
@@ -113,9 +113,9 @@ Both were fixed upstream rather than worked around:
 [mtl5#549](https://github.com/stillwater-sc/mtl5/issues/549) is a row-major i-k-j kernel,
 bit-identical by construction, and [mtl5#550](https://github.com/stillwater-sc/mtl5/issues/550) is
 `mult(compressed2D, dense2D, dense2D)`, both in
-[mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). Against that branch the port is back to
-baseline within about 0.5 % p50, with byte-identical trajectories. The remaining cost is building a
-CRS copy per product, which a non-owning CRS view in MTL5 would remove.
+[mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552), released in MTL5 5.14. With it the port
+is within 1 % of baseline p50 latency (+0.7 % p50 and +1.4 % p99 for both families together: 30.79 → 31.02 ms and 37.32 → 37.84 ms, medians of three interleaved runs on V1_01), with byte-identical trajectories. What it still pays for is
+building a CRS copy per product, which a non-owning CRS view in MTL5 would remove.
 
 ### What the second family showed
 
@@ -139,10 +139,10 @@ S⁻¹ and Kalman gain, the χ² gate, initialization, triangulation and the NEE
   about 2× better on ill-conditioned spectra like the filter covariance (cond 1e6–1e10), and the
   MTL5 order is about 1.4× better on well-conditioned ones.
 
-So the factor stays in cortex. MTL5 is asked for an opt-in term-by-term ordering in
-[mtl5#556](https://github.com/stillwater-sc/mtl5/issues/556), which would let it port bit for bit.
-The same issue notes a smaller difference: `cholesky_factor` tests the pivot with `diag <= 0`, which
-a NaN passes, while cortex's factor rejects it.
+So the factor waited for MTL5. [mtl5#556](https://github.com/stillwater-sc/mtl5/issues/556) added
+an opt-in order, `cholesky_factor(A, mtl::tag::subtract_term_by_term{})`, which starts from the
+matrix entry and subtracts each product in turn. The same change made the pivot test reject a NaN,
+as cortex's factor did. With that order the factor ports bit for bit as well.
 
 ## The MTL5 gap register (#451)
 
@@ -151,13 +151,13 @@ interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
 
 - scalar × matrix for non-arithmetic scalars (mtl5#538);
 - a vectorizable generic dense product (mtl5#549) and a CRS × dense-matrix product (mtl5#550), both
-  in mtl5#552;
+  in mtl5#552: **done, MTL5 5.14**;
 - a non-owning CRS view over caller arrays (`compressed2D` copies them);
 - block insert/scatter into `dense2D`;
 - a symmetric A·P·Aᵀ primitive;
 - a left-null-space helper;
-- an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556). Until
-  then the factor is local. Multi-RHS solves need nothing new: two `trsm` calls do it;
+- an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556): **done,
+  MTL5 5.14**. Multi-RHS solves need nothing new: two `trsm` calls do it;
 - a matrix exponential.
 
 Lie-group exp/log and Jacobians stay in `branes::math::lie`; they are not MTL5's job.

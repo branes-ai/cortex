@@ -592,3 +592,13 @@ TEST_CASE("invariant la::sub rejects a shape mismatch", "[sdk][invariants]") {
     const ms::DynMat<double> a(2, 2), b(2, 3);
     REQUIRE_THROWS_AS(inv::la::sub(a, b), std::invalid_argument);
 }
+
+TEST_CASE("DynMat mul skips a zero coefficient times posit NaR", "[sdk][invariants][dense]") {
+    // A half-dense A takes the dense kernel unless B has a non-finite entry,
+    // which is classified (isnar), not computed.
+    ms::DynMat<Posit32> a(1, 2), b(2, 1);
+    a(0, 0) = Posit32(1);
+    b(0, 0) = Posit32(2);
+    b(1, 0).setnar();
+    REQUIRE(ms::mul(a, b)(0, 0) == Posit32(2));
+}
