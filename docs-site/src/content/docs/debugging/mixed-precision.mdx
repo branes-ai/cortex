@@ -5,7 +5,10 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="note" title="Status: planned">
+<Aside type="note" title="Status: in progress">
+  The equivalence gate for the port is in place, and the first family (products and the covariance
+  sandwiches) is waiting on an MTL5 kernel fix,
+  [mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -65,6 +68,52 @@ behind `math::Scalar`, and its linear algebra is hand-rolled:
 4. **Per-stage arithmetic.** Covariance and update math can run in one type while Jacobian assembly
    runs in another. A precision matrix of stages × types becomes the characterization report, and
    the diagnosis of #437.
+5. **No latency regression.** `vio_bench` per-frame latency (p50, p99) on EuRoC V1_01 must stay at
+   its pre-port level, or the change must explain the difference.
+
+### The equivalence gate
+
+Two tools hold a port to "same results". Run each before the port to take a reference, and after it
+to compare:
+
+```bash
+# Stage benches: every built-in fixture, every variant, in double (117 outputs).
+./build/tools/bench_snapshot --write before.json              # before the port
+./build/tools/bench_snapshot --compare before.json            # after: 1e-12 normwise, per output
+
+# EuRoC: every tracked pose and its σ, at full precision, per sequence.
+./build/tools/vio_trajectory_report --dataset …/V1_01_easy/mav0 --label V1_01 --out ref/    # before
+./build/tools/vio_trajectory_report --dataset …/V1_01_easy/mav0 --label V1_01 --out after/  # after
+./build/tools/bench_snapshot --compare-trajectory ref/V1_01_trajectory.csv after/V1_01_trajectory.csv
+                                                               # the gate: 1e-9 normwise, per column
+cmp ref/V1_01_trajectory.csv after/V1_01_trajectory.csv       # optional: bit-identical too?
+```
+
+Both compares fail on anything they can't check:
+- a fixture that throws;
+- an output or column present on one side only;
+- a non-finite value that isn't the same kind on both sides (NaN, or an infinity of the same
+  sign).
+
+### What the first family showed
+
+The products port reproduces every bench output and all three EuRoC trajectories (V1_01, MH_05,
+V2_03) **bit for bit**: MTL5 builds each entry in the same k order as the hand-rolled loop. It also
+cost **+7 % p50 and +17 % p99** per-frame latency.
+
+- **MTL5 5.12's generic dense product is an i-j-k dot product.** It walks B down a column and can't
+  vectorize, so it ran 1.5–2.6× slower than the i-k-j loop it replaced at the filter's sizes
+  (81×81, 81×15).
+- **MTL5 has no CRS × dense-matrix product.** The hand-rolled loop skipped zero terms, which made
+  F·P (F is the identity on the clone rows) and (I − KH)·P cheap.
+
+Both were fixed upstream rather than worked around:
+[mtl5#549](https://github.com/stillwater-sc/mtl5/issues/549) is a row-major i-k-j kernel,
+bit-identical by construction, and [mtl5#550](https://github.com/stillwater-sc/mtl5/issues/550) is
+`mult(compressed2D, dense2D, dense2D)`, both in
+[mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). Against that branch the port is back to
+baseline within about 0.5 % p50, with byte-identical trajectories. The remaining cost is building a
+CRS copy per product, which a non-owning CRS view in MTL5 would remove.
 
 ## The MTL5 gap register (#451)
 
@@ -72,6 +121,9 @@ Every operator the pipeline needs that MTL5 doesn't provide is recorded with its
 interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
 
 - scalar × matrix for non-arithmetic scalars (mtl5#538);
+- a vectorizable generic dense product (mtl5#549) and a CRS × dense-matrix product (mtl5#550), both
+  in mtl5#552;
+- a non-owning CRS view over caller arrays (`compressed2D` copies them);
 - block insert/scatter into `dense2D`;
 - a symmetric A·P·Aᵀ primitive;
 - a left-null-space helper;

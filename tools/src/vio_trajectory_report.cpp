@@ -21,7 +21,8 @@
 //                   error exceeds 3σ.
 //
 // The S6 boundaries come from the stage tap (#446); everything else from the
-// estimator's public state. Writes report.json and windows.csv to --out. A metric
+// estimator's public state. Writes report.json, windows.csv and trajectory.csv
+// (every tracked pose and its σ at full precision) to --out. A metric
 // with nothing to measure (no ground-truth match, no applied update) is NaN, which
 // JSON writes as null.
 //
@@ -197,6 +198,7 @@ int main(int argc, char** argv) {
     std::array<ev::ConsistencyAccumulator, ev::kNumNavBlocks> nees_block;
     std::vector<Window> windows;
     std::vector<ev::StampedPose<T>> traj;
+    std::vector<std::array<double, 4>> traj_sigma;  // per tracked frame: σ of position x, y, z and attitude (trace)
     std::size_t gi = 0, frames = 0, beyond = 0, not_pd = 0;
     bool anchored = false;
     SE3 anchor;
@@ -218,6 +220,14 @@ int main(int argc, char** argv) {
         sp.t_s = t;
         sp.pose = e.current_pose();
         traj.push_back(sp);
+        {
+            const auto Pf = e.backend().state().covariance();
+            constexpr auto kp = msckf::State<T>::kPos, kt = msckf::State<T>::kTheta;
+            traj_sigma.push_back({std::sqrt(Pf(kp, kp)),
+                                  std::sqrt(Pf(kp + 1, kp + 1)),
+                                  std::sqrt(Pf(kp + 2, kp + 2)),
+                                  std::sqrt(Pf(kt, kt) + Pf(kt + 1, kt + 1) + Pf(kt + 2, kt + 2))});
+        }
         if (gt.empty())
             return;
         while (gi + 1 < gt.size() && std::abs(gt[gi + 1].t_s - t) <= std::abs(gt[gi].t_s - t))
@@ -357,7 +367,8 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(dir, ec);
         std::ofstream js(dir / (args.label + "_report.json"));
         std::ofstream csv(dir / (args.label + "_windows.csv"));
-        if (ec || !js || !csv) {
+        std::ofstream poses(dir / (args.label + "_trajectory.csv"));
+        if (ec || !js || !csv || !poses) {
             std::cerr << "vio_trajectory_report: cannot write to " << args.out
                       << (ec ? " (" + ec.message() + ")" : std::string()) << "\n";
             return 1;
@@ -368,13 +379,26 @@ int main(int argc, char** argv) {
             csv << w.t0 - t_first << ',' << w.frames << ',' << normalized(w.nees) << ',' << normalized(w.nis) << ','
                 << (w.leak_n ? w.leak_sum / static_cast<double>(w.leak_n) : 0.0) << ','
                 << (w.frames ? static_cast<double>(w.beyond_3sigma) / w.frames : 0.0) << '\n';
+        // Every tracked pose at full precision: the run's fingerprint, for
+        // equivalence gates (#448: a port must reproduce it to 1e-9 relative).
+        poses << std::setprecision(17) << "t_s,px,py,pz,qw,qx,qy,qz,sigma_px,sigma_py,sigma_pz,sigma_theta\n";
+        for (std::size_t i = 0; i < traj.size(); ++i) {
+            const auto p = traj[i].pose.translation();
+            const auto q = traj[i].pose.rotation().quaternion();
+            poses << traj[i].t_s << ',' << p[0] << ',' << p[1] << ',' << p[2] << ',' << q[0] << ',' << q[1] << ','
+                  << q[2] << ',' << q[3];
+            for (const double x : traj_sigma[i])
+                poses << ',' << x;
+            poses << '\n';
+        }
         js.close();
         csv.close();
-        if (!js || !csv) {
+        poses.close();
+        if (!js || !csv || !poses) {
             std::cerr << "vio_trajectory_report: writing the report to " << args.out << " failed\n";
             return 1;
         }
-        std::cout << "    wrote " << args.out << "/" << args.label << "_{report.json,windows.csv}\n";
+        std::cout << "    wrote " << args.out << "/" << args.label << "_{report.json,windows.csv,trajectory.csv}\n";
     }
     return 0;
 }

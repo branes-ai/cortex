@@ -87,6 +87,7 @@ template <math::Scalar T>
                                               std::size_t n = 200,
                                               std::uint64_t seed = 0xA17) {
     using namespace init_detail;
+    using init_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     using SO3t = SO3<T>;
     using Vec3t = Vec3<T>;
     const T g = T{981} / T{100};
@@ -243,6 +244,7 @@ template <math::Scalar T>
 [[nodiscard]] DynamicInitResult<T> dynamic_init(
     T excitation = T{1.5}, T scale_true = T{2}, std::size_t n = 6, T imu_noise = T{0.01}, std::uint64_t seed = 0xD33) {
     using namespace init_detail;
+    using init_detail::Vec3;  // eval::Vec3 (nav_consistency.hpp) would be ambiguous with it
     using Vec3t = Vec3<T>;
     const Vec3t dir{{T{0.8}, T{0.5}, T{0.2}}};
     const T dn = norm3(dir);
