@@ -7,8 +7,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
   The equivalence gate for the port is in place. Two families run on MTL5 5.14: the products and
-  sums, and the Cholesky factor with its SPD solves. Both are bit-identical. QR and the null
-  space are next. The issues:
+  sums, and the Cholesky factor with its SPD solves. Both are bit-identical. QR and the null space
+  wait on an opt-in reflector in MTL5
+  ([mtl5#559](https://github.com/stillwater-sc/mtl5/issues/559)), and the eigen/SVD family waits on
+  the SfM front-end benches ([#472](https://github.com/branes-ai/cortex/issues/472)). The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -143,6 +145,41 @@ So the factor waited for MTL5. [mtl5#556](https://github.com/stillwater-sc/mtl5/
 an opt-in order, `cholesky_factor(A, mtl::tag::subtract_term_by_term{})`, which starts from the
 matrix entry and subtracts each product in turn. The same change made the pivot test reject a NaN,
 as cortex's factor did. With that order the factor ports bit for bit as well.
+
+### QR and the null space, measured before porting
+
+MTL5's `householder` is the LAPACK reflector: scaled, v(0) = 1, with the sign chosen so R's diagonal
+is positive. cortex's QR and MSCKF null-space projection use the textbook reflector (unscaled
+v = x − αe₁, α = −sign(x₀)‖x‖). A prototype port showed:
+- V1_01 and MH_05 summary metrics identical to 4 digits, but the trajectories at 1.2e-8 (outside the
+  1e-9 gate);
+- one of 16,265 update decisions flipping on V2_03, after which the run diverges;
+- a different, equally valid, null-space basis from S6b.
+
+As with the Cholesky factor, MTL5 is asked for an opt-in textbook reflector
+([mtl5#559](https://github.com/stillwater-sc/mtl5/issues/559)) so this family can port bit for bit.
+
+### The eigen and SVD family: a convergence bug first
+
+The symmetric eigensolver is used only in the SfM front end of dynamic initialization: the 8-point
+null space (N = 9), triangulation (N = 4), the DLT PnP (N = 12) and `svd3`. No MTL5 routine
+reproduces cortex's cyclic Jacobi, so this family cannot keep its bits. EuRoC trajectories stay
+byte-identical whatever it does, because dynamic init is attempted there but never succeeds.
+Measuring the candidates turned up a bug: cortex's Jacobi stopped only at an exactly zero
+off-diagonal, which rounding never produces, so every call ran all 100 sweeps
+([#497](https://github.com/branes-ai/cortex/issues/497)). Null-vector accuracy and time per call on
+AᵀA systems with a known null vector (N = 9):
+
+| Solver | Null-vector angle | Time per call |
+|---|---|---|
+| cortex Jacobi, 100 sweeps (before #497) | 3.3e-9 | 164 µs |
+| cortex Jacobi, converged (off ≤ ε²‖A‖²_F) | 3.2e-9 | 7 µs |
+| `mtl::eigen_symmetric` (tridiagonal QR), tol = ε | 9.0e-9 | 4 µs |
+| `mtl::svd` of A (one-sided Jacobi) | 3.2e-9 | 69 µs |
+
+Fixing the stopping rule made the solver 22× faster with the same accuracy. One window build in the
+backend dropped from about 0.55 s to about 28 ms (Release). The MTL5 choice for this family is
+measured on the SfM benches of #472 once they land.
 
 ## The MTL5 gap register (#451)
 

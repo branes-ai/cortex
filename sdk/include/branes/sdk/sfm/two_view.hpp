@@ -23,6 +23,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -42,46 +43,72 @@ using Mat3 = ld::Mat<T, 3, 3>;
 /// `w` the eigenvalues (unsorted). Generic over the dimension N — used here at
 /// N=9 (the 8-point null space) and N=3 (3×3 SVD via the normal matrices).
 /// Clean-room generalization of the 4×4 Horn-alignment solver.
+///
+/// Converged when the off-diagonal mass is below ε²·‖A‖²_F (‖A‖_F is invariant
+/// under the rotations): the rotations hold the off-diagonal at the rounding
+/// level rather than driving it to exactly zero, so an exact-zero test never
+/// fires and ran all 100 sweeps (#497). Both masses are summed over entries
+/// divided by A's largest magnitude, so neither overflows (entries ≳ 1e154 in
+/// double) or underflows. Returns the sweeps it took.
 template <math::Scalar T, std::size_t N>
-void jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
+int jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
     V = ld::Mat<T, N, N>::identity();
-    for (int sweep = 0; sweep < 100; ++sweep) {
-        T off = T{0};
+    T scale = T{0};
+    for (std::size_t p = 0; p < N; ++p)
+        for (std::size_t q = 0; q < N; ++q)
+            if (ld::abs_(A(p, q)) > scale)
+                scale = ld::abs_(A(p, q));
+    int sweep = 0;
+    if (scale > T{0}) {  // a zero matrix is already diagonal (and a NaN one has no scale)
+        T frob2 = T{0};
         for (std::size_t p = 0; p < N; ++p)
-            for (std::size_t q = p + 1; q < N; ++q)
-                off += A(p, q) * A(p, q);
-        if (!(off > T{0}))
-            break;  // already diagonal to working precision
-        for (std::size_t p = 0; p < N; ++p) {
-            for (std::size_t q = p + 1; q < N; ++q) {
-                const T apq = A(p, q);
-                if (apq == T{0})
-                    continue;
-                const T theta = (A(q, q) - A(p, p)) / (T{2} * apq);
-                const T t = (theta >= T{0} ? T{1} : T{-1}) / (ld::abs_(theta) + ld::sqrt_(theta * theta + T{1}));
-                const T c = T{1} / ld::sqrt_(t * t + T{1});
-                const T s = t * c;
-                // Apply the Givens rotation G(p,q,θ) on both sides: A ← GᵀAG.
-                for (std::size_t k = 0; k < N; ++k) {
-                    const T akp = A(k, p), akq = A(k, q);
-                    A(k, p) = c * akp - s * akq;
-                    A(k, q) = s * akp + c * akq;
+            for (std::size_t q = 0; q < N; ++q) {
+                const T a = A(p, q) / scale;
+                frob2 += a * a;
+            }
+        const T eps = std::numeric_limits<T>::epsilon();
+        const T tol = eps * eps * frob2;
+        for (; sweep < 100; ++sweep) {
+            T off = T{0};
+            for (std::size_t p = 0; p < N; ++p)
+                for (std::size_t q = p + 1; q < N; ++q) {
+                    const T a = A(p, q) / scale;
+                    off += a * a;
                 }
-                for (std::size_t k = 0; k < N; ++k) {
-                    const T apk = A(p, k), aqk = A(q, k);
-                    A(p, k) = c * apk - s * aqk;
-                    A(q, k) = s * apk + c * aqk;
-                }
-                for (std::size_t k = 0; k < N; ++k) {
-                    const T vkp = V(k, p), vkq = V(k, q);
-                    V(k, p) = c * vkp - s * vkq;
-                    V(k, q) = s * vkp + c * vkq;
+            if (!(off > tol))
+                break;  // diagonal to working precision
+            for (std::size_t p = 0; p < N; ++p) {
+                for (std::size_t q = p + 1; q < N; ++q) {
+                    const T apq = A(p, q);
+                    if (apq == T{0})
+                        continue;
+                    const T theta = (A(q, q) - A(p, p)) / (T{2} * apq);
+                    const T t = (theta >= T{0} ? T{1} : T{-1}) / (ld::abs_(theta) + ld::sqrt_(theta * theta + T{1}));
+                    const T c = T{1} / ld::sqrt_(t * t + T{1});
+                    const T s = t * c;
+                    // Apply the Givens rotation G(p,q,θ) on both sides: A ← GᵀAG.
+                    for (std::size_t k = 0; k < N; ++k) {
+                        const T akp = A(k, p), akq = A(k, q);
+                        A(k, p) = c * akp - s * akq;
+                        A(k, q) = s * akp + c * akq;
+                    }
+                    for (std::size_t k = 0; k < N; ++k) {
+                        const T apk = A(p, k), aqk = A(q, k);
+                        A(p, k) = c * apk - s * aqk;
+                        A(q, k) = s * apk + c * aqk;
+                    }
+                    for (std::size_t k = 0; k < N; ++k) {
+                        const T vkp = V(k, p), vkq = V(k, q);
+                        V(k, p) = c * vkp - s * vkq;
+                        V(k, q) = s * vkp + c * vkq;
+                    }
                 }
             }
         }
     }
     for (std::size_t i = 0; i < N; ++i)
         w[i] = A(i, i);
+    return sweep;
 }
 
 /// Thin SVD of a 3×3 matrix M = U·diag(S)·Vᵀ with the singular values in S
