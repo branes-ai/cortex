@@ -127,3 +127,59 @@ TEST_CASE("two-view SfM degrades gracefully on too few points", "[sdk][sfm][two-
     const auto r = sfm::estimate_relative_pose<T>(x0, x1);
     REQUIRE_FALSE(r.success);
 }
+
+TEST_CASE("jacobi_eigh converges in a few sweeps and diagonalizes to working precision", "[sdk][sfm][jacobi]") {
+    // A 9x9 normal matrix like the 8-point solver's: AtA of a 27x9 system with
+    // a fixed pseudo-random fill. The exact-zero stopping test this replaced
+    // ran all 100 sweeps on every such matrix (#497).
+    constexpr std::size_t N = 9;
+    ld::Mat<T, N, N> M{};
+    std::vector<T> A(27 * N);
+    for (std::size_t i = 0; i < A.size(); ++i) {
+        const T h = std::sin(static_cast<T>(i) * 12.9898) * 43758.5453;
+        A[i] = h - std::floor(h) - 0.5;
+    }
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j)
+            for (std::size_t r = 0; r < 27; ++r)
+                M(i, j) += A[r * N + i] * A[r * N + j];
+    ld::Mat<T, N, N> V;
+    ld::Vec<T, N> w;
+    const int sweeps = sfm::jacobi_eigh<T, N>(M, V, w);
+    REQUIRE(sweeps < 20);
+    // M = V diag(w) Vt, relative to |M|_F.
+    T frob = 0, res = 0;
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j) {
+            T s = 0;
+            for (std::size_t k = 0; k < N; ++k)
+                s += V(i, k) * w[k] * V(j, k);
+            res += (M(i, j) - s) * (M(i, j) - s);
+            frob += M(i, j) * M(i, j);
+        }
+    REQUIRE(std::sqrt(res / frob) < 1e-14);
+}
+
+TEST_CASE("jacobi_eigh converges on a matrix whose squared entries overflow", "[sdk][sfm][jacobi]") {
+    // Entries near 1e160: their squares overflow double, so a convergence test
+    // on unscaled sums would see an infinite tolerance and stop after zero
+    // sweeps. The test scales by the largest entry first.
+    constexpr std::size_t N = 4;
+    ld::Mat<T, N, N> M{};
+    const T base[N][N] = {{4, 1, 0.5, 0.2}, {1, 3, 0.3, 0.1}, {0.5, 0.3, 2, 0.4}, {0.2, 0.1, 0.4, 1}};
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j)
+            M(i, j) = base[i][j] * 1e160;
+    ld::Mat<T, N, N> V;
+    ld::Vec<T, N> w;
+    const int sweeps = sfm::jacobi_eigh<T, N>(M, V, w);
+    REQUIRE(sweeps > 0);
+    REQUIRE(sweeps < 20);
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j) {
+            T s = 0;
+            for (std::size_t k = 0; k < N; ++k)
+                s += V(i, k) * (w[k] / 1e160) * V(j, k);
+            REQUIRE(std::abs(base[i][j] - s) < 1e-14);
+        }
+}
