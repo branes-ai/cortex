@@ -13,8 +13,17 @@
 //
 //   ./bench_snapshot --write before.json
 //   ./bench_snapshot --compare before.json [--rel 1e-12]
+//   ./bench_snapshot --compare-trajectory ref.csv new.csv [--rel 1e-9]
 //
-// Exit status: 0 when every output matches (or after --write), 1 otherwise.
+// The last form is the end-to-end gate: two vio_trajectory_report
+// NAME_trajectory.csv files, column by column, normwise relative.
+//
+// Every output must be accounted for: a fixture that throws fails --write and
+// --compare, an output missing from either side fails, and a non-finite value
+// must be the same kind (NaN, or an infinity of the same sign) on both sides.
+//
+// Exit status: 0 when every output matches (or after --write), 1 otherwise,
+// 2 on a usage error.
 
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/s0_sensor_model_bench.hpp>
@@ -38,6 +47,8 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,23 +58,28 @@ namespace {
 namespace bn = branes::tools::bench;
 using Snapshot = std::map<std::string, std::vector<double>>;
 
+/// The outputs, and the runs that threw instead of producing one.
+struct Taken {
+    Snapshot outputs;
+    std::vector<std::string> threw;
+};
+
 template <class B>
-void take(Snapshot& snap) {
+void take(Taken& t) {
     for (const auto& nf : B::builtin_fixtures())
         for (const auto& v : B::variants()) {
             const auto key = std::string(B::kStage) + "/" + nf.name + "/" + v.name;
             try {
                 const auto in = B::template decode_input<double>(nf.fixture.input);
-                snap[key] = B::template flatten<double>(B::template run<double>(in, v.name));
+                t.outputs[key] = B::template flatten<double>(B::template run<double>(in, v.name));
             } catch (const std::exception& e) {
-                std::cerr << "  " << key << ": " << e.what() << "\n";
-                snap[key] = {};  // recorded as "threw"; a compare requires the same
+                t.threw.push_back(key + ": " + e.what());
             }
         }
 }
 
-Snapshot take_all() {
-    Snapshot s;
+Taken take_all() {
+    Taken s;
     take<bn::S0SensorModelBench>(s);
     take<bn::S1InitializationBench>(s);
     take<bn::S2PropagationBench>(s);
@@ -81,6 +97,92 @@ Snapshot take_all() {
     return s;
 }
 
+/// Normwise relative difference of `a` from the reference `r`:
+/// max|a − r| / max|r| over the finite entries. `kind_differs` reports a
+/// non-finite entry that is not the same on both sides (NaN vs NaN, or an
+/// infinity of the same sign).
+double compare_values(const std::vector<double>& r, const std::vector<double>& a, bool& kind_differs) {
+    double scale = 0.0, diff = 0.0;
+    kind_differs = false;
+    for (std::size_t i = 0; i < r.size(); ++i) {
+        if (std::isnan(r[i]) || std::isnan(a[i])) {
+            kind_differs = kind_differs || !(std::isnan(r[i]) && std::isnan(a[i]));
+            continue;
+        }
+        if (!std::isfinite(r[i]) || !std::isfinite(a[i])) {
+            kind_differs = kind_differs || r[i] != a[i];
+            continue;
+        }
+        scale = std::max(scale, std::abs(r[i]));
+        diff = std::max(diff, std::abs(a[i] - r[i]));
+    }
+    return scale > 0.0 ? diff / scale : diff;
+}
+
+/// A numeric CSV with one header line.
+bool read_csv(const std::string& path, std::string& header, std::vector<std::vector<double>>& rows) {
+    std::ifstream in(path);
+    if (!in || !std::getline(in, header))
+        return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty())
+            continue;
+        std::vector<double> row;
+        std::stringstream ss(line);
+        std::string cell;
+        while (std::getline(ss, cell, ','))
+            row.push_back(std::stod(cell));
+        rows.push_back(std::move(row));
+    }
+    return true;
+}
+
+/// Two trajectory CSVs, column by column: 0 when every column is within `rel`.
+int compare_trajectory(const std::string& ref_path, const std::string& new_path, double rel) {
+    std::string h1, h2;
+    std::vector<std::vector<double>> r, a;
+    try {
+        if (!read_csv(ref_path, h1, r) || !read_csv(new_path, h2, a)) {
+            std::cerr << "bench_snapshot: cannot read " << ref_path << " or " << new_path << "\n";
+            return 1;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "bench_snapshot: a trajectory cell is not a number (" << e.what() << ")\n";
+        return 1;
+    }
+    if (h1 != h2 || r.size() != a.size()) {
+        std::cout << "bench_snapshot: trajectories differ in shape (" << r.size() << " vs " << a.size() << " rows"
+                  << (h1 != h2 ? ", different columns" : "") << ")\n";
+        return 1;
+    }
+    const std::size_t ncols = r.empty() ? 0 : r.front().size();
+    std::size_t bad = 0;
+    double worst = 0.0;
+    for (std::size_t c = 0; c < ncols; ++c) {
+        std::vector<double> rc, ac;
+        for (std::size_t i = 0; i < r.size(); ++i) {
+            if (r[i].size() != ncols || a[i].size() != ncols) {
+                std::cout << "bench_snapshot: row " << i << " has the wrong number of cells\n";
+                return 1;
+            }
+            rc.push_back(r[i][c]);
+            ac.push_back(a[i][c]);
+        }
+        bool kind = false;
+        const double d = compare_values(rc, ac, kind);
+        worst = std::max(worst, d);
+        if (kind || d > rel) {
+            std::cout << "  DIFFERS  column " << c << "  relative " << d << (kind ? " (non-finite kind changed)" : "")
+                      << "\n";
+            ++bad;
+        }
+    }
+    std::cout << "bench_snapshot: " << r.size() << " poses x " << ncols << " columns, " << bad << " columns outside "
+              << rel << "; worst relative " << worst << "\n";
+    return bad == 0 ? 0 : 1;
+}
+
 /// A JSON number, or the strings bench fixtures use for non-finite values.
 nlohmann::json num(double x) {
     return bn::pack_num(x);
@@ -89,28 +191,52 @@ nlohmann::json num(double x) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string write, compare;
-    double rel = 1e-12;
+    std::string write, compare, traj_ref, traj_new;
+    std::optional<double> rel_arg;
+    const auto usage = [] {
+        std::cerr << "usage: bench_snapshot --write FILE | --compare FILE [--rel 1e-12]\n"
+                     "       bench_snapshot --compare-trajectory REF.csv NEW.csv [--rel 1e-9]\n";
+        return 2;
+    };
     for (int i = 1; i < argc; ++i) {
         const std::string_view a = argv[i];
         if (a == "--write" && i + 1 < argc)
             write = argv[++i];
         else if (a == "--compare" && i + 1 < argc)
             compare = argv[++i];
-        else if (a == "--rel" && i + 1 < argc)
-            rel = std::stod(argv[++i]);
-        else {
-            std::cerr << "usage: bench_snapshot --write FILE | --compare FILE [--rel 1e-12]\n";
-            return 2;
-        }
+        else if (a == "--compare-trajectory" && i + 2 < argc) {
+            traj_ref = argv[++i];
+            traj_new = argv[++i];
+        } else if (a == "--rel" && i + 1 < argc) {
+            try {
+                rel_arg = std::stod(argv[++i]);
+            } catch (const std::exception&) {
+                return usage();
+            }
+        } else
+            return usage();
     }
-    if (write.empty() == compare.empty()) {
-        std::cerr << "bench_snapshot: give exactly one of --write / --compare\n";
+    if ((write.empty() ? 0 : 1) + (compare.empty() ? 0 : 1) + (traj_ref.empty() ? 0 : 1) != 1) {
+        std::cerr << "bench_snapshot: give exactly one of --write / --compare / --compare-trajectory\n";
         return 2;
     }
+    if (rel_arg && !(std::isfinite(*rel_arg) && *rel_arg >= 0.0)) {
+        std::cerr << "bench_snapshot: --rel must be a finite number >= 0\n";
+        return 2;
+    }
+    if (!traj_ref.empty())
+        return compare_trajectory(traj_ref, traj_new, rel_arg.value_or(1e-9));
+    const double rel = rel_arg.value_or(1e-12);
 
-    const Snapshot now = take_all();
+    const Taken taken = take_all();
+    const Snapshot& now = taken.outputs;
+    for (const auto& t : taken.threw)
+        std::cout << "  THREW    " << t << "\n";
     if (!write.empty()) {
+        if (!taken.threw.empty()) {
+            std::cerr << "bench_snapshot: " << taken.threw.size() << " runs threw; no snapshot written\n";
+            return 1;
+        }
         nlohmann::json j = nlohmann::json::object();
         for (const auto& [k, v] : now) {
             auto& a = j[k] = nlohmann::json::array();
@@ -133,7 +259,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     const auto ref = nlohmann::json::parse(in);
-    std::size_t bad = 0, checked = 0;
+    std::size_t bad = taken.threw.size(), checked = 0;
     double worst = 0.0;
     std::string worst_key;
     for (const auto& [k, jv] : ref.items()) {
@@ -153,32 +279,24 @@ int main(int argc, char** argv) {
             ++bad;
             continue;
         }
-        double scale = 0.0, diff = 0.0;
-        bool finiteness = true;
-        for (std::size_t i = 0; i < r.size(); ++i) {
-            if (std::isfinite(r[i]) != std::isfinite(a[i]) || std::isnan(r[i]) != std::isnan(a[i])) {
-                finiteness = false;
-                continue;
-            }
-            if (!std::isfinite(r[i]))
-                continue;
-            scale = std::max(scale, std::abs(r[i]));
-            diff = std::max(diff, std::abs(a[i] - r[i]));
-        }
-        const double d = scale > 0.0 ? diff / scale : diff;
+        bool kind_differs = false;
+        const double d = compare_values(r, a, kind_differs);
+        const bool finiteness = !kind_differs;
         if (d > worst) {
             worst = d;
             worst_key = k;
         }
         if (!finiteness || d > rel) {
-            std::cout << "  DIFFERS  " << k << "  relative " << d << (finiteness ? "" : " (finiteness changed)")
+            std::cout << "  DIFFERS  " << k << "  relative " << d << (finiteness ? "" : " (non-finite kind changed)")
                       << "\n";
             ++bad;
         }
     }
     for (const auto& [k, v] : now)
-        if (!ref.contains(k))
-            std::cout << "  NEW      " << k << "\n";
+        if (!ref.contains(k)) {
+            std::cout << "  NEW      " << k << "  (not in the reference: take a new one)\n";
+            ++bad;
+        }
     std::cout << "bench_snapshot: " << checked << " outputs compared, " << bad << " outside " << rel
               << "; worst relative " << worst << (worst_key.empty() ? "" : " (" + worst_key + ")") << "\n";
     return bad == 0 ? 0 : 1;

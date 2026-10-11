@@ -77,14 +77,23 @@ Two tools hold a port to "same results". Run each before the port to take a refe
 to compare:
 
 ```bash
-# every stage bench, every built-in fixture, every variant, in double: 117 outputs
-./build/tools/bench_snapshot --write before.json
-./build/tools/bench_snapshot --compare before.json            # 1e-12 normwise, per output
+# Stage benches: every built-in fixture, every variant, in double (117 outputs).
+./build/tools/bench_snapshot --write before.json              # before the port
+./build/tools/bench_snapshot --compare before.json            # after: 1e-12 normwise, per output
 
-# every tracked pose and its σ, at full precision, per EuRoC sequence
-./build/tools/vio_trajectory_report --dataset …/V1_01_easy/mav0 --label V1_01 --out ref/
-cmp ref/V1_01_trajectory.csv after/V1_01_trajectory.csv
+# EuRoC: every tracked pose and its σ, at full precision, per sequence.
+./build/tools/vio_trajectory_report --dataset …/V1_01_easy/mav0 --label V1_01 --out ref/    # before
+./build/tools/vio_trajectory_report --dataset …/V1_01_easy/mav0 --label V1_01 --out after/  # after
+./build/tools/bench_snapshot --compare-trajectory ref/V1_01_trajectory.csv after/V1_01_trajectory.csv
+                                                               # the gate: 1e-9 normwise, per column
+cmp ref/V1_01_trajectory.csv after/V1_01_trajectory.csv       # optional: bit-identical too?
 ```
+
+Both compares fail on anything they can't check:
+- a fixture that throws;
+- an output or column present on one side only;
+- a non-finite value that isn't the same kind on both sides (NaN, or an infinity of the same
+  sign).
 
 ### What the first family showed
 
