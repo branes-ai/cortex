@@ -19,6 +19,7 @@
 //   ./vio_pipeline --video --out DIR               # + per-frame scene + overlay data
 //   ./vio_pipeline --source euroc --dataset ROOT --video --out DIR
 //   ./vio_pipeline --source euroc --dataset ROOT --capture DIR --capture-nis 5
+//   ./vio_pipeline --source euroc --dataset ROOT --prefer-dynamic --capture DIR --capture-stages S1_initialization
 //                                                  # stage boundaries → bench fixtures (#446)
 
 // stb_image_write generates its implementation in this TU; the define must
@@ -93,6 +94,7 @@ struct Args {
     // Live-assertion mode (#447): every boundary checked against its bench; the
     // first violation is reported (and captured, with --capture).
     bool live_assert = false;
+    bool prefer_dynamic = false;  ///< EuRoC: dynamic VI init only (VioConfig::prefer_dynamic_init)
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
@@ -166,6 +168,8 @@ Args parse(int argc, char** argv) {
             a.capture.nis_per_dof_above = std::stod(argv[++i]);
         else if (v == "--capture-first-violation")
             a.capture.first_violation = true;
+        else if (v == "--prefer-dynamic")
+            a.prefer_dynamic = true;
         else if (v == "--live-assert") {
             a.live_assert = true;
             a.capture.first_violation = true;
@@ -834,7 +838,9 @@ int main(int argc, char** argv) {
                "  --capture-first-violation  trigger: capture the first boundary failing its bench\n"
                "  --capture-max N            stop after N fixtures (default 100000)\n"
                "  --capture-loop A:B         capture the filter loop over frames A..B (DIR/C_filter_loop/loop.json)\n"
-               "  --live-assert              check every boundary against its bench; report the first violation\n";
+               "  --live-assert              check every boundary against its bench; report the first violation\n"
+               "  --prefer-dynamic           EuRoC: initialize by dynamic VI alignment only (no static init);\n"
+               "                             with --capture-stages S1_initialization, captures every attempt\n";
         return 0;
     }
     if ((!args.capture_dir.empty() || args.live_assert) && (args.invariant || args.sweep))
@@ -867,9 +873,10 @@ int main(int argc, char** argv) {
         const auto taps = args.invariant ? std::make_unique<RunTaps>()
                                          : make_taps(args, "EuRoC " + args.dataset, euroc_cam0().intrinsics);
         const auto& rec = taps->recorder;
-        const bool ok = args.invariant
-                            ? run_euroc_invariant(args, VioConfig{}, r, &stream)
-                            : run_euroc(args, VioConfig{}, r, &stream, args.video ? &frames : nullptr, taps->tap());
+        VioConfig cfg;
+        cfg.prefer_dynamic_init = args.prefer_dynamic;
+        const bool ok = args.invariant ? run_euroc_invariant(args, cfg, r, &stream)
+                                       : run_euroc(args, cfg, r, &stream, args.video ? &frames : nullptr, taps->tap());
         taps->finish(args.capture_dir);
         if (!ok)
             return 0;
