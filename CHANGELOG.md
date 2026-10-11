@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.75.2](https://github.com/branes-ai/cortex/compare/v0.75.1...v0.75.2) (2026-10-11)
+
+
+### Code Refactoring
+
+* **sdk:** spd solves on mtl5 trsm; cholesky factor stays local ([#448](https://github.com/branes-ai/cortex/issues/448)) ([#493](https://github.com/branes-ai/cortex/issues/493)) ([d0a0dd5](https://github.com/branes-ai/cortex/commit/d0a0dd53ebb6ed582dea7b73e5e6ad20cb3b9d12))
+
 ## [0.75.1](https://github.com/branes-ai/cortex/compare/v0.75.0...v0.75.1) (2026-10-11)
 
 
