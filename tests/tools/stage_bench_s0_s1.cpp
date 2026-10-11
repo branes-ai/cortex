@@ -196,7 +196,12 @@ TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they d
         const bn::NamedFixture nf{name, bn::load(dir / (std::string(name) + ".json"))};
         REQUIRE(nf.fixture.variant == "sfm_two_view_pnp");
         const auto run = bn::run_fixture<S1>(nf, nf.fixture.variant, bn::AllTypes{}, {"double"});
-        REQUIRE(result(run, "replay.bit_identical").value == 0.0);
+        // Bit-identical on the platform it was captured on (Linux); elsewhere the
+        // math library differs, and the replay must keep its shape and finiteness.
+        if (nf.fixture.platform == bn::current_platform())
+            REQUIRE(result(run, "replay.bit_identical").value == 0.0);
+        else
+            REQUIRE(result(run, "replay.same_shape_and_finiteness").pass);
         const auto out = S1::run<double>(S1::decode_input<double>(nf.fixture.input), "sfm_two_view_pnp");
         REQUIRE(out.window.status == status);
         REQUIRE((out.success == 1) == (status == St::Ok));
