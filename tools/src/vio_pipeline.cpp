@@ -270,6 +270,8 @@ void report_capture(const Recorder* rec, const std::string& dir, bool live) {
         std::cout << "  (first invariant violation at frame " << *st.first_violation_frame << ")";
     if (st.chain_mismatches)
         std::cout << "\n  WARNING: " << st.chain_mismatches << " S6 boundaries did not reproduce the run";
+    if (st.init_mismatches)
+        std::cout << "\n  WARNING: " << st.init_mismatches << " S1 dynamic-init attempts did not reproduce the run";
     if (st.skipped)
         std::cout << "\n  skipped         : " << st.skipped << " S6 boundaries (multi-camera)";
     std::cout << "\n";

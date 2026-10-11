@@ -394,7 +394,8 @@ writes fixtures:
 
 S1 is tapped too (#472): each dynamic-init attempt becomes an `S1_initialization` fixture named
 by attempt, captured when the range starts at frame 0 and no trigger is set. Its expected output is
-the bench's `sfm_two_view_pnp` run, checked against the run's window outcome. `vio_pipeline
+the bench's `sfm_two_view_pnp` run, checked against the run's window outcome
+(`stats().init_mismatches`, reported separately from the S6 `chain_mismatches`). `vio_pipeline
 --prefer-dynamic` makes EuRoC runs attempt it on every frame. Not tapped: S4 (`asl_trace` covers
 S4), S10; multi-camera S6 boundaries are skipped.
 

@@ -168,6 +168,7 @@ TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-ide
         REQUIRE(value_of(replay(nf), "replay.bit_identical") == 0.0);
     }
     // The bench rebuilds each window as the backend did.
+    REQUIRE(rec.stats().init_mismatches == 0);
     REQUIRE(rec.stats().chain_mismatches == 0);
 }
 

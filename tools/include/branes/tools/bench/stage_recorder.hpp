@@ -26,6 +26,7 @@
 // state with the same stage functions, and the recomputed chain is checked
 // against the run: its outcome, NIS and state after must equal the run's bit
 // for bit. A difference is counted (`stats().chain_mismatches`), never hidden.
+// S1 differences are counted separately (`stats().init_mismatches`).
 //
 // Selection (`CaptureOptions`): by stage, by frame range, and by trigger —
 //   • `nis_per_dof_above`: an S6 update whose NIS/dof exceeds the threshold;
@@ -121,6 +122,7 @@ struct CaptureStats {
     std::size_t chain_mismatches = 0;  ///< S6 boundaries examined whose recomputed chain differs from the run
     std::size_t skipped = 0;           ///< selected boundaries the recorder cannot express (see `on_s6`)
     std::size_t init_attempts = 0;     ///< dynamic-init attempts seen (S1, before the filter starts)
+    std::size_t init_mismatches = 0;   ///< S1 attempts whose window the bench rebuilt differently from the run
     std::optional<std::uint64_t> first_violation_frame;  ///< the frame the first-violation trigger fired on
     std::optional<Violation> first_violation;            ///< …and what failed there
 };
@@ -248,7 +250,7 @@ public:
         in.gravity_magnitude = gravity_magnitude;
         const auto out = B::template run<T>(in, "sfm_two_view_pnp");
         if (out.window.success != window.success || out.window.status != window.status || (out.success != 0) != aligned)
-            ++stats_.chain_mismatches;
+            ++stats_.init_mismatches;
         std::string n = std::to_string(attempt);
         NamedFixture nf;
         nf.name = "init_attempt" + std::string(n.size() < 4 ? 4 - n.size() : 0, '0') + n + "_" + std::string(B::kStage);

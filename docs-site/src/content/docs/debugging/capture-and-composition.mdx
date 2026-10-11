@@ -75,8 +75,10 @@ after must equal the run's bit for bit. A difference is counted and reported, ne
 Each fixture is tagged with the arithmetic the run used and the platform it was captured on, so
 `replay.bit_identical` holds there. S1 is captured per dynamic-init attempt, before the filter
 starts: the SfM window, the static IMU window, and the bench's `sfm_two_view_pnp` run as the
-expected output, checked against what the backend did. To capture moving-start windows from
-EuRoC:
+expected output, checked against what the backend did. Because those attempts come before frame 0,
+they are captured only when the frame range starts at frame 0 (the default) and no trigger
+(`--capture-nis`, `--capture-first-violation`, `--live-assert`) is set; otherwise no attempt
+produces an S1 fixture. To capture moving-start windows from EuRoC:
 
 ```bash
 ./build/tools/vio_pipeline --source euroc --dataset …/MH_05_difficult/mav0 --prefer-dynamic \
