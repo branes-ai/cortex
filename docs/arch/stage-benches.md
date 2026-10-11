@@ -220,6 +220,67 @@ The benches build on what is already there rather than replacing it at once:
   factorization, which breaks down once κ² exceeds 1/ε. This is #449/#450 territory; the default
   (static) path is green in every type.
 
+## The S1 SfM front end (#472)
+
+The S1 bench's `dynamic` variant starts from ready-made keyframes. The backend builds those
+keyframes from images: `sfm::build_init_window` bootstraps the window with a two-view essential
+matrix on the frame with the largest parallax to frame 0, resections every other frame by PnP, and
+hands the keyframes to `try_dynamic`. That front end, where the moving-start failures of #211/#247
+live, is now on the bench.
+
+- **Input:** every S1 fixture also carries an SfM window (`InitFrame`s: normalized observations by
+  track id, plus the preintegration since the previous frame) and camera 0's extrinsics. Fixtures
+  from before #472 have none and still load.
+- **Variants:**
+  - `sfm_two_view_pnp`: the backend's path, `build_init_window` → `try_dynamic` →
+    `seed_from_alignment`;
+  - `sfm_adjacent_bootstrap`: the bootstrap on frame 1, the pre-#247 choice;
+  - `sfm_keyframes_4hz`: the same SfM, with keyframes at least 0.25 s apart for the alignment.
+    `InitWindowOptions::min_keyframe_dt` composes the preintegration of the frames it merges.
+- **Contract:**
+  - the window builds;
+  - its keyframe attitudes are in SO(3);
+  - every resection's reprojection RMS is inside the PnP gate;
+  - against truth, the keyframe attitudes (relative to the first) and the camera track (after a
+    similarity fit: the window is up to scale and gauge) match;
+  - when it aligns, the metric scale matches, and the usual S1 seeding contract holds.
+- **Diagnostics:** `InitWindowResult` now reports where a build stopped (`status`: no bootstrap
+  pair, two-view failed, too few landmarks, PnP failed on frame N), the bootstrap frame, its parallax
+  and correspondences, the landmark count, and each resection's inlier count and RMS.
+- **Fixtures:**
+  - *known answer:* exact observations and preintegration;
+  - *ground truth:* 20 frames, 0.1 px of noise;
+  - *captured:* 10 frames, 1 px;
+  - three windows **captured from EuRoC MH_05** by the new S1 tap. One is at rest, one is moving
+    and fails the two-view, and one is the window that finally aligns.
+- **Sweep:** observation noise × window length (5/10/20 frames at 20 Hz) × camera speed, crossed
+  with the existing static axes.
+- **Types:** the SfM variants run only in native types by default (`runs_by_default`). Their
+  RANSAC runs hundreds of eigensolves per window, and an emulated posit is ~10⁴× slower.
+
+### What it found
+
+- **The eigensolver never converged** (#497). The Jacobi stopped only at an exactly zero
+  off-diagonal, so every call ran 100 sweeps. One window build took 0.55 s; it takes 28 ms now, at
+  the same accuracy.
+- **The lever arm is mixed into up-to-scale positions** (#499). The window adds the metric
+  camera→IMU lever arm to SfM camera positions. The alignment then scales it too, and even exact
+  data comes out 0.2–5.5 % off in scale. Zeroing the lever arm takes 0.88 % down to 0.017 %.
+- **The RANSAC gates are tighter than pixel noise** (#500). The two-view Sampson gate is ≈0.9 px
+  and the PnP gate ≈2.3 px, each with a 50 % inlier floor.
+  - In the sweep, 2 px of noise never builds a window. At 1 px every point probed fails the two-view
+    or PnP, and at 0.5 px short windows fail PnP.
+  - On EuRoC MH_05, 82 of 170 attempts fail the two-view while the drone moves (> 100 px of mean
+    disparity). At rest, the bootstrap accepts a 0.05 px "parallax": there is no minimum-parallax
+    gate.
+- **The alignment accepts badly scaled windows** (#501). A camera track only ~1 % off (0.1 px of
+  noise) aligns with a 21–34 % scale error, and at 0.25–0.5 px the error reaches 60–90 %.
+  `try_dynamic` gates on observability, not consistency.
+  - Spacing the keyframes at ≥ 0.25 s helps at some points (21 % → 6.8 % on the ground-truth
+    fixture) but not in general. The short-baseline SfM track, with no refinement, is the cause.
+- **The largest-parallax bootstrap matters** (#247). The adjacent bootstrap loses the 0.1 px
+  window the shipped one builds.
+
 ## What the S2 and S3 benches found (#455)
 
 - **The propagator didn't compile for posits.** `s.timestamp += dt` added a `T` into the `double`
@@ -331,7 +392,11 @@ writes fixtures:
 - the triggers select exactly what they name;
 - a tap that captures nothing, or everything, leaves the run bit-identical.
 
-Not tapped: S1, S4 (`asl_trace` covers S4), S10; multi-camera S6 boundaries are skipped.
+S1 is tapped too (#472): each dynamic-init attempt becomes an `S1_initialization` fixture named
+by attempt, captured when the range starts at frame 0 and no trigger is set. Its expected output is
+the bench's `sfm_two_view_pnp` run, checked against the run's window outcome. `vio_pipeline
+--prefer-dynamic` makes EuRoC runs attempt it on every frame. Not tapped: S4 (`asl_trace` covers
+S4), S10; multi-camera S6 boundaries are skipped.
 
 **Found by capture.**
 

@@ -73,8 +73,17 @@ same stage functions. It then checks the chain against the run: the outcome, the
 after must equal the run's bit for bit. A difference is counted and reported, never hidden.
 
 Each fixture is tagged with the arithmetic the run used and the platform it was captured on, so
-`replay.bit_identical` holds there. Not captured: S1 (initialization), S4 (the frontend: the
-backend never sees images; `asl_trace` covers S4) and S10. A multi-camera updater's S6 boundaries
+`replay.bit_identical` holds there. S1 is captured per dynamic-init attempt, before the filter
+starts: the SfM window, the static IMU window, and the bench's `sfm_two_view_pnp` run as the
+expected output, checked against what the backend did. To capture moving-start windows from
+EuRoC:
+
+```bash
+./build/tools/vio_pipeline --source euroc --dataset …/MH_05_difficult/mav0 --prefer-dynamic \
+    --capture cap/ --capture-stages S1_initialization
+```
+
+Not captured: S4 (the frontend: the backend never sees images; `asl_trace` covers S4) and S10. A multi-camera updater's S6 boundaries
 are skipped, because the S5 and S6a benches model one camera.
 
 ### What selects a capture
