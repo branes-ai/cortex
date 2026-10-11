@@ -11,6 +11,11 @@
 
 #include <branes/math/lie/detail.hpp>  // scalar sqrt_
 
+#include <mtl/mat/dense2D.hpp>
+#include <mtl/operation/cholesky.hpp>
+#include <mtl/operation/trans.hpp>
+#include <mtl/operation/trsm.hpp>
+
 #include <cassert>
 #include <cstddef>
 #include <vector>
@@ -40,6 +45,23 @@ struct DynMat {
         return m;
     }
 };
+
+/// Zero-copy MTL5 views of a `DynMat`'s row-major storage.
+namespace mtl_view {
+template <math::Scalar T>
+using Dense = mtl::mat::dense2D<T>;  // row-major, the DynMat layout
+
+template <math::Scalar T>
+[[nodiscard]] Dense<T> of(DynMat<T>& m) {
+    return Dense<T>(m.rows, m.cols, m.d.data());
+}
+/// Read-only use: MTL5 has no const external view, and nothing is written
+/// through this one.
+template <math::Scalar T>
+[[nodiscard]] Dense<T> of(const DynMat<T>& m) {
+    return Dense<T>(m.rows, m.cols, const_cast<T*>(m.d.data()));
+}
+}  // namespace mtl_view
 
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> mul(const DynMat<T>& a, const DynMat<T>& b) {
@@ -134,28 +156,20 @@ template <math::Scalar T>
 
 /// Solve A X = B given a precomputed lower Cholesky factor L (A = L Lᵀ).
 /// Lets a caller that already factored A (e.g. to test definiteness) reuse
-/// the factor instead of re-factoring inside `spd_solve`.
+/// the factor instead of re-factoring inside `spd_solve`. Two MTL5 triangular
+/// solves, forward (L Y = B) then back (Lᵀ X = Y), per RHS column, each entry
+/// as b − L(i,0)·x(0) − L(i,1)·x(1) − … in ascending order: the hand-rolled
+/// substitution this replaced, bit for bit.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> cholesky_solve(const DynMat<T>& L, const DynMat<T>& b) {
     assert(L.rows == L.cols && L.rows == b.rows && "cholesky_solve: shape mismatch");
-    const std::size_t n = L.rows;
-    const std::size_t k = b.cols;
-    DynMat<T> x(n, k);
-    // Forward (L y = b) then back (Lᵀ x = y), per RHS column.
-    for (std::size_t c = 0; c < k; ++c) {
-        for (std::size_t i = 0; i < n; ++i) {
-            T s = b(i, c);
-            for (std::size_t j = 0; j < i; ++j)
-                s -= L(i, j) * x(j, c);
-            x(i, c) = s / L(i, i);
-        }
-        for (std::size_t ii = n; ii-- > 0;) {
-            T s = x(ii, c);
-            for (std::size_t j = ii + 1; j < n; ++j)
-                s -= L(j, ii) * x(j, c);
-            x(ii, c) = s / L(ii, ii);
-        }
-    }
+    DynMat<T> x = b;
+    if (x.d.empty())
+        return x;
+    auto X = mtl_view::of(x);
+    const auto Lv = mtl_view::of(L);
+    mtl::trsm(T{1}, Lv, X, /*upper=*/false);
+    mtl::trsm(T{1}, mtl::trans(Lv), X, /*upper=*/true);
     return x;
 }
 
