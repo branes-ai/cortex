@@ -6,23 +6,28 @@
 // matrices don't fit). Row-major, type-generic, header-only. Not a
 // general BLAS — just what the State/Propagator/StateHelper need.
 //
-// The arithmetic is moving onto MTL5 (#448) one family at a time: `DynMat`
-// keeps its storage and its interface, and a ported operation runs an MTL5
-// kernel over zero-copy `mtl::mat::dense2D` views of that storage
-// (`mtl_view`). Each family is held to the pre-port results by the stage
-// benches and the EuRoC trajectories (tools/src/bench_snapshot.cpp).
+// The arithmetic runs on MTL5 (#448): `DynMat` keeps its storage and its
+// interface, and its operations are MTL5 kernels over zero-copy
+// `mtl::mat::dense2D` views of that storage (`mtl_view`). Each ported
+// operation reproduces the hand-rolled one it replaced bit for bit at
+// T = double (the same terms, summed in the same order), which the stage
+// benches and the EuRoC trajectories check (tools/src/bench_snapshot.cpp).
 
 #ifndef BRANES_SDK_MSCKF_DENSE_HPP
 #define BRANES_SDK_MSCKF_DENSE_HPP
 
-#include <branes/math/lie/detail.hpp>  // scalar sqrt_
+#include <branes/math/arithmetic.hpp>  // math::Scalar
 
+#include <mtl/mat/compressed2D.hpp>
 #include <mtl/mat/dense2D.hpp>
+#include <mtl/mat/operators.hpp>
 #include <mtl/operation/cholesky.hpp>
+#include <mtl/operation/mult.hpp>
 #include <mtl/operation/trans.hpp>
 #include <mtl/operation/trsm.hpp>
 
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -69,18 +74,54 @@ template <math::Scalar T>
 }
 }  // namespace mtl_view
 
+/// A·B. The filter's left operands are often mostly zero: the transition F
+/// is the identity on every clone row, G = [I; J] and I − KH are sparse. A
+/// left operand under half dense is multiplied in compressed (CRS) form, so its
+/// zeros cost nothing. Both kernels build every entry as zero + A(i,0)·B(0,j) +
+/// A(i,1)·B(1,j) + … in ascending k (the CRS one over A's nonzeros only, whose
+/// omitted terms are exact zeros), so they agree with each other and with the
+/// hand-rolled product this replaced, bit for bit, as long as B is finite. A
+/// zero A(i,k) times a non-finite B(k,j) is NaN, which the dense kernel adds
+/// and the zero-skipping product never forms, so when A has zeros and B a
+/// non-finite entry the CRS kernel runs whatever A's density.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> mul(const DynMat<T>& a, const DynMat<T>& b) {
     assert(a.cols == b.rows && "DynMat::mul: inner dimensions must match");
     DynMat<T> r(a.rows, b.cols);
-    for (std::size_t i = 0; i < a.rows; ++i)
-        for (std::size_t k = 0; k < a.cols; ++k) {
-            const T aik = a(i, k);
-            if (aik == T{0})
-                continue;
-            for (std::size_t j = 0; j < b.cols; ++j)
-                r(i, j) += aik * b(k, j);
-        }
+    if (r.d.empty() || a.cols == 0)
+        return r;
+    auto R = mtl_view::of(r);
+    std::size_t nnz = 0;
+    for (const T& x : a.d)
+        nnz += x == T{0} ? 0 : 1;
+    // Classified, not computed (no x − x, which traps on NaR or FE_INVALID).
+    // Unqualified, so a Universal type's own isfinite is found by ADL.
+    const auto all_finite = [](const DynMat<T>& m) {
+        using std::isfinite;
+        for (const T& x : m.d)
+            if (!isfinite(x))
+                return false;
+        return true;
+    };
+    if (2 * nnz >= a.d.size() && (nnz == a.d.size() || all_finite(b))) {
+        mtl::mult(mtl_view::of(a), mtl_view::of(b), R);
+        return r;
+    }
+    using Csr = mtl::mat::compressed2D<T>;
+    using Index = typename Csr::size_type;
+    std::vector<Index> starts(a.rows + 1, 0), cols;
+    std::vector<T> vals;
+    cols.reserve(nnz);
+    vals.reserve(nnz);
+    for (std::size_t i = 0; i < a.rows; ++i) {
+        for (std::size_t k = 0; k < a.cols; ++k)
+            if (a(i, k) != T{0}) {
+                cols.push_back(static_cast<Index>(k));
+                vals.push_back(a(i, k));
+            }
+        starts[i + 1] = static_cast<Index>(cols.size());
+    }
+    mtl::mult(Csr(a.rows, a.cols, nnz, starts.data(), cols.data(), vals.data()), mtl_view::of(b), R);
     return r;
 }
 
@@ -97,8 +138,10 @@ template <math::Scalar T>
 [[nodiscard]] DynMat<T> add(const DynMat<T>& a, const DynMat<T>& b) {
     assert(a.rows == b.rows && a.cols == b.cols && "DynMat::add: shape mismatch");
     DynMat<T> r(a.rows, a.cols);
-    for (std::size_t i = 0; i < a.d.size(); ++i)
-        r.d[i] = a.d[i] + b.d[i];
+    if (r.d.empty())
+        return r;
+    auto R = mtl_view::of(r);
+    R = mtl_view::of(a) + mtl_view::of(b);
     return r;
 }
 
@@ -115,34 +158,26 @@ void symmetrize(DynMat<T>& a) {
         }
 }
 
-/// Cholesky factor (lower L with A = L Lᵀ). Returns false if A is not
-/// positive-definite to working precision.
-///
-/// Kept local, not MTL5's `cholesky_factor` (#448): that one forms each entry
-/// as a − (Σ products) where this one subtracts term by term. Both are
-/// backward stable, but the bits differ, and on EuRoC V2_03 that flips 2 of
-/// ~16k update decisions and the trajectory diverges. The port waits on a
-/// term-by-term ordering in MTL5 (stillwater-sc/mtl5#556).
+/// Cholesky factor (lower L with A = L Lᵀ, zeros above the diagonal).
+/// Returns false if A is not positive-definite to working precision,
+/// including a NaN pivot. MTL5's `cholesky_factor` in its term-by-term order
+/// (stillwater-sc/mtl5#556): each entry starts from a(i,j) and subtracts
+/// L(i,k)·L(j,k) in ascending k, as the hand-rolled factor did, so the bits
+/// are the same. The default order, a − (Σ products), rounds differently,
+/// and on EuRoC V2_03 that flips 2 of ~16k update decisions.
 template <math::Scalar T>
 [[nodiscard]] bool cholesky(const DynMat<T>& a, DynMat<T>& L) {
     assert(a.rows == a.cols && "DynMat::cholesky: matrix must be square");
     const std::size_t n = a.rows;
-    L = DynMat<T>(n, n);
-    for (std::size_t j = 0; j < n; ++j) {
-        T sum = a(j, j);
-        for (std::size_t k = 0; k < j; ++k)
-            sum -= L(j, k) * L(j, k);
-        if (!(sum > T{0}))
-            return false;
-        const T Ljj = math::lie::detail::sqrt_(sum);
-        L(j, j) = Ljj;
-        for (std::size_t i = j + 1; i < n; ++i) {
-            T s = a(i, j);
-            for (std::size_t k = 0; k < j; ++k)
-                s -= L(i, k) * L(j, k);
-            L(i, j) = s / Ljj;
-        }
-    }
+    L = a;
+    if (n == 0)
+        return true;
+    auto Lv = mtl_view::of(L);
+    if (mtl::cholesky_factor(Lv, mtl::tag::subtract_term_by_term{}) != 0)
+        return false;
+    for (std::size_t j = 1; j < n; ++j)
+        for (std::size_t i = 0; i < j; ++i)
+            L(i, j) = T{0};  // MTL5 leaves the upper triangle as it was
     return true;
 }
 
