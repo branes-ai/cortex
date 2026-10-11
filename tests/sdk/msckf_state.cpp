@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -170,4 +171,46 @@ TEST_CASE("S10 clone augmentation lands after the calibration block", "[sdk][s10
     REQUIRE(s.calib.size() == 1);
     REQUIRE(s.calib_offset(0) == ms::State<T>::kImuDim);
     REQUIRE(ms::is_positive_semidefinite(s.covariance()));
+}
+
+TEST_CASE("DynMat mul skips zero coefficients: 0 times NaN or inf never enters a sum", "[sdk][msckf][dense]") {
+    // The product the MTL5 port replaced: zero A(i,k) terms are never formed.
+    const auto skip_zeros = [](const ms::DynMat<T>& a, const ms::DynMat<T>& b) {
+        ms::DynMat<T> r(a.rows, b.cols);
+        for (std::size_t i = 0; i < a.rows; ++i)
+            for (std::size_t k = 0; k < a.cols; ++k)
+                if (a(i, k) != T{0})
+                    for (std::size_t j = 0; j < b.cols; ++j)
+                        r(i, j) += a(i, k) * b(k, j);
+        return r;
+    };
+    const T nan = std::numeric_limits<T>::quiet_NaN(), inf = std::numeric_limits<T>::infinity();
+    {
+        ms::DynMat<T> a(1, 2), b(2, 1);  // half dense: the dense kernel's density
+        a(0, 0) = 1;
+        b(0, 0) = 2;
+        b(1, 0) = nan;
+        REQUIRE(ms::mul(a, b)(0, 0) == 2);
+        b(1, 0) = -inf;
+        REQUIRE(ms::mul(a, b)(0, 0) == 2);
+    }
+    // Every density, with non-finite entries in B: the same values, NaN where it was NaN.
+    for (const std::size_t zeros : {std::size_t{0}, std::size_t{3}, std::size_t{8}, std::size_t{14}}) {
+        ms::DynMat<T> a(4, 4), b(4, 3);
+        for (std::size_t i = 0; i < 16; ++i)
+            a.d[i] = i < zeros ? T{0} : T(0.25) * T(i) - T(1.5);
+        for (std::size_t i = 0; i < 12; ++i)
+            b.d[i] = T(0.5) * T(i) - T(2);
+        b(1, 2) = nan;
+        b(3, 0) = inf;
+        const auto r = ms::mul(a, b), ref = skip_zeros(a, b);
+        INFO("zeros in A: " << zeros);
+        for (std::size_t i = 0; i < r.d.size(); ++i) {
+            INFO("entry " << i);
+            if (std::isnan(ref.d[i]))
+                REQUIRE(std::isnan(r.d[i]));
+            else
+                REQUIRE(r.d[i] == ref.d[i]);
+        }
+    }
 }

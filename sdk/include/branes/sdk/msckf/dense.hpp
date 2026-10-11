@@ -79,7 +79,10 @@ template <math::Scalar T>
 /// zeros cost nothing. Both kernels build every entry as zero + A(i,0)·B(0,j) +
 /// A(i,1)·B(1,j) + … in ascending k (the CRS one over A's nonzeros only, whose
 /// omitted terms are exact zeros), so they agree with each other and with the
-/// hand-rolled product this replaced, bit for bit.
+/// hand-rolled product this replaced, bit for bit, as long as B is finite. A
+/// zero A(i,k) times a non-finite B(k,j) is NaN, which the dense kernel adds
+/// and the zero-skipping product never forms, so when A has zeros and B a
+/// non-finite entry the CRS kernel runs whatever A's density.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> mul(const DynMat<T>& a, const DynMat<T>& b) {
     assert(a.cols == b.rows && "DynMat::mul: inner dimensions must match");
@@ -90,7 +93,14 @@ template <math::Scalar T>
     std::size_t nnz = 0;
     for (const T& x : a.d)
         nnz += x == T{0} ? 0 : 1;
-    if (2 * nnz >= a.d.size()) {
+    // x − x is zero exactly when x is finite (NaN, ±inf and NaR give NaN/NaR).
+    const auto all_finite = [](const DynMat<T>& m) {
+        for (const T& x : m.d)
+            if (!(x - x == T{0}))
+                return false;
+        return true;
+    };
+    if (2 * nnz >= a.d.size() && (nnz == a.d.size() || all_finite(b))) {
         mtl::mult(mtl_view::of(a), mtl_view::of(b), R);
         return r;
     }
