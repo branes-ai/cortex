@@ -31,14 +31,17 @@
 #include <branes/sdk/msckf/stages/s6_msckf_update.hpp>
 #include <branes/sdk/msckf/stages/s9_marginalization.hpp>
 #include <branes/sdk/msckf/state.hpp>
+#include <branes/sdk/sfm/init_window.hpp>
 
 #include <cstdint>
+#include <span>
 
 namespace branes::sdk::msckf {
 
 /// The stage boundaries a tap can observe.
 enum class TapStage {
     S0_sensor_model,     ///< one pixel unprojected and normalized
+    S1_initialization,   ///< one dynamic-init attempt: the SfM window and the static IMU window
     S2_propagation,      ///< one IMU step (or the zero-order hold to a frame time)
     S3_augmentation,     ///< the frame's pose cloned into the window
     S6_msckf_update,     ///< one feature track through S5 → S6e
@@ -66,6 +69,19 @@ public:
 
     virtual void
     on_s0(std::uint32_t /*camera_id*/, T /*u*/, T /*v*/, const stages::s0_sensor_model::Result<T>& /*out*/) {}
+
+    /// One dynamic-init attempt (before the filter is initialized): the
+    /// buffered SfM window, camera 0's extrinsics, the static-init IMU window,
+    /// and what the attempt did (`window` built or not, `aligned` = try_dynamic
+    /// accepted it and the filter was seeded from it).
+    virtual void on_s1(std::span<const sfm::InitFrame<T>> /*frames*/,
+                       const CameraExtrinsics<T>& /*extrinsics*/,
+                       std::span<const Vec3> /*gyro*/,
+                       std::span<const Vec3> /*accel*/,
+                       T /*gravity_magnitude*/,
+                       double /*t*/,
+                       const sfm::InitWindowResult<T>& /*window*/,
+                       bool /*aligned*/) {}
 
     virtual void on_s2(const St& /*before*/,
                        const Propagator<T>& /*propagator*/,
