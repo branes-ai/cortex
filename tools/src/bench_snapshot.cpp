@@ -43,6 +43,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -131,8 +132,17 @@ bool read_csv(const std::string& path, std::string& header, std::vector<std::vec
         std::vector<double> row;
         std::stringstream ss(line);
         std::string cell;
-        while (std::getline(ss, cell, ','))
-            row.push_back(std::stod(cell));
+        while (std::getline(ss, cell, ',')) {
+            // The whole cell must be the number ("1.5abc" is not 1.5); a trailing
+            // CR from a CRLF file is whitespace, not data.
+            while (!cell.empty() && std::isspace(static_cast<unsigned char>(cell.back())))
+                cell.pop_back();
+            std::size_t used = 0;
+            const double v = std::stod(cell, &used);
+            if (used != cell.size())
+                throw std::invalid_argument("'" + cell + "' is not a number");
+            row.push_back(v);
+        }
         rows.push_back(std::move(row));
     }
     return true;
@@ -258,20 +268,34 @@ int main(int argc, char** argv) {
         std::cerr << "bench_snapshot: cannot read " << compare << "\n";
         return 1;
     }
-    const auto ref = nlohmann::json::parse(in);
+    // The reference, decoded up front: a malformed file is an error (exit 1),
+    // not an abort.
+    Snapshot ref;
+    try {
+        const auto j = nlohmann::json::parse(in);
+        if (!j.is_object())
+            throw std::invalid_argument("not a JSON object");
+        for (const auto& [k, jv] : j.items()) {
+            if (!jv.is_array())
+                throw std::invalid_argument("'" + k + "' is not an array");
+            auto& v = ref[k];
+            for (const auto& x : jv)
+                v.push_back(bn::unpack_num(x));
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "bench_snapshot: " << compare << " is not a snapshot (" << e.what() << ")\n";
+        return 1;
+    }
     std::size_t bad = taken.threw.size(), checked = 0;
     double worst = 0.0;
     std::string worst_key;
-    for (const auto& [k, jv] : ref.items()) {
+    for (const auto& [k, r] : ref) {
         const auto it = now.find(k);
         if (it == now.end()) {
             std::cout << "  MISSING  " << k << "\n";
             ++bad;
             continue;
         }
-        std::vector<double> r;
-        for (const auto& x : jv)
-            r.push_back(bn::unpack_num(x));
         const auto& a = it->second;
         ++checked;
         if (a.size() != r.size()) {
@@ -293,7 +317,7 @@ int main(int argc, char** argv) {
         }
     }
     for (const auto& [k, v] : now)
-        if (!ref.contains(k)) {
+        if (ref.count(k) == 0) {
             std::cout << "  NEW      " << k << "  (not in the reference: take a new one)\n";
             ++bad;
         }
