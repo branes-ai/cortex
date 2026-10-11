@@ -6,9 +6,11 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
-  The equivalence gate for the port is in place, and the first family (products and the covariance
+  The equivalence gate for the port is in place. The first family (products and the covariance
   sandwiches) is waiting on an MTL5 kernel fix,
-  [mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). The issues:
+  [mtl5#552](https://github.com/stillwater-sc/mtl5/pull/552). In the second family the triangular
+  solves run on MTL5, and the Cholesky factor stays local until
+  [mtl5#556](https://github.com/stillwater-sc/mtl5/issues/556). The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -115,6 +117,33 @@ bit-identical by construction, and [mtl5#550](https://github.com/stillwater-sc/m
 baseline within about 0.5 % p50, with byte-identical trajectories. The remaining cost is building a
 CRS copy per product, which a non-owning CRS view in MTL5 would remove.
 
+### What the second family showed
+
+The second family is the Cholesky factor and the SPD solves behind it. They serve the update's
+S⁻¹ and Kalman gain, the χ² gate, initialization, triangulation and the NEES checks.
+
+- **The solves port bit for bit.** `cholesky_solve` is now two `mtl::trsm` calls, forward through L
+  and back through `trans(L)`. trsm's generic path subtracts each term in the same order as the
+  hand-rolled substitution. All 117 bench outputs and all three EuRoC trajectories are identical,
+  and latency is unchanged (V1_01 p50 30.86 → 30.85 ms, p99 37.51 → 37.49 ms, three interleaved
+  runs each).
+- **The factor does not.** MTL5's `cholesky_factor` forms each entry as a − (Σ products). The
+  hand-rolled factor subtracts term by term. Both are backward stable, but they round differently:
+  37 of 117 bench outputs move, and the filter loop moves by up to 2.5e-11.
+- **On EuRoC, that rounding change is a different run.** On V2_03, 2 of 16,265 update accept/reject
+  decisions flip, and the trajectory goes a different way from there (ATE 0.269 → 0.261 m, worst
+  pose about 15 cm apart). The filter's discrete decisions amplify any rounding change. So the
+  ≤ 1e-9 trajectory criterion only holds for a port that keeps the bits; a port that rounds
+  differently needs a statistical comparison instead.
+- **Neither ordering is more accurate.** In backward error ‖A − LLᵀ‖/‖A‖ at n = 81, term by term is
+  about 2× better on ill-conditioned spectra like the filter covariance (cond 1e6–1e10), and the
+  MTL5 order is about 1.4× better on well-conditioned ones.
+
+So the factor stays in cortex. MTL5 is asked for an opt-in term-by-term ordering in
+[mtl5#556](https://github.com/stillwater-sc/mtl5/issues/556), which would let it port bit for bit.
+The same issue notes a smaller difference: `cholesky_factor` tests the pivot with `diag <= 0`, which
+a NaN passes, while cortex's factor rejects it.
+
 ## The MTL5 gap register (#451)
 
 Every operator the pipeline needs that MTL5 doesn't provide is recorded with its pipeline sites, the
@@ -127,7 +156,8 @@ interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
 - block insert/scatter into `dense2D`;
 - a symmetric A·P·Aᵀ primitive;
 - a left-null-space helper;
-- a multi-RHS `cholesky_solve`;
+- an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556). Until
+  then the factor is local. Multi-RHS solves need nothing new: two `trsm` calls do it;
 - a matrix exponential.
 
 Lie-group exp/log and Jacobians stay in `branes::math::lie`; they are not MTL5's job.
