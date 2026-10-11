@@ -23,6 +23,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -42,16 +43,28 @@ using Mat3 = ld::Mat<T, 3, 3>;
 /// `w` the eigenvalues (unsorted). Generic over the dimension N — used here at
 /// N=9 (the 8-point null space) and N=3 (3×3 SVD via the normal matrices).
 /// Clean-room generalization of the 4×4 Horn-alignment solver.
+///
+/// Converged when the off-diagonal mass is below ε²·‖A‖²_F (‖A‖_F is invariant
+/// under the rotations): the rotations hold the off-diagonal at the rounding
+/// level rather than driving it to exactly zero, so an exact-zero test never
+/// fires and ran all 100 sweeps (#497). Returns the sweeps it took.
 template <math::Scalar T, std::size_t N>
-void jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
+int jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
     V = ld::Mat<T, N, N>::identity();
-    for (int sweep = 0; sweep < 100; ++sweep) {
+    T frob2 = T{0};
+    for (std::size_t p = 0; p < N; ++p)
+        for (std::size_t q = 0; q < N; ++q)
+            frob2 += A(p, q) * A(p, q);
+    const T eps = std::numeric_limits<T>::epsilon();
+    const T tol = eps * eps * frob2;
+    int sweep = 0;
+    for (; sweep < 100; ++sweep) {
         T off = T{0};
         for (std::size_t p = 0; p < N; ++p)
             for (std::size_t q = p + 1; q < N; ++q)
                 off += A(p, q) * A(p, q);
-        if (!(off > T{0}))
-            break;  // already diagonal to working precision
+        if (!(off > tol))
+            break;  // diagonal to working precision
         for (std::size_t p = 0; p < N; ++p) {
             for (std::size_t q = p + 1; q < N; ++q) {
                 const T apq = A(p, q);
@@ -82,6 +95,7 @@ void jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
     }
     for (std::size_t i = 0; i < N; ++i)
         w[i] = A(i, i);
+    return sweep;
 }
 
 /// Thin SVD of a 3×3 matrix M = U·diag(S)·Vᵀ with the singular values in S
