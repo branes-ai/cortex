@@ -33,14 +33,16 @@ const sdk::eval::SyntheticData<double>& world() {
 }
 
 /// A backend with the synthetic world's camera.
-Backend make_backend() {
+Backend make_backend(bool prefer_dynamic_init = false) {
     const auto& w = world();
     Backend::CameraCalibration cal;
     cal.intrinsics = w.camera;
     cal.extrinsics.R_imu_cam = w.R_imu_cam;
     cal.extrinsics.p_imu_cam = w.p_imu_cam;
     Backend be(std::vector<Backend::CameraCalibration>{cal});
-    be.initialize(sdk::VioConfig{});
+    sdk::VioConfig cfg;
+    cfg.prefer_dynamic_init = prefer_dynamic_init;
+    be.initialize(cfg);
     return be;
 }
 
@@ -77,6 +79,8 @@ bn::FixtureRun replay(const bn::NamedFixture& nf) {
     auto go = [&]<class B>() { return bn::run_fixture<B>(nf, bn::kShipped, bn::TypeList<double>{}); };
     if (s == "S0_sensor_model")
         return go.operator()<bn::S0SensorModelBench>();
+    if (s == "S1_initialization")  // its expected output binds the SfM variant, not `shipped`
+        return bn::run_fixture<bn::S1InitializationBench>(nf, nf.fixture.variant, bn::TypeList<double>{});
     if (s == "S2_propagation")
         return go.operator()<bn::S2PropagationBench>();
     if (s == "S3_augmentation")
@@ -135,11 +139,36 @@ TEST_CASE("captured fixtures replay bit-identically through their stage benches"
         REQUIRE(value_of(r, "replay.bit_identical") == 0.0);
     }
     for (const auto& s : bn::capturable_stages()) {
+        if (s == "S1_initialization")
+            continue;  // before frame 0: outside this range (the next test)
         INFO(s);
         REQUIRE(per_stage[s] > 0);
     }
+    REQUIRE(per_stage["S1_initialization"] == 0);
     REQUIRE(rec.stats().chain_mismatches == 0);
     REQUIRE(rec.stats().fixtures == rec.fixtures().size());
+}
+
+TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-identically", "[tools][capture]") {
+    bn::CaptureOptions opt;
+    opt.stages = {"S1_initialization"};
+    opt.source = "synthetic_world (default config), 0.5 px noise, prefer_dynamic_init";
+    Recorder rec(opt, intrinsics());
+    auto be = make_backend(/*prefer_dynamic_init=*/true);
+    be.set_stage_tap(&rec);
+    run(be, kFrames);
+    // No window aligns on this run (the S1 bench's SfM findings), so the backend
+    // attempts dynamic init on every frame from the fifth on.
+    REQUIRE(rec.fixtures().size() >= 10);
+    REQUIRE(rec.stats().init_attempts == rec.fixtures().size());
+    for (const auto& nf : rec.fixtures()) {
+        INFO(nf.name);
+        REQUIRE(nf.fixture.stage == "S1_initialization");
+        REQUIRE(nf.fixture.variant == "sfm_two_view_pnp");
+        REQUIRE(value_of(replay(nf), "replay.bit_identical") == 0.0);
+    }
+    // The bench rebuilds each window as the backend did.
+    REQUIRE(rec.stats().chain_mismatches == 0);
 }
 
 TEST_CASE("captured fixtures written to disk load and replay", "[tools][capture]") {

@@ -322,6 +322,19 @@ template <class B>
         return 5;
 }
 
+/// The types a variant runs in when no `--types` is given: the default set,
+/// minus any the bench leaves out for that variant through
+/// `B::runs_by_default(variant, type)`. For a variant too costly in emulated
+/// arithmetic (a Universal posit runs ~10⁴× slower than native floating point),
+/// such as a RANSAC front end. Naming the type in `--types` still runs it.
+template <class B>
+[[nodiscard]] std::vector<std::string> default_types_for(std::string_view variant) {
+    auto names = type_names(DefaultTypes{});
+    if constexpr (requires { B::runs_by_default(variant, std::string_view{}); })
+        std::erase_if(names, [&](const std::string& t) { return !B::runs_by_default(variant, t); });
+    return names;
+}
+
 /// Run bench `B` on one fixture for every type in `Types` whose name is in
 /// `selected` (empty: all), always computing the `double` run as the reference.
 template <class B, class... Ts>
@@ -540,7 +553,7 @@ int bench_main(int argc, char** argv) {
                 continue;
             }
             runs.push_back(
-                run_fixture<B>(nf, v.name, bench_types<B>(), a.types.empty() ? type_names(DefaultTypes{}) : a.types));
+                run_fixture<B>(nf, v.name, bench_types<B>(), a.types.empty() ? default_types_for<B>(v.name) : a.types));
             print_run(runs.back());
             ok = ok && runs.back().pass();
             type_runs += runs.back().types.size();
