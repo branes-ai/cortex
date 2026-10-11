@@ -16,7 +16,12 @@
 #ifndef BRANES_SDK_FEATURES_MSCKF_NULLSPACE_HPP
 #define BRANES_SDK_FEATURES_MSCKF_NULLSPACE_HPP
 
-#include <branes/math/lie/detail.hpp>  // scalar sqrt_/abs_
+#include <branes/math/arithmetic.hpp>  // math::Scalar
+
+#include <mtl/mat/dense2D.hpp>
+#include <mtl/operation/householder.hpp>
+#include <mtl/tag/reflector_form.hpp>
+#include <mtl/vec/dense_vector.hpp>
 
 #include <cstddef>
 #include <span>
@@ -41,8 +46,6 @@ struct NullspaceProjection {
 template <math::Scalar T>
 [[nodiscard]] NullspaceProjection<T> msckf_left_nullspace_project(
     std::span<const T> H_f, std::span<const T> H_x, std::span<const T> r, std::size_t m, std::size_t n) {
-    using math::lie::detail::sqrt_;
-
     NullspaceProjection<T> out;
     if (m <= 3)
         return out;
@@ -62,36 +65,18 @@ template <math::Scalar T>
         mtx[i * cols + 3 + n] = r[i];
     }
 
-    // Householder QR: zero the sub-diagonal of the first 3 (H_f) columns,
-    // applying each reflector across the whole augmented row.
-    std::vector<T> v(m);
+    // Householder QR: zero the sub-diagonal of the first 3 (H_f) columns. MTL5's
+    // textbook reflector (stillwater-sc/mtl5#559): unscaled v = x − α·e₁,
+    // α = −sign(x_c)·‖x‖, each column updated as A(:,j) −= ((2·vᵀA(:,j))/vᵀv)·v.
+    // Columns c+1.. get each reflector: the later H_f columns, then [H_x | r].
+    // Column c and those before it are not read again.
+    mtl::mat::dense2D<T> M(m, cols, mtx.data());
     for (std::size_t c = 0; c < 3; ++c) {
-        T norm2 = T{0};
-        for (std::size_t i = c; i < m; ++i) {
-            const T x = mtx[i * cols + c];
-            norm2 = norm2 + x * x;
-        }
-        const T norm = sqrt_(norm2);
-        if (norm <= T{0})
-            continue;
-        const T diag = mtx[c * cols + c];
-        const T alpha = (diag >= T{0}) ? -norm : norm;  // avoid cancellation
+        mtl::vec::dense_vector<T> x(m - c);
         for (std::size_t i = c; i < m; ++i)
-            v[i] = mtx[i * cols + c];
-        v[c] -= alpha;
-        T vtv = T{0};
-        for (std::size_t i = c; i < m; ++i)
-            vtv = vtv + v[i] * v[i];
-        if (vtv <= T{0})
-            continue;
-        for (std::size_t j = 0; j < cols; ++j) {
-            T s = T{0};
-            for (std::size_t i = c; i < m; ++i)
-                s = s + v[i] * mtx[i * cols + j];
-            const T f = (T{2} * s) / vtv;
-            for (std::size_t i = c; i < m; ++i)
-                mtx[i * cols + j] -= f * v[i];
-        }
+            x(i - c) = mtx[i * cols + c];
+        const auto h = mtl::householder(x, mtl::tag::textbook_reflector{});
+        mtl::apply_householder_left(M, h.v, h.vtv, c, c + 1, mtl::tag::textbook_reflector{});
     }
 
     // Rows 3..m-1 of the [H_x | r] block are the feature-free system.
