@@ -6,19 +6,23 @@
 // matrices don't fit). Row-major, type-generic, header-only. Not a
 // general BLAS — just what the State/Propagator/StateHelper need.
 //
-// The arithmetic is moving onto MTL5 (#448) one family at a time: `DynMat`
-// keeps its storage and its interface, and a ported operation runs an MTL5
-// kernel over zero-copy `mtl::mat::dense2D` views of that storage
-// (`mtl_view`). Each family is held to the pre-port results by the stage
-// benches and the EuRoC trajectories (tools/src/bench_snapshot.cpp).
+// The arithmetic runs on MTL5 (#448): `DynMat` keeps its storage and its
+// interface, and its operations are MTL5 kernels over zero-copy
+// `mtl::mat::dense2D` views of that storage (`mtl_view`). Each ported
+// operation reproduces the hand-rolled one it replaced bit for bit at
+// T = double (the same terms, summed in the same order), which the stage
+// benches and the EuRoC trajectories check (tools/src/bench_snapshot.cpp).
 
 #ifndef BRANES_SDK_MSCKF_DENSE_HPP
 #define BRANES_SDK_MSCKF_DENSE_HPP
 
 #include <branes/math/lie/detail.hpp>  // scalar sqrt_
 
+#include <mtl/mat/compressed2D.hpp>
 #include <mtl/mat/dense2D.hpp>
+#include <mtl/mat/operators.hpp>
 #include <mtl/operation/cholesky.hpp>
+#include <mtl/operation/mult.hpp>
 #include <mtl/operation/trans.hpp>
 #include <mtl/operation/trsm.hpp>
 
@@ -69,18 +73,42 @@ template <math::Scalar T>
 }
 }  // namespace mtl_view
 
+/// A·B. The filter's left operands are often mostly zero: the transition F
+/// is the identity on every clone row, G = [I; J] and I − KH are sparse. A
+/// left operand under half dense is multiplied in compressed (CRS) form, so its
+/// zeros cost nothing. Both kernels build every entry as zero + A(i,0)·B(0,j) +
+/// A(i,1)·B(1,j) + … in ascending k (the CRS one over A's nonzeros only, whose
+/// omitted terms are exact zeros), so they agree with each other and with the
+/// hand-rolled product this replaced, bit for bit.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> mul(const DynMat<T>& a, const DynMat<T>& b) {
     assert(a.cols == b.rows && "DynMat::mul: inner dimensions must match");
     DynMat<T> r(a.rows, b.cols);
-    for (std::size_t i = 0; i < a.rows; ++i)
-        for (std::size_t k = 0; k < a.cols; ++k) {
-            const T aik = a(i, k);
-            if (aik == T{0})
-                continue;
-            for (std::size_t j = 0; j < b.cols; ++j)
-                r(i, j) += aik * b(k, j);
-        }
+    if (r.d.empty() || a.cols == 0)
+        return r;
+    auto R = mtl_view::of(r);
+    std::size_t nnz = 0;
+    for (const T& x : a.d)
+        nnz += x == T{0} ? 0 : 1;
+    if (2 * nnz >= a.d.size()) {
+        mtl::mult(mtl_view::of(a), mtl_view::of(b), R);
+        return r;
+    }
+    using Csr = mtl::mat::compressed2D<T>;
+    using Index = typename Csr::size_type;
+    std::vector<Index> starts(a.rows + 1, 0), cols;
+    std::vector<T> vals;
+    cols.reserve(nnz);
+    vals.reserve(nnz);
+    for (std::size_t i = 0; i < a.rows; ++i) {
+        for (std::size_t k = 0; k < a.cols; ++k)
+            if (a(i, k) != T{0}) {
+                cols.push_back(static_cast<Index>(k));
+                vals.push_back(a(i, k));
+            }
+        starts[i + 1] = static_cast<Index>(cols.size());
+    }
+    mtl::mult(Csr(a.rows, a.cols, nnz, starts.data(), cols.data(), vals.data()), mtl_view::of(b), R);
     return r;
 }
 
@@ -97,8 +125,10 @@ template <math::Scalar T>
 [[nodiscard]] DynMat<T> add(const DynMat<T>& a, const DynMat<T>& b) {
     assert(a.rows == b.rows && a.cols == b.cols && "DynMat::add: shape mismatch");
     DynMat<T> r(a.rows, a.cols);
-    for (std::size_t i = 0; i < a.d.size(); ++i)
-        r.d[i] = a.d[i] + b.d[i];
+    if (r.d.empty())
+        return r;
+    auto R = mtl_view::of(r);
+    R = mtl_view::of(a) + mtl_view::of(b);
     return r;
 }
 
