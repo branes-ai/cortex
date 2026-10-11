@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.75.1](https://github.com/branes-ai/cortex/compare/v0.75.0...v0.75.1) (2026-10-11)
+
+
+### Tests
+
+* **tools:** equivalence gate for the mtl5 port ([#491](https://github.com/branes-ai/cortex/issues/491)) ([8515626](https://github.com/branes-ai/cortex/commit/851562613b87c3c88b197c59c2a9dd3ce3150dce))
+
 ## [0.75.0](https://github.com/branes-ai/cortex/compare/v0.74.0...v0.75.0) (2026-10-10)
 
 
