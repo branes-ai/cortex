@@ -29,9 +29,11 @@ one small executable, so an edit to a stage costs seconds to re-check, not a EuR
   written to CSV for the figure pipeline.
 - **Research:** alternative implementations of the stage (variants) run on identical fixtures,
   side by side.
-- **Mixed precision:** the same stage runs in `double`, `float`, `posit<32,2>`, `posit<16,1>` and
-  `long double`,
-  each compared with the `double` run.
+- **Mixed precision:** the same stage runs in `double`, `float`, `posit<32,2>`, `posit<16,1>`,
+  `long double` and `strict_double`, each compared with the `double` run. `strict_double` is double
+  with only explicit conversions out ([#449](https://github.com/branes-ai/cortex/issues/449)). Any
+  implicit narrowing of T to double is a compile error in it, and its results must equal double's
+  bit for bit.
 
 ## Fixtures
 

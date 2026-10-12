@@ -75,6 +75,32 @@ storage, and each family below moves its operations onto MTL5 views of it:
 5. **No latency regression.** `vio_bench` per-frame latency (p50, p99) on EuRoC V1_01 must stay at
    its pre-port level, or the change must explain the difference.
 
+### Genericity, checked by a strict type (#449)
+
+Point 3's sites are found by the compiler. `StrictDouble` (`tools/bench/strict_double.hpp`) is an
+IEEE double whose conversions out (to double, float or an integer) are all explicit. Construction
+from an arithmetic type stays implicit, as for a posit. Every stage bench instantiates its stage in
+it, so a `double x = t;`, a `std::sqrt(t)` that picks the double overload, or a T passed where a
+double is taken, fails to compile. Every operation is the double operation, so a generic stage
+computes exactly what it computes in double. A test holds every bench to that:
+
+```bash
+./build/tools/s6e_ekf_update_bench --types double,strict_double --variant all
+#   max |output - double output| = 0     (every fixture, every variant)
+```
+
+The first run compiled cleanly and matched double bit for bit on every fixture and variant of all 14
+benches, the C_filter_loop composition included, which runs the whole estimator. The non-ADL math
+and `static_cast<double>` sites the audit listed had already gone: Universal's posits convert to
+double only explicitly too, so the posit32 benches removed them. What `strict_double` adds is a
+check at full double precision that genericity costs nothing at `T = double`, and a compile error
+the moment a narrowing comes back. The `static_cast<double>` that remain on the path (S1's
+diagnostics, the NIS telemetry, the `double` timestamp) are explicit and are telemetry or
+timestamps by design.
+
+The type is left out on MSVC, whose Release optimizer crashes (C1001) compiling the stages with it.
+The check runs on gcc and clang, and the posit types already enforce explicit conversions on MSVC.
+
 ### The equivalence gate
 
 Two tools hold a port to "same results". Run each before the port to take a reference, and after it

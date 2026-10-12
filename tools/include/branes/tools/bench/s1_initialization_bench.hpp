@@ -606,7 +606,7 @@ struct S1InitializationBench {
         const double se = dy.success ? std::abs(static_cast<double>(dy.scale) - 2.0) / 2.0 * 100.0 : std::nan("");
         // The SfM front end only in native arithmetic: its RANSAC is far too
         // costly per point in an emulated type (runs_by_default).
-        constexpr bool native = std::is_floating_point_v<T>;
+        constexpr bool native = std::numeric_limits<T>::is_iec559;
         Output<T> sf, ad, k4;
         if constexpr (native) {
             sf = run<T>(in, "sfm_two_view_pnp");

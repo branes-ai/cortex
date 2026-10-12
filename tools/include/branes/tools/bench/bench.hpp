@@ -243,7 +243,7 @@ template <class T>
 template <class T>
 [[nodiscard]] double eps_at(double magnitude) {
     const double eps = static_cast<double>(std::numeric_limits<T>::epsilon());
-    if constexpr (std::is_floating_point_v<T>) {
+    if constexpr (std::numeric_limits<T>::is_iec559) {
         return eps;
     } else {
         const double m = std::abs(magnitude);
