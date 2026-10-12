@@ -38,8 +38,8 @@ namespace sqrt_detail {
 /// The block of `m` at rows [r0, r0 + nr) and columns [c0, c0 + nc), as an MTL5
 /// view (no copy). `m` must outlive the view.
 template <math::Scalar T>
-[[nodiscard]] mtl::mat::view::map_view<mtl_view::Dense<T>> block(const mtl_view::Dense<T>& m, std::size_t r0,
-                                                                  std::size_t nr, std::size_t c0, std::size_t nc) {
+[[nodiscard]] mtl::mat::view::map_view<mtl_view::Dense<T>>
+block(const mtl_view::Dense<T>& m, std::size_t r0, std::size_t nr, std::size_t c0, std::size_t nc) {
     using Index = typename mtl_view::Dense<T>::size_type;
     std::vector<Index> rows(nr), cols(nc);
     std::iota(rows.begin(), rows.end(), static_cast<Index>(r0));
