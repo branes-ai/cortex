@@ -143,6 +143,18 @@ The S2 and S3 benches (#455) added two more:
   across Δt and dynamics: the propagation half of the observability question behind the
   over-confidence (#212).
 
+Two later variants (#471) answer that half:
+- **The R-IEKF's propagation keeps yaw exactly.** The `invariant` variant runs `InvariantPropagator`
+  and checks it in its own error coordinates, against an unobservable basis that does not depend on
+  the state (translation ξp = eᵢ, yaw ξθ = ẑ). Its yaw leak is 0 on every fixture and at every
+  sweep point. So where the R-IEKF loses to the body-frame filter end to end, the cause is not its
+  propagation.
+- **A higher-order body-frame Φ leaks more.** With Φ = I + AΔt + ½(AΔt)² the yaw leak grows 3.5–9×
+  on tumbling dynamics (2.2e-5 against 2.4e-6 per 5 ms step), and exp(AΔt) is the same to three
+  digits. The leak comes from linearizing against the mean's Euler step, not from truncating Φ:
+  extra terms in Φ that the mean doesn't integrate make it worse. Removing it takes a different
+  error state, not a better Φ.
+
 The S4 and S5 benches (#456) found four more:
 
 - **Border churn in the front end.** KLT drops features whose window doesn't fit at the coarsest

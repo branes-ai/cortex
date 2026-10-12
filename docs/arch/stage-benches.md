@@ -30,7 +30,7 @@ Benches so far:
 |---|---|---|---|
 | `s0_sensor_model_bench` | #454 | `shipped` (Newton undistortion), `fixed_point` | distortion strength × radius → round trip, Jacobian, px per 1° extrinsic / per 1 ms offset |
 | `s1_initialization_bench` | #454 | `shipped` (static), `gravity_align`, `dynamic` (VI alignment) | window × IMU noise × excitation → roll/pitch and scale error |
-| `s2_propagation_bench` | #455 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance` | Δt × dynamics × Q scale → position error, yaw leak, diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
+| `s2_propagation_bench` | #455, #471 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance`, `higher_order_phi`, `invariant` (R-IEKF) | Δt × dynamics × Q scale → position error (body and invariant), yaw leak (first-order, second-order, exp(AΔt) and invariant Φ), diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
 | `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
 | `s4_frontend_bench` | #456 | `shipped` (FB gate off), `fb_gate_1px`, `klt_window_7` | image noise × shift → survival, end-point RMS, FB median |
 | `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg`, `midpoint_two_view`, `dlt_linear`, `inverse_depth_gn` | parallax × pixel noise → depth error per method, κ, gate rejection |
@@ -294,6 +294,45 @@ live, is now on the bench.
   (#212, #437).
 - **Φ needed exposing.** `Propagator::transition` now returns Φ and Q_d. `propagate` is its sequence,
   and it is bit-identical on the synthetic full and square-root backend runs.
+
+### The invariant and higher-order Φ variants (#471)
+
+Two more S2 variants run the same fixtures:
+- `invariant` runs `InvariantPropagator`: the R-IEKF's SE₂(3) mean and its Φ. That Φ is
+  I + AΔt + ½(AΔt)², with a state-independent nav block plus the bias lever arms. It acts on the
+  invariant error ξ (R = Exp(ξθ)·R̂, v = v̂ + ξθ×v̂ + ξv, p = p̂ + ξθ×p̂ + ξp).
+- `higher_order_phi` runs the shipped mean and Q_d with Φ = I + AΔt + ½(AΔt)².
+
+P enters the invariant variant through J, with ξ = J·δ: ξθ = R̂δθ, ξv = δv + [v̂]×R̂δθ,
+ξp = δp + [p̂]×R̂δθ, and the same per clone. P leaves through J⁻¹ at the final mean, so the output P
+is comparable with the other variants. The per-step checks run in ξ against ξ's own unobservable
+basis, translation ξp = eᵢ and yaw ξθ = ẑ. That basis does not depend on the state, and J maps the
+body-frame basis onto it exactly.
+
+- **The invariant filter preserves yaw exactly.** Its yaw leak is 0 on the tumbling and captured
+  fixtures, and 0 at every point of the S2 sweep (Δt 2.5–20 ms, static to aggressive). So the bench
+  gates it to roundoff, like translation. The same mean lands on the analytic truth to 1e-14.
+- **A higher-order body-frame Φ leaks more yaw, not less.** On the tumbling dynamics:
+
+  | Δt | first-order Φ | second-order Φ | exp(AΔt) | invariant |
+  |---|---|---|---|---|
+  | 2.5 ms | 6.0e-7 | 5.5e-6 | 5.5e-6 | 0 |
+  | 5 ms | 2.4e-6 | 2.2e-5 | 2.2e-5 | 0 |
+  | 10 ms | 9.6e-6 | 8.7e-5 | 8.7e-5 | 0 |
+  | 20 ms | 3.8e-5 | 3.5e-4 | 3.5e-4 | 0 |
+
+  Every body-frame variant leaks at O(Δt²), and second order already matches exp(AΔt). The leak is
+  therefore not a truncation error in Φ. It comes from linearizing at the start-of-step estimate
+  against the mean's Euler step, which uses the start-of-step rotation. The ½(AΔt)² term adds an
+  attitude-rate path into δv (½Δt²·R̂[a]×[ω]×) that this mean doesn't have. A body-frame Φ is
+  consistent only to the order the mean is integrated, which is the #366 lesson again. Removing the
+  leak takes a different error state, not more terms in Φ. On the captured segment the second-order
+  Φ leaks less (1.8e-7 against 3.1e-6), so which way the order moves the leak depends on the
+  dynamics.
+
+This answers the propagation half of the #212/#437 question. The R-IEKF's propagation is not where
+it loses to the body-frame filter end to end, because its Φ keeps the gauge exactly. The cause has to
+be in the update or the composition.
 
 ## What the S4 and S5 benches found (#456)
 
