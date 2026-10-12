@@ -6,13 +6,16 @@
 // the unobservable subspace exactly while the yaw direction leaks (the
 // body-frame filter's first-order leak, reported); the canonical Q_d grows the
 // position block the diagonal Q_d leaves out; square-root variants start from
-// a singular (cloned) covariance; and the committed fixture files replay.
+// a singular (cloned) covariance; and the committed fixture files replay. The
+// invariant variant (#471) preserves the yaw direction too, and a higher-order
+// body-frame Φ leaks more of it, not less.
 
 #include <branes/tools/bench/s2_propagation_bench.hpp>
 #include <branes/tools/bench/s3_augmentation_bench.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -74,6 +77,57 @@ TEST_CASE("S2 bench sweep: the canonical Q_d grows the position sigma the diagon
     REQUIRE(m[3] > 0.0);  // λ_min/‖P‖ stays positive
     REQUIRE_THROWS_AS(S2::sweep_point<double>({{"dt", 0.005}, {"dynamics", 3.0}, {"q_scale", 1.0}}),
                       std::invalid_argument);
+}
+
+TEST_CASE("S2 bench: the invariant error maps the body-frame gauge onto a state-independent one",
+          "[tools][bench][s2]") {
+    // The captured fixture's state: tumbling, moving, three clones.
+    const auto in = S2::decode_input<double>(S2::captured().input);
+    const auto& s = in.state;
+    REQUIRE(s.clones.size() == 3);
+    const auto J = S2::to_invariant(s);
+    const auto Ji = S2::to_invariant(s, /*inverse=*/true);
+    const auto JN = branes::sdk::msckf::mul(J, S2::unobservable_basis(s));
+    const auto Ninv = S2::invariant_basis(s);
+    const auto I = branes::sdk::msckf::mul(Ji, J);
+    double basis_err = 0.0, inverse_err = 0.0;
+    for (std::size_t i = 0; i < JN.d.size(); ++i)
+        basis_err = std::max(basis_err, std::abs(JN.d[i] - Ninv.d[i]));
+    for (std::size_t i = 0; i < I.rows; ++i)
+        for (std::size_t j = 0; j < I.cols; ++j)
+            inverse_err = std::max(inverse_err, std::abs(I(i, j) - (i == j ? 1.0 : 0.0)));
+    CAPTURE(basis_err, inverse_err);
+    REQUIRE(basis_err < 1e-12);
+    REQUIRE(inverse_err < 1e-12);
+
+    // On the tumbling trajectory the invariant Φ preserves yaw to roundoff,
+    // where the shipped body-frame Φ leaks it at O(Δt²).
+    const auto gt = S2::ground_truth();
+    const auto inv_run = bn::run_fixture<S2>({"gt", gt}, "invariant", bn::AllTypes{}, {"double"});
+    const auto body_run = bn::run_fixture<S2>({"gt", gt}, bn::kShipped, bn::AllTypes{}, {"double"});
+    REQUIRE(value_of(inv_run, "observability.yaw_leak") < 1e-15);
+    REQUIRE(value_of(body_run, "observability.yaw_leak") > 1e-7);
+}
+
+TEST_CASE("S2 bench sweep: a higher-order body-frame Phi leaks more yaw, the invariant one none",
+          "[tools][bench][s2]") {
+    const auto cols = S2::sweep_columns();
+    auto at = [&](const std::vector<double>& m, std::string_view name) {
+        const auto it = std::find(cols.begin(), cols.end(), name);
+        REQUIRE(it != cols.end());
+        return m[static_cast<std::size_t>(it - cols.begin())];
+    };
+    for (const double dt : {0.0025, 0.01}) {
+        const auto m = S2::sweep_point<double>({{"dt", dt}, {"dynamics", 1.0}, {"q_scale", 1.0}});
+        CAPTURE(dt, at(m, "yaw_leak"), at(m, "yaw_leak_2nd_order"), at(m, "yaw_leak_exp"));
+        // The leak is the linearization against the start-of-step Euler mean, not
+        // Φ's truncation: expanding Φ further moves it away from that mean.
+        REQUIRE(at(m, "yaw_leak_2nd_order") > at(m, "yaw_leak"));
+        REQUIRE(std::abs(at(m, "yaw_leak_exp") - at(m, "yaw_leak_2nd_order")) < 0.01 * at(m, "yaw_leak_2nd_order"));
+        REQUIRE(at(m, "yaw_leak_invariant") < 1e-15);
+        // Same strapdown physics: the invariant mean lands on the analytic truth too.
+        REQUIRE(at(m, "pos_err_invariant_m") < 1e-12);
+    }
 }
 
 TEST_CASE("S3 bench: every fixture passes for every variant (double, float, long double)", "[tools][bench][s3]") {
