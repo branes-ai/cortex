@@ -35,15 +35,25 @@ struct StrictDouble {
     double v;
 
     StrictDouble() = default;  // trivially constructible, like double
-    template <class A>
-        requires std::is_arithmetic_v<A>
-    constexpr StrictDouble(A x) : v(static_cast<double>(x)) {}
 
-    template <class A>
-        requires std::is_arithmetic_v<A>
-    constexpr explicit operator A() const {
-        return static_cast<A>(v);
+    // One non-template overload per arithmetic type, in and out: a constrained
+    // template conversion crashes MSVC's optimizer (C1001), and a single double
+    // constructor would make T{n} from a non-constant integer a narrowing error.
+#define BRANES_STRICT_CONVERSIONS(A)                                                                                   \
+    constexpr StrictDouble(A x) : v(static_cast<double>(x)) {}                                                         \
+    constexpr explicit operator A() const {                                                                            \
+        return static_cast<A>(v);                                                                                      \
     }
+    BRANES_STRICT_CONVERSIONS(double)
+    BRANES_STRICT_CONVERSIONS(float)
+    BRANES_STRICT_CONVERSIONS(long double)
+    BRANES_STRICT_CONVERSIONS(int)
+    BRANES_STRICT_CONVERSIONS(unsigned)
+    BRANES_STRICT_CONVERSIONS(long)
+    BRANES_STRICT_CONVERSIONS(unsigned long)
+    BRANES_STRICT_CONVERSIONS(long long)
+    BRANES_STRICT_CONVERSIONS(unsigned long long)
+#undef BRANES_STRICT_CONVERSIONS
 
     constexpr StrictDouble operator-() const {
         return StrictDouble(-v);
@@ -169,6 +179,12 @@ public:
     static constexpr bool is_iec559 = true;
     static constexpr bool is_bounded = true;
     static constexpr bool is_modulo = false;
+    static constexpr std::float_denorm_style has_denorm = D::has_denorm;
+    static constexpr bool has_denorm_loss = D::has_denorm_loss;
+    static constexpr bool traps = D::traps;
+    static constexpr bool tinyness_before = D::tinyness_before;
+    static constexpr int min_exponent10 = D::min_exponent10;
+    static constexpr int max_exponent10 = D::max_exponent10;
     static constexpr int digits = D::digits;
     static constexpr int digits10 = D::digits10;
     static constexpr int max_digits10 = D::max_digits10;
