@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.77.0](https://github.com/branes-ai/cortex/compare/v0.76.1...v0.77.0) (2026-10-12)
+
+
+### Features
+
+* **tools:** s2 bench invariant-propagator and higher-order phi variants ([#509](https://github.com/branes-ai/cortex/issues/509)) ([de05d32](https://github.com/branes-ai/cortex/commit/de05d32181089d3231ad824efd6081b390bc1ab3)), closes [#471](https://github.com/branes-ai/cortex/issues/471)
+
+
+### Code Refactoring
+
+* **sdk:** square-root form solves and gain product on mtl5 trsm/mult ([#507](https://github.com/branes-ai/cortex/issues/507)) ([e21fb9c](https://github.com/branes-ai/cortex/commit/e21fb9cf9f77e2f81929a18cd533f53adfed6e74))
+
 ## [0.76.1](https://github.com/branes-ai/cortex/compare/v0.76.0...v0.76.1) (2026-10-12)
 
 
