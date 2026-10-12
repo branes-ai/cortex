@@ -23,10 +23,16 @@
 //
 // Variants: "shipped" (first-order Φ, the diagonal Q_d), "canonical_qd" (same Φ,
 // the canonical B·Σ·Bᵀ Q_d with the position and v–p terms the diagonal drops),
-// "sqrt_covariance" (the square-root covariance form of the same propagation).
+// "sqrt_covariance" (the square-root covariance form of the same propagation),
+// "higher_order_phi" (Φ = I + AΔt + ½(AΔt)², the shipped mean) and "invariant"
+// (the R-IEKF's InvariantPropagator: SE₂(3) mean, its own Φ, on the invariant
+// error ξ, #471). The invariant variant's per-step checks run in ξ, against the
+// invariant unobservable basis; its output P is mapped back to the body-frame
+// error at the final mean, so it compares with the other variants'.
 //
 // Sweep: Δt × trajectory dynamics × Q scale → position error vs the analytic
-// truth, yaw leak, the diagonal-vs-canonical position-σ gap, and λ_min/‖P‖.
+// truth, yaw leak (first-order, second-order and exp(AΔt) Φ, and the invariant
+// filter's), the diagonal-vs-canonical position-σ gap, and λ_min/‖P‖.
 //
 // Header-only, C++20.
 
@@ -36,6 +42,7 @@
 #include <branes/sdk/eval/invariants.hpp>
 #include <branes/sdk/eval/propagation_probe.hpp>  // pp_detail::qd_canonical
 #include <branes/sdk/eval/synthetic_world.hpp>
+#include <branes/sdk/msckf/invariant_propagator.hpp>
 #include <branes/sdk/msckf/sqrt_covariance.hpp>
 #include <branes/sdk/msckf/stages/s2_propagation.hpp>
 #include <branes/sdk/msckf/stages/s3_augmentation.hpp>
@@ -88,12 +95,17 @@ struct S2PropagationBench {
     struct Output {
         State<T> state{T{1}};
         std::vector<Step<T>> steps;
+        /// The steps are in the invariant error ξ, whose Φ preserves the whole
+        /// unobservable subspace by construction (not serialized).
+        bool invariant_error = false;
     };
 
     [[nodiscard]] static std::vector<Variant> variants() {
         return {{"shipped", "stages::s2_propagation::apply (first-order Phi, diagonal Q_d)"},
                 {"canonical_qd", "same Phi, canonical B*Sigma*B^T Q_d (position and v-p terms)"},
-                {"sqrt_covariance", "the square-root covariance form of the same propagation"}};
+                {"sqrt_covariance", "the square-root covariance form of the same propagation"},
+                {"higher_order_phi", "Phi = I + A dt + (A dt)^2 / 2, diagonal Q_d, the shipped mean"},
+                {"invariant", "InvariantPropagator (R-IEKF): SE2(3) mean, its Phi, on the invariant error"}};
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
@@ -132,7 +144,7 @@ struct S2PropagationBench {
     }
     template <class T>
     [[nodiscard]] static Output<T> decode_output(const json& j) {
-        return Output<T>{unpack_state<T>(j.at("state")), {}};
+        return Output<T>{unpack_state<T>(j.at("state")), {}, false};
     }
 
     // ── The stage ───────────────────────────────────────────────────────────
@@ -143,6 +155,8 @@ struct S2PropagationBench {
         auto& s = out.state;
         if (variant == "sqrt_covariance")
             return run_sqrt(in, prop);
+        if (variant == "invariant")
+            return run_invariant(in);
         for (const auto& x : in.samples) {
             if (!(x.dt > T{0}))
                 continue;
@@ -152,12 +166,15 @@ struct S2PropagationBench {
             const auto tr = prop.transition(s, x.gyro, x.accel, x.dt);
             st.F = tr.F;
             st.Q = dense_q(s.dim(), tr.q);
-            if (variant == "canonical_qd") {
+            if (variant == "canonical_qd" || variant == "higher_order_phi") {
                 State<T> mean = s;
                 prop.propagate(mean, x.gyro, x.accel, x.dt);  // the mean is the shipped one
-                st.Q = canonical_q(s.dim(), in.noise, x.dt);
+                if (variant == "canonical_qd")
+                    st.Q = canonical_q(s.dim(), in.noise, x.dt);
+                else
+                    st.F = second_order(tr.F);
                 DynMat<T> P =
-                    sdk::msckf::add(sdk::msckf::mul(sdk::msckf::mul(tr.F, s.cov.P), sdk::msckf::transpose(tr.F)), st.Q);
+                    sdk::msckf::add(sdk::msckf::mul(sdk::msckf::mul(st.F, s.cov.P), sdk::msckf::transpose(st.F)), st.Q);
                 sdk::msckf::symmetrize(P);
                 mean.cov.P = std::move(P);
                 s = std::move(mean);
@@ -227,8 +244,10 @@ struct S2PropagationBench {
                                                      kInvStage,
                                                      "observability.translation_preserved"));
             auto y = inv::check_subspace_preserved(st.F, st.N_before, st.N_after, kInvStage, "observability.yaw_leak");
-            y.bound = inv::Bound::Report;  // the body-frame filter's known first-order leak: reported, not gated
-            y.pass = std::isfinite(y.value);
+            if (!out.invariant_error) {
+                y.bound = inv::Bound::Report;  // the body-frame filter's known first-order leak: reported, not gated
+                y.pass = std::isfinite(y.value);
+            }  // the invariant filter's: held to roundoff, like translation
             yaw.take(y);
         }
         for (auto* w : {&ident, &trans, &yaw})
@@ -379,7 +398,14 @@ struct S2PropagationBench {
         return sw;
     }
     [[nodiscard]] static std::vector<std::string> sweep_columns() {
-        return {"pos_err_m", "yaw_leak", "pos_sigma_gap_pct", "lambda_min_rel"};
+        return {"pos_err_m",
+                "yaw_leak",
+                "yaw_leak_2nd_order",
+                "yaw_leak_exp",
+                "yaw_leak_invariant",
+                "pos_err_invariant_m",
+                "pos_sigma_gap_pct",
+                "lambda_min_rel"};
     }
     /// 0.5 s of the analytic trajectory at `dynamics` (0 static, 1 tumbling, 2
     /// aggressive) sampled every `dt`, with the IMU noise densities × q_scale.
@@ -400,11 +426,22 @@ struct S2PropagationBench {
         const auto in = decode_input<T>(encode_input(traj.input));
         const auto shipped = run<T>(in, kShipped);
         const auto canon = run<T>(in, "canonical_qd");
-        double pos_err = 0.0, leak = 0.0;
-        for (std::size_t i = 0; i < 3; ++i)
+        const auto invar = run<T>(in, "invariant");
+        double pos_err = 0.0, pos_err_inv = 0.0, leak = 0.0, leak2 = 0.0, leak_exp = 0.0, leak_inv = 0.0;
+        for (std::size_t i = 0; i < 3; ++i) {
             pos_err = std::max(pos_err, std::abs(static_cast<double>(shipped.state.p[i]) - traj.p_end[i]));
-        for (const auto& st : shipped.steps)
+            pos_err_inv = std::max(pos_err_inv, std::abs(static_cast<double>(invar.state.p[i]) - traj.p_end[i]));
+        }
+        // The same body-frame steps under each expansion of Φ = exp(AΔt): the
+        // mean, and so the basis at both ends, is the shipped one throughout.
+        for (const auto& st : shipped.steps) {
             leak = std::max(leak, inv::check_subspace_preserved(st.F, st.N_before, st.N_after).value);
+            leak2 = std::max(leak2, inv::check_subspace_preserved(second_order(st.F), st.N_before, st.N_after).value);
+            leak_exp =
+                std::max(leak_exp, inv::check_subspace_preserved(exponential(st.F), st.N_before, st.N_after).value);
+        }
+        for (const auto& st : invar.steps)
+            leak_inv = std::max(leak_inv, inv::check_subspace_preserved(st.F, st.N_before, st.N_after).value);
         auto pos_sigma = [](const DynMat<T>& P) {
             double tr = 0.0;
             for (std::size_t i = 3; i < 6; ++i)
@@ -415,6 +452,10 @@ struct S2PropagationBench {
         const auto ev = inv::la::symmetric_eigenvalues(shipped.state.cov.P);
         return {pos_err,
                 leak,
+                leak2,
+                leak_exp,
+                leak_inv,
+                pos_err_inv,
                 sc > 0.0 ? (sc - sd) / sc * 100.0 : 0.0,
                 static_cast<double>(ev.front()) /
                     std::max(1e-300, static_cast<double>(inv::la::max_abs(shipped.state.cov.P)))};
@@ -461,6 +502,64 @@ struct S2PropagationBench {
             put(off + 3, 3, zx(s.clones[c].p));
         }
         return N;
+    }
+
+    /// The unobservable subspace in the invariant error ξ (R = Exp(ξθ)·R̂,
+    /// v = v̂ + ξθ×v̂ + ξv, p = p̂ + ξθ×p̂ + ξp; per clone the same in θ, p),
+    /// laid out at the body-frame indices. It does not depend on the state:
+    /// translation is ξp = eᵢ (IMU and every clone), and global yaw is ξθ = ẑ
+    /// with the other blocks zero. `to_invariant` maps `unobservable_basis(s)`
+    /// onto it.
+    template <class T>
+    [[nodiscard]] static DynMat<T> invariant_basis(const State<T>& s) {
+        DynMat<T> N(s.dim(), 4);
+        for (std::size_t i = 0; i < 3; ++i)
+            N(State<T>::kPos + i, i) = T{1};
+        N(State<T>::kTheta + 2, 3) = T{1};
+        for (std::size_t c = 0; c < s.clones.size(); ++c) {
+            const std::size_t off = s.clone_offset(c);
+            for (std::size_t i = 0; i < 3; ++i)
+                N(off + 3 + i, i) = T{1};
+            N(off + 2, 3) = T{1};
+        }
+        return N;
+    }
+
+    /// J with ξ = J·δ, from the body-frame error δ (R = R̂·Exp(δθ), p and v
+    /// additive) to the invariant error ξ, at the mean `s`: ξθ = R̂δθ,
+    /// ξv = δv + [v̂]×R̂δθ, ξp = δp + [p̂]×R̂δθ, per clone ξθ = R̂c·δθc and
+    /// ξp = δpc + [p̂c]×R̂c·δθc; biases and calibration unchanged. With
+    /// `inverse`, J⁻¹: δθ = R̂ᵀξθ, δv = ξv − [v̂]×ξθ, δp = ξp − [p̂]×ξθ.
+    template <class T>
+    [[nodiscard]] static DynMat<T> to_invariant(const State<T>& s, bool inverse = false) {
+        using math::lie::detail::hat;
+        DynMat<T> J = DynMat<T>::identity(s.dim());
+        auto put = [&](std::size_t r0, std::size_t c0, const auto& B) {
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = 0; j < 3; ++j)
+                    J(r0 + i, c0 + j) = B(i, j);
+        };
+        auto block =
+            [&](std::size_t th, std::size_t pos, std::size_t vel, const auto& R, const Vec3<T>& p, const Vec3<T>* v) {
+                const auto Rm = R.matrix();
+                if (inverse) {
+                    put(th, th, R.inverse().matrix());
+                    put(pos, th, hat(p) * T{-1});
+                    if (v)
+                        put(vel, th, hat(*v) * T{-1});
+                } else {
+                    put(th, th, Rm);
+                    put(pos, th, hat(p) * Rm);
+                    if (v)
+                        put(vel, th, hat(*v) * Rm);
+                }
+            };
+        block(State<T>::kTheta, State<T>::kPos, State<T>::kVel, s.R, s.p, &s.v);
+        for (std::size_t c = 0; c < s.clones.size(); ++c) {
+            const std::size_t off = s.clone_offset(c);
+            block(off, off + 3, 0, s.clones[c].R, s.clones[c].p, nullptr);
+        }
+        return J;
     }
 
 private:
@@ -546,6 +645,109 @@ private:
             out.steps.push_back(std::move(st));
         }
         out.state.cov.P = sq.covariance();
+        return out;
+    }
+
+    /// Φ₂ = I + M + ½M² from the first-order F = I + M (M = AΔt).
+    template <class T>
+    [[nodiscard]] static DynMat<T> second_order(const DynMat<T>& F) {
+        DynMat<T> M = F;
+        for (std::size_t i = 0; i < M.rows; ++i)
+            M(i, i) -= T{1};
+        const DynMat<T> M2 = sdk::msckf::mul(M, M);
+        DynMat<T> out = F;
+        for (std::size_t i = 0; i < out.d.size(); ++i)
+            out.d[i] += M2.d[i] / T{2};
+        return out;
+    }
+
+    /// exp(M) from the first-order F = I + M, by its Taylor series to the
+    /// working precision (M = AΔt is small, so it converges in a few terms).
+    template <class T>
+    [[nodiscard]] static DynMat<T> exponential(const DynMat<T>& F) {
+        DynMat<T> M = F;
+        for (std::size_t i = 0; i < M.rows; ++i)
+            M(i, i) -= T{1};
+        DynMat<T> out = F, term = M;
+        for (int k = 2; k < 30; ++k) {
+            term = sdk::msckf::mul(term, M);
+            for (auto& x : term.d)
+                x /= T(k);
+            double big = 0.0;
+            for (std::size_t i = 0; i < out.d.size(); ++i) {
+                out.d[i] += term.d[i];
+                big = std::max(big, std::abs(static_cast<double>(term.d[i])));
+            }
+            if (!(big > 1e-300) || big < 1e-18)
+                break;
+        }
+        return out;
+    }
+
+    /// The R-IEKF propagation (#471): the mean on SE₂(3) by
+    /// InvariantPropagator::propagate_mean, P on the invariant error ξ by its Φ
+    /// (I + AΔt + ½(AΔt)², a state-independent nav block plus the bias lever
+    /// arms) and its diagonal Q. P enters through J (`to_invariant`) and leaves
+    /// through J⁻¹ at the final mean. Φ is the identity on the clones and the
+    /// calibration, as in the body-frame filter.
+    template <class T>
+    [[nodiscard]] static Output<T> run_invariant(const Input<T>& in) {
+        namespace ms = sdk::msckf;
+        using Nav = ms::InvariantNavState<T>;
+        const ms::InvariantPropagator<T> prop(in.noise, in.gravity);
+        Output<T> out{in.state, {}, /*invariant_error=*/true};
+        auto& s = out.state;
+        const std::size_t d = s.dim();
+        // Invariant order (θ, v, p, bg, ba) → the body-frame indices (θ, p, v, bg, ba).
+        std::array<std::size_t, Nav::kDim> at{};
+        for (std::size_t i = 0; i < 3; ++i) {
+            at[Nav::kTheta + i] = State<T>::kTheta + i;
+            at[Nav::kVel + i] = State<T>::kVel + i;
+            at[Nav::kPos + i] = State<T>::kPos + i;
+            at[Nav::kBg + i] = State<T>::kBg + i;
+            at[Nav::kBa + i] = State<T>::kBa + i;
+        }
+        const DynMat<T> J = to_invariant(s);
+        DynMat<T> P = ms::mul(ms::mul(J, s.cov.P), ms::transpose(J));
+        ms::symmetrize(P);
+        const DynMat<T> N = invariant_basis(s);
+        Nav x;
+        x.X = typename Nav::SE23(s.R, s.v, s.p);
+        x.bg = s.bg;
+        x.ba = s.ba;
+        for (const auto& smp : in.samples) {
+            if (!(smp.dt > T{0}))
+                continue;
+            Step<T> st;
+            st.P_before = P;
+            st.N_before = N;
+            const DynMat<T> phi = prop.phi(x.X.rotation(), x.X.velocity(), x.X.position(), smp.dt);
+            st.F = DynMat<T>::identity(d);
+            for (std::size_t i = 0; i < Nav::kDim; ++i)
+                for (std::size_t j = 0; j < Nav::kDim; ++j)
+                    st.F(at[i], at[j]) = phi(i, j);
+            // InvariantPropagator::propagate's Q: diagonal, so the reordering is all it needs.
+            st.Q = DynMat<T>(d, d);
+            for (std::size_t i = 0; i < 3; ++i) {
+                st.Q(State<T>::kTheta + i, State<T>::kTheta + i) = in.noise.gyro * in.noise.gyro * smp.dt;
+                st.Q(State<T>::kVel + i, State<T>::kVel + i) = in.noise.accel * in.noise.accel * smp.dt;
+                st.Q(State<T>::kBg + i, State<T>::kBg + i) = in.noise.gyro_bias * in.noise.gyro_bias * smp.dt;
+                st.Q(State<T>::kBa + i, State<T>::kBa + i) = in.noise.accel_bias * in.noise.accel_bias * smp.dt;
+            }
+            P = ms::add(ms::mul(ms::mul(st.F, P), ms::transpose(st.F)), st.Q);
+            ms::symmetrize(P);
+            prop.propagate_mean(x, smp.gyro, smp.accel, smp.dt);
+            s.timestamp += static_cast<double>(smp.dt);
+            st.P_after = P;
+            st.N_after = N;
+            out.steps.push_back(std::move(st));
+        }
+        s.R = x.X.rotation();
+        s.v = x.X.velocity();
+        s.p = x.X.position();
+        const DynMat<T> Ji = to_invariant(s, /*inverse=*/true);
+        s.cov.P = ms::mul(ms::mul(Ji, P), ms::transpose(Ji));
+        ms::symmetrize(s.cov.P);
         return out;
     }
 
