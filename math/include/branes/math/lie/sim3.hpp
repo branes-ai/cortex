@@ -22,6 +22,7 @@
 #include <branes/math/lie/so3.hpp>
 
 #include <cassert>
+#include <limits>
 
 namespace branes::math::lie {
 
@@ -168,7 +169,13 @@ public:
     }
 
 private:
-    static constexpr T kSmall = T{1} / T{100000};  // 1e-5
+    // Small-angle threshold for θ in w_matrix: max(1e-5, ε_T^{1/3}), shared
+    // with SO3 (#449); detail::small_angle has the analysis. Its closed forms
+    // B/θ and C/θ² cancel the way SO3's Jacobian does; that branch was not swept
+    // separately. The σ integrals do not use it (see scalar_moment).
+    static T small() {
+        return detail::small_angle<T>();
+    }
 
     static Tangent neg(const Tangent& tau) {
         Tangent r;
@@ -214,7 +221,7 @@ private:
 
         // For θ→0, (B/θ) and (C/θ²) have finite limits; compute via series.
         T coefF, coefF2;
-        if (theta2 < kSmall * kSmall) {
+        if (theta2 < small() * small()) {
             // exp(uφ^) ≈ I + uφ^ + u²/2 (φ^)²; integrate e^{σu}·u and ·u²/2.
             coefF = scalar_Au(sigma);             // ∫ e^{σu} u du
             coefF2 = scalar_Au2(sigma) * T{0.5};  // ½ ∫ e^{σu} u² du
@@ -233,28 +240,56 @@ private:
         return I * A + Fx * coefF + Fx2 * coefF2;
     }
 
-    // Scalar integrals over u∈[0,1] with small-σ series fallbacks.
-    static T scalar_A(const T& sigma) {  // ∫ e^{σu} du
-        if (detail::abs_(sigma) < kSmall) {
-            return T{1} + sigma * T{0.5} + sigma * sigma * (T{1} / T{6});
+    // Scalar integrals I_k(σ) = ∫₀¹ uᵏ e^{σu} du, k = 0, 1, 2.
+    //
+    // NUMERICAL NOTE (#449, PR #512). The closed forms cancel catastrophically
+    // as σ → 0, and the cancellation deepens with k:
+    //   I₀ = (e^σ − 1)/σ                      numerator ~ σ,     relative error ~ ε/σ
+    //   I₁ = (e^σ(σ − 1) + 1)/σ²              numerator ~ σ²/2,  relative error ~ 2ε/σ²
+    //   I₂ = (e^σ(σ² − 2σ + 2) − 2)/σ³        numerator ~ σ³/3,  relative error ~ 6ε/σ³
+    // So no single hand-off serves all three. With the old shared 1e-5 hand-off
+    // and a three-term series, I₂ was off by 33 % at σ = 1e-5 in DOUBLE. In
+    // float it was off by 100 % or more, up to 1e7× at σ = 3e-5. With the
+    // type-scaled SO3 threshold it was still off by 42 % at σ = 1e-2 in float.
+    //
+    // Instead, |σ| < 1 sums the Taylor series
+    //   I_k(σ) = Σₙ σⁿ / (n! (n + k + 1))
+    // until a term no longer changes the sum (≤ 18 terms in double, ≤ 11 in
+    // float). The series has no cancellation for |σ| < 1. For |σ| ≥ 1 the closed
+    // forms lose at most a few ulps (at σ = −1, I₂'s numerator is 5/e − 2 ≈ −0.16,
+    // a factor ~12). The hand-off at 1 is therefore independent of T. Measured
+    // error, double and float, σ ∈ [1e-6, 3]: within ~1 ulp of the exact value.
+    // Sim3 is not on the VIO path, so this changes no pipeline output.
+    static T scalar_moment(const T& sigma, int k) {
+        if (!(detail::abs_(sigma) < T{1})) {
+            const T es = detail::exp_(sigma);
+            if (k == 0)
+                return (es - T{1}) / sigma;
+            const T s2 = sigma * sigma;
+            if (k == 1)
+                return (es * (sigma - T{1}) + T{1}) / s2;
+            return (es * (s2 - T{2} * sigma + T{2}) - T{2}) / (s2 * sigma);
         }
-        return (detail::exp_(sigma) - T{1}) / sigma;
+        const T eps = std::numeric_limits<T>::epsilon();
+        T term = T{1};  // σⁿ / n!
+        T sum = T{0};
+        for (int n = 0; n < 64; ++n) {  // converges long before 64 for |σ| < 1
+            const T add = term / T(n + k + 1);
+            sum = sum + add;
+            if (!(detail::abs_(add) > eps * detail::abs_(sum)))
+                break;
+            term = term * sigma / T(n + 1);
+        }
+        return sum;
     }
-    static T scalar_Au(const T& sigma) {  // ∫ e^{σu} u du = (e^σ(σ-1)+1)/σ²
-        if (detail::abs_(sigma) < kSmall) {
-            return T{0.5} + sigma * (T{1} / T{3}) + sigma * sigma * (T{1} / T{8});
-        }
-        const T es = detail::exp_(sigma);
-        return (es * (sigma - T{1}) + T{1}) / (sigma * sigma);
+    static T scalar_A(const T& sigma) {  // ∫ e^{σu} du
+        return scalar_moment(sigma, 0);
+    }
+    static T scalar_Au(const T& sigma) {  // ∫ e^{σu} u du
+        return scalar_moment(sigma, 1);
     }
     static T scalar_Au2(const T& sigma) {  // ∫ e^{σu} u² du
-        if (detail::abs_(sigma) < kSmall) {
-            return T{1} / T{3} + sigma * T{0.25} + sigma * sigma * (T{1} / T{10});
-        }
-        const T es = detail::exp_(sigma);
-        const T s2 = sigma * sigma;
-        // = (e^σ(σ² - 2σ + 2) - 2)/σ³
-        return (es * (s2 - T{2} * sigma + T{2}) - T{2}) / (s2 * sigma);
+        return scalar_moment(sigma, 2);
     }
 
     SO3<T> R_{};

@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace {
 
@@ -114,4 +115,24 @@ TEST_CASE("y = A*x + b instantiates for Universal cfloat", "[math][type-smoke]")
 
 TEST_CASE("y = A*x + b instantiates for Universal fixed-point", "[math][type-smoke]") {
     check_axpb<fixedQ16>();
+}
+
+TEST_CASE("a ridge tuned in double is floored at the roundoff of a coarser type", "[math][generic]") {
+    using branes::math::at_least_roundoff;
+    // Double (and wider) keep the nominal value exactly: no result moves (#449).
+    REQUIRE(at_least_roundoff(1e-9) == 1e-9);
+    REQUIRE(at_least_roundoff(1e-9L) == 1e-9L);
+    // Coarser types are raised to 16 ulps at 1, so the ridge survives on a unit diagonal.
+    REQUIRE(at_least_roundoff(1e-9f) == 16 * std::numeric_limits<float>::epsilon());
+    REQUIRE(1.0f + at_least_roundoff(1e-9f) > 1.0f);
+    const posit16 r16 = at_least_roundoff(posit16(1e-9));
+    REQUIRE(r16 == posit16(16) * std::numeric_limits<posit16>::epsilon());
+    REQUIRE(posit16(1) + r16 > posit16(1));
+    const posit32 r32 = at_least_roundoff(posit32(1e-9));
+    REQUIRE(posit32(1) + r32 > posit32(1));
+    // The floor is relative to the entry it is added to: a small diagonal keeps
+    // the nominal ridge, a large one gets a few of its own ulps.
+    REQUIRE(at_least_roundoff(1e-9f, 1e-4f) == 1e-9f);
+    REQUIRE(at_least_roundoff(1e-9f, -1e3f) == 16 * std::numeric_limits<float>::epsilon() * 1e3f);
+    REQUIRE(at_least_roundoff(1e-9, 1e5) == 1e-9);
 }

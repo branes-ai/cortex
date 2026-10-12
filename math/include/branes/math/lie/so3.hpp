@@ -71,8 +71,13 @@ public:
         const T theta2 = detail::dot(phi, phi);
         const T theta = detail::sqrt_(theta2);
         T real, imag;  // quaternion real part, and sin(theta/2)/theta
-        if (theta < kSmall) {
-            // Series: cos(theta/2) and sin(theta/2)/theta about theta=0.
+        if (theta < small()) {
+            // Series: cos(theta/2) and sin(theta/2)/theta about theta=0. In IEEE
+            // the closed form below does not cancel and is accurate for any
+            // theta > 0, so this branch only avoids 0/0. In a tapered format
+            // (posit), sin(theta/2) and theta are both small and carry few
+            // fraction bits, so their ratio is inaccurate (posit16: 0.6 % at
+            // 3e-4); the type-scaled small() keeps such angles on the series.
             real = T{1} - theta2 * T{0.125};
             imag = T{0.5} - theta2 * (T{1} / T{48});
         } else {
@@ -92,8 +97,10 @@ public:
         const T nv = detail::norm(v);
         const T w = q_[0];  // canonicalized w >= 0
         T scale;
-        if (nv < kSmall) {
-            // theta ~ 0: scale = 2/w * (1 + (nv/w)^2/3 + ...) ~ 2 (w~1).
+        if (nv < small()) {
+            // theta ~ 0: scale = 2/w * (1 + (nv/w)^2/3 + ...) ~ 2 (w~1). As in
+            // exp, the closed form does not cancel; the guard matters for 0/0
+            // and for tapered formats (see detail::small_angle).
             scale = T{2} / w - (T{2} / T{3}) * (nv * nv) / (w * w * w);
         } else {
             scale = T{2} * detail::atan2_(nv, w) / nv;
@@ -159,8 +166,12 @@ public:
         const Matrix3 W2 = W * W;
         const T theta2 = detail::dot(phi, phi);
         const Matrix3 I = Matrix3::identity();
-        if (theta2 < kSmall * kSmall) {
-            // Jl ~ I + 1/2 W + 1/6 W^2.
+        if (theta2 < small() * small()) {
+            // Jl ~ I + 1/2 W + 1/6 W^2, truncation ~theta^3/24. This is the
+            // branch the threshold exists for: the closed form's 1 - cos(theta)
+            // and theta - sin(theta) cancel, an error ~eps/theta that grows as
+            // theta shrinks (in float, 1 - cos(theta) is exactly 0 below
+            // ~2.4e-4 and Jl loses its W/2 term). See detail::small_angle.
             return I + W * T{0.5} + W2 * (T{1} / T{6});
         }
         const T theta = detail::sqrt_(theta2);
@@ -175,8 +186,14 @@ public:
         const Matrix3 W2 = W * W;
         const T theta2 = detail::dot(phi, phi);
         const Matrix3 I = Matrix3::identity();
-        if (theta2 < kSmall * kSmall) {
-            // Jl^{-1} ~ I - 1/2 W + 1/12 W^2.
+        if (theta2 < small() * small()) {
+            // Jl^{-1} ~ I - 1/2 W + 1/12 W^2. The closed form's c is a
+            // difference of two terms ~1/theta^2, so c itself is inaccurate at
+            // small theta, but it multiplies W^2 (~theta^2). In IEEE the error
+            // in Jl^{-1} stays ~eps at every theta (float: <= 1.3e-7 measured).
+            // In a posit, 1/theta^2 is a large number with few fraction bits:
+            // posit32's closed form is off by 1.3e-6 (~170 eps) at theta = 1e-5.
+            // The type-scaled threshold keeps those angles on the series.
             return I - W * T{0.5} + W2 * (T{1} / T{12});
         }
         const T theta = detail::sqrt_(theta2);
@@ -201,8 +218,12 @@ public:
     }
 
 private:
-    // Small-angle threshold; series expansions kick in below this.
-    static constexpr T kSmall = T{1} / T{100000};  // 1e-5
+    // Small-angle threshold; series expansions kick in below this:
+    // max(1e-5, ε_T^{1/3}). It scales with T because the closed forms' rounding
+    // does (#449); detail::small_angle has the error analysis and measurements.
+    static T small() {
+        return detail::small_angle<T>();
+    }
 
     void normalize() {
         T n = detail::sqrt_(q_[0] * q_[0] + q_[1] * q_[1] + q_[2] * q_[2] + q_[3] * q_[3]);

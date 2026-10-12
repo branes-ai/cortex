@@ -101,6 +101,52 @@ timestamps by design.
 The type is left out on MSVC, whose Release optimizer crashes (C1001) compiling the stages with it.
 The check runs on gcc and clang, and the posit types already enforce explicit conversions on MSVC.
 
+### Thresholds that scale with T, and what stays IEEE (#449)
+
+The audit listed the fixed `T(1e-9)` ridges and SO(3)'s 1e-5 small-angle threshold as constants
+that vanish in a coarse type. Measured in the benches, they split into two kinds:
+
+- **Tolerances scale with T.** The small-angle hand-off in SO(3) and Sim(3) is
+  `lie::detail::small_angle<T>()` = max(1e-5, ε_T^(1/3)). In float, 1 − cos θ is already zero at
+  θ = 1e-4, so the closed-form Jacobian lost its W/2 term there. Below ε^(1/3) the series'
+  truncation error is under ε, and above it the closed forms lose at most ε^(2/3). Now the float
+  Jacobians at θ = 1e-4 match double to 1e-6. Sim(3)'s scale-rate integrals $\int_0^1 u^k e^{\sigma u}\,du$
+  cancel like σᵏ, so no shared hand-off serves them. They are now a series summed to convergence
+  for |σ| < 1, accurate to about an ulp in every type. Sim(3) is not on the VIO path. Two more
+  tolerances use
+  `math::at_least_roundoff(nominal, scale)` = max(nominal, 16·ε_T·|scale|):
+  - the PSD check's ridge, floored at a few ulps of each diagonal entry, so that rounding at float's
+    level is not read as a negative eigenvalue;
+  - the initializer's up-vector degeneracy test, which compares a sine in [0, 1].
+- **Regularizing ridges stay fixed.** Triangulation's Gauss-Newton ridge and the initializer's
+  gyro-bias and velocity ridges guard a zero diagonal, an unexcited unknown. Every bench type
+  represents 1e-9 there: double, float and posit32 hold it, and posit16 rounds it up to its minpos
+  (3.7e-9), not to zero. IEEE half and Q16.16 fixed point round it to 0; a port to those needs a
+  rescaled problem. A T-scaled ridge was tried and measured as harmful:
+  - floored at 16·ε_T, the velocity/gravity/scale alignment's float scale error in the S1 SfM bench
+    went from rounding level to 17.2 %;
+  - floored at 16 ulps of each diagonal entry, it went to 24.8 %.
+
+  A ridge λ shrinks the solution along each eigenvector of the normal matrix by λ/(σᵢ + λ). The
+  alignment's scale-carrying mode has σ = 5.5e-6, so 1.9e-6 removes about a quarter of it. These
+  ridges stay at 1e-9 in every type.
+
+For double (and long double) `small_angle` returns 1e-5 exactly. `at_least_roundoff` returns the
+old 1e-9 unless the entry it scales with exceeds about 2.8e5, where 16·ε·|scale| passes 1e-9; that
+is a property of the input, not a guarantee. As measured, the bench snapshot and the EuRoC
+trajectories are unchanged bit for bit. The error models, the measurements
+behind each choice and guidance for hardware formats are on
+[Numerical Thresholds Across Arithmetic Types](/debugging/numerical-thresholds/).
+
+What stays IEEE by design, outside T:
+
+| Part | Type | Why |
+|---|---|---|
+| KLT tracker (`cv/klt.hpp`) | double internally, `float` points | an image-domain front end; pixels are the measurement, not the estimate |
+| `VioConfig` | double | a parsed configuration POD (see the configuration discipline); cast to T once when the backend initializes |
+| Timestamps | double | time is an index, not a state; `dt` is cast to T for the propagation step |
+| `eval/` telemetry (NEES, NIS, innovation statistics) | double | diagnostics accumulate over a whole run; they read the estimate, never feed it |
+
 ### The equivalence gate
 
 Two tools hold a port to "same results". Run each before the port to take a reference, and after it
