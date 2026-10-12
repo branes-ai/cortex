@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.78.0](https://github.com/branes-ai/cortex/compare/v0.77.0...v0.78.0) (2026-10-12)
+
+
+### Features
+
+* **tools:** strict_double bench type audits genericity bit for bit ([#510](https://github.com/branes-ai/cortex/issues/510)) ([ced6345](https://github.com/branes-ai/cortex/commit/ced6345615c628fced9a27f69163ae60c677439a))
+
 ## [0.77.0](https://github.com/branes-ai/cortex/compare/v0.76.1...v0.77.0) (2026-10-12)
 
 
