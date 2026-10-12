@@ -522,8 +522,13 @@ public:
             for (std::size_t a = 0; a < 3; ++a) {
                 for (std::size_t bb = 0; bb < 3; ++bb)
                     Hn(a, bb) = H(a, bb);
-                // A fixed ridge, not T-scaled (#449): it guards a zero diagonal, where every T
-                // represents 1e-9. A T-scaled ridge biases the solve (see imu_init.hpp).
+                // A REGULARIZER, fixed at 1e-9 in every T (#449). It keeps a
+                // depth-degenerate H (a feature seen along one ray) factorable,
+                // and must stay far below H's informative eigenvalues: a ridge λ
+                // shrinks the solution along each eigenvector by λ/(σᵢ + λ).
+                // Do not scale it with ε_T: a T-scaled ridge biased the
+                // initializer's alignment solve by 17 % in float (imu_init.hpp,
+                // docs-site …/debugging/numerical-thresholds.mdx).
                 Hn(a, a) += T(1e-9);
                 gn(a, 0) = g[a];
             }

@@ -68,14 +68,47 @@ template <Scalar T>
     return log(x);
 }
 
-/// The angle below which the groups switch from closed forms to their Taylor
-/// series: 1e-5, raised to ε_T^{1/3} for a type too coarse for it (#449). Below
-/// ε^{1/3} the second-order series' truncation error (θ⁴) is under ε, and above
-/// it the closed forms' cancellation error (ε/θ in the Jacobians) is at most
-/// ε^{2/3}. With a fixed 1e-5, float or a posit evaluates (1 − cos θ)/θ² at
-/// angles where 1 − cos θ is a few ulps or zero. ε^{1/3} is below 1e-5 for double
-/// and wider types, so they keep 1e-5 bit for bit. The threshold itself is a
-/// tuning constant, so it is computed in double once per type.
+/// The angle θ below which SO(3)/Sim(3) switch from closed forms to their
+/// truncated Taylor series: max(1e-5, ε_T^{1/3}) (#449).
+///
+/// NUMERICAL NOTE — read before changing this, or before porting the groups to a
+/// new number format or to hardware. Full analysis and measurements:
+/// docs-site …/debugging/numerical-thresholds.mdx.
+///
+/// Two error sources trade off at this threshold:
+///  - The closed forms cancel. The left Jacobian's coefficients are
+///    a = (1 − cos θ)/θ² and b = (θ − sin θ)/θ³. 1 − cos θ is a difference of two
+///    numbers near 1, so it carries an absolute error of about ε_T. Divided by θ²
+///    and multiplied by W (whose entries are about θ), that is an error of about
+///    ε/θ in Jl, which GROWS as θ shrinks. In float, 1 − cos θ rounds to exactly
+///    0 for θ ≲ 2.4e-4, so a = 0 and Jl loses its W/2 term entirely.
+///  - The series truncate. Jl ≈ I + W/2 + W²/6 drops terms of order θ³/24,
+///    which SHRINK as θ shrinks.
+/// The error-optimal crossover is where ε/θ = θ³/24, i.e. θ* ≈ (24·ε)^{1/4}. That
+/// model bounds the rounding from above, so measured crossovers sit a little lower:
+/// about 2e-4 for double (model 2.7e-4) and 2.5e-2 for float (model 4.1e-2).
+///
+/// Why ε^{1/3} rather than θ*: the cortex policy is that T = double stays bit
+/// for bit, and θ* for double (2.7e-4) is above 1e-5, so it would move double's
+/// results. ε^{1/3} is below 1e-5 for double and long double (6.1e-6 and
+/// 4.8e-7), so they keep 1e-5. It is above 1e-5 for every narrower format, where
+/// it bounds the truncation error by ε/24 and the cancellation by ε^{2/3}.
+/// Measured maximum error of Jl's entries, over θ ∈ [1e-6, 0.1]:
+///   float    5.7e-5 with 1e-5  →  1.8e-6 with ε^{1/3} (4.9e-3)  (θ* would give ~4e-7)
+///   posit32  1.8e-5            →  1.4e-7 (threshold 2.0e-3)
+///   posit16  3.2e-3            →  1.3e-4 (threshold 6.3e-2), which is its rounding floor
+/// Double itself is not error-optimal: in θ ∈ [1e-5, 2e-4] its closed form is off
+/// by up to ~1e-12, against ~1e-16 for the series. Raising double's threshold is a
+/// known improvement, held back only by the bit-identity gate.
+///
+/// Tapered formats (posits): ε_T is the precision at magnitude 1. Small θ, θ²
+/// and sin θ have FEWER fraction bits than that. The series is safe, because it
+/// adds small corrections to O(1) terms. A closed form that divides two small
+/// numbers is not: posit16's sin(θ/2)/θ is 0.6 % off at θ = 3e-4. So for posits
+/// even the exp/log closed forms, which do not cancel in IEEE, need this threshold.
+///
+/// The threshold is a tuning constant, not part of the computation, so it is
+/// computed in double once per type, in a function-local static.
 template <Scalar T>
 [[nodiscard]] T small_angle() {
     static const T k = [] {

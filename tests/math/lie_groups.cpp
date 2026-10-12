@@ -18,8 +18,10 @@
 #include <universal/number/posit/mathlib.hpp>
 // clang-format on
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <utility>
 
 namespace lie = branes::math::lie;
 namespace det = branes::math::lie::detail;
@@ -154,27 +156,52 @@ TEST_CASE("SO3 left Jacobian inverse is finite and correct near a half-turn", "[
     }
 }
 
+namespace {
+
+/// Max |entry error| of SO3<T>'s left Jacobian and its inverse over a log sweep
+/// of angles, against double evaluated at the same (T-rounded) rotation vector.
+template <class T>
+std::pair<double, double> so3_jacobian_sweep_error() {
+    double ej = 0, eji = 0;
+    for (double t = 1e-6; t < 0.11; t *= 1.7782794100389228) {  // 10^(1/4)
+        const det::Vec<T, 3> phi{{T(0.6 * t), T(-0.48 * t), T(0.64 * t)}};
+        const det::Vec<double, 3> phid{{double(phi[0]), double(phi[1]), double(phi[2])}};
+        const auto J = lie::SO3<T>::left_jacobian(phi);
+        const auto Ji = lie::SO3<T>::left_jacobian_inverse(phi);
+        const auto Jd = lie::SO3<double>::left_jacobian(phid);
+        const auto Jdi = lie::SO3<double>::left_jacobian_inverse(phid);
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j) {
+                ej = std::max(ej, std::abs(double(J(i, j)) - Jd(i, j)));
+                eji = std::max(eji, std::abs(double(Ji(i, j)) - Jdi(i, j)));
+            }
+    }
+    return {ej, eji};
+}
+
+}  // namespace
+
 TEST_CASE("SO3 small-angle hand-off scales with the arithmetic type", "[math][lie][so3][generic]") {
-    // Double keeps 1e-5 bit for bit; float moves up to eps^(1/3) (#449).
+    // max(1e-5, eps^(1/3)) (#449): double and long double keep 1e-5 bit for bit.
     REQUIRE(det::small_angle<double>() == 1.0 / 100000.0);
     REQUIRE(det::small_angle<long double>() == 1.0L / 100000.0L);
     REQUIRE(double(det::small_angle<float>()) > 1e-3);
 
-    // At theta = 1e-4 float's 1 - cos(theta) rounds to 0, so the closed-form
-    // Jacobian loses its W/2 term. Below the scaled hand-off the series holds.
-    const double ang = 1e-4;
-    const det::Vec<double, 3> phid{{ang, -0.5 * ang, 0.25 * ang}};
-    const det::Vec<float, 3> phif{{float(phid[0]), float(phid[1]), float(phid[2])}};
-    const auto Jd = lie::SO3<double>::left_jacobian(phid);
-    const auto Jf = lie::SO3<float>::left_jacobian(phif);
-    for (std::size_t i = 0; i < 3; ++i)
-        for (std::size_t j = 0; j < 3; ++j)
-            REQUIRE(std::abs(double(Jf(i, j)) - Jd(i, j)) < 1e-6);
-    const auto Jfi = lie::SO3<float>::left_jacobian_inverse(phif);
-    const auto Jdi = lie::SO3<double>::left_jacobian_inverse(phid);
-    for (std::size_t i = 0; i < 3; ++i)
-        for (std::size_t j = 0; j < 3; ++j)
-            REQUIRE(std::abs(double(Jfi(i, j)) - Jdi(i, j)) < 1e-6);
+    // The measured error bounds of docs-site debugging/numerical-thresholds,
+    // with ~2x headroom. With the old fixed 1e-5 hand-off the left Jacobian was
+    // off by 5.7e-5 (float), 1.8e-5 (posit32) and 3.2e-3 (posit16): the closed
+    // form's 1 - cos(theta) cancels (in float it is exactly 0 at theta = 1e-4).
+    using posit32 = sw::universal::posit<32, 2>;
+    using posit16 = sw::universal::posit<16, 1>;
+    const auto [jf, jif] = so3_jacobian_sweep_error<float>();
+    REQUIRE(jf < 4e-6);  // measured 1.8e-6
+    REQUIRE(jif < 4e-7);
+    const auto [j32, ji32] = so3_jacobian_sweep_error<posit32>();
+    REQUIRE(j32 < 3e-7);  // measured 1.4e-7
+    REQUIRE(ji32 < 3e-7);
+    const auto [j16, ji16] = so3_jacobian_sweep_error<posit16>();
+    REQUIRE(j16 < 3e-4);     // measured 1.3e-4, posit16's rounding at 1
+    REQUIRE(ji16 < 1.5e-3);  // measured 6.4e-4 (2.6 eps), at theta = 0.1 on the closed form
 }
 
 // ── SE3 ──────────────────────────────────────────────────────────────
@@ -395,6 +422,36 @@ TEST_CASE("Sim3 round-trip across arithmetic types", "[math][lie][sim3]") {
 }
 
 // ── #161: degenerate-input guards must admit all legitimate inputs ──────
+
+TEST_CASE("Sim3 exp is accurate at small scale rates in every type", "[math][lie][sim3][generic]") {
+    // Regression (#449, PR #512): the scale-rate integrals I_k(sigma) =
+    // int_0^1 u^k e^(sigma u) du were closed forms that cancel like sigma^k
+    // ((e^s(s^2 - 2s + 2) - 2)/s^3 for k = 2). They are now a series summed to
+    // convergence for |sigma| < 1. theta = 3e-3 keeps w_matrix on its
+    // small-angle branch, where I_1 and I_2 enter.
+    for (double sg : {1e-5, 1e-4, 1e-3, 1e-2, 1e-1, -1e-2}) {
+        const double th = 3e-3;
+        const double v[7] = {0.5, -0.3, 0.2, 0.6 * th, -0.48 * th, 0.64 * th, sg};
+        det::Vec<long double, 7> tl{};
+        det::Vec<double, 7> td{};
+        det::Vec<float, 7> tf{};
+        for (std::size_t i = 0; i < 7; ++i) {
+            tf[i] = float(v[i]);
+            td[i] = double(tf[i]);  // the same (float-rounded) tangent in every type
+            tl[i] = static_cast<long double>(td[i]);
+        }
+        const auto ref = lie::Sim3<long double>::exp(tl).translation();
+        const auto d = lie::Sim3<double>::exp(td).translation();
+        const auto f = lie::Sim3<float>::exp(tf).translation();
+        for (std::size_t i = 0; i < 3; ++i) {
+            INFO("sigma = " << sg << ", i = " << i);
+            // Measured: double <= 9.9e-15 (3.1e-13 before), float <= 4.6e-8
+            // (3.4e-7 before). Double's remainder is w_matrix's theta closed form.
+            REQUIRE(std::abs(static_cast<long double>(d[i]) - ref[i]) < 2.5e-14L);
+            REQUIRE(std::abs(static_cast<long double>(f[i]) - ref[i]) < 1e-7L);
+        }
+    }
+}
 
 TEST_CASE("SO3 normalizes non-unit and small-but-nonzero quaternions", "[math][lie][so3]") {
     // A non-unit quaternion is a documented valid input: it must normalize,

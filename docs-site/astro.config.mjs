@@ -144,6 +144,7 @@ export default defineConfig({
             { label: 'Stage Benches', slug: 'debugging/stage-benches' },
             { label: 'Capture & Composition', slug: 'debugging/capture-and-composition' },
             { label: 'Mixed Precision on MTL5', slug: 'debugging/mixed-precision' },
+            { label: 'Numerical Thresholds Across Types', slug: 'debugging/numerical-thresholds' },
             { label: 'Worked Example: Finding #461', slug: 'debugging/worked-example' },
           ],
         },

@@ -293,6 +293,11 @@ private:
         const T c = math::lie::detail::dot(up_body, ez);
         const Vec3 v = math::lie::detail::cross(up_body, ez);
         const T s = math::lie::detail::norm(v);
+        // s = |up × ẑ| = sin of the angle to vertical, in [0, 1]. Below the
+        // threshold the axis v/s is noise, so take the exact (anti)parallel
+        // branch. This is a TOLERANCE on a unit-scale quantity, so it is floored
+        // at a few ulps of T (#449): in float, s carries ~1e-7 of rounding, and a
+        // fixed 1e-9 would accept that rounding as an axis.
         if (!(s > math::at_least_roundoff(T(1e-9)))) {
             // Parallel (already up) or anti-parallel (upside down).
             if (c > T{0})
@@ -333,7 +338,9 @@ private:
         for (std::size_t i = 0; i < 3; ++i) {
             for (std::size_t j = 0; j < 3; ++j)
                 A(i, j) = H(i, j);
-            A(i, i) += T(1e-9);  // fixed, not T-scaled: see the velocity ridge below
+            // A REGULARIZER, fixed at 1e-9 in every T (#449). It must stay far
+            // below the bias modes' eigenvalues; see the velocity ridge below.
+            A(i, i) += T(1e-9);
             rhs(i, 0) = b[i];
         }
         const DynMat<T> x = spd_solve(A, rhs);
@@ -464,10 +471,28 @@ private:
         }
 
         // The velocities need motion to be observable; a small ridge
-        // regularizes. Factor once and reuse the factor for the solve. The ridge
-        // is fixed, not T-scaled (#449): it guards a zero diagonal (an unexcited
-        // velocity), where every T represents 1e-9. Floored at a few ulps of each
-        // entry it biased the weakly observed scale (the S1 SfM bench in float).
+        // regularizes. Factor once and reuse the factor for the solve.
+        //
+        // NUMERICAL NOTE (#449). The ridge λ is a REGULARIZER, so it is a fixed
+        // 1e-9 in every T, deliberately not scaled with ε_T. It makes an
+        // unexcited direction (an exactly zero or near-null mode) factorable. It
+        // also shrinks the solution along every eigenvector of H by λ/(σᵢ + λ).
+        // On the S1 known-answer window:
+        //  - the refined pass's smallest eigenvalue is 5.5e-6 (cond 7e5), and
+        //    that mode carries the scale;
+        //  - λ = 1e-9 shrinks it by 0.02 %;
+        //  - λ = 16·ε_float = 1.9e-6 shrank it by 26 %, a 17 % scale error;
+        //  - λ = 16 ulps of each diagonal entry gave 25–29 %.
+        // So λ must sit far below the informative eigenvalues, which are set by
+        // the motion, not by T. Do not floor it with at_least_roundoff.
+        //
+        // Precision: rounding moves the solution by about cond(H)·ε_T. That is
+        // 0.55 % of scale for a float32 solve of this H (cond 7e5). H = JᵀJ (normal
+        // equations) squares the conditioning of J; a narrow format (half,
+        // bfloat16, posit16: cond·ε ≥ 1) cannot resolve the scale this way at
+        // all. A port to such a format needs a QR/square-root solve of the
+        // stacked constraints, or a rescaled problem.
+        // See docs-site …/debugging/numerical-thresholds.mdx.
         for (std::size_t i = 0; i < dim; ++i)
             H(i, i) += T(1e-9);
         DynMat<T> L;
