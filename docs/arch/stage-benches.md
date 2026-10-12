@@ -16,7 +16,7 @@ replay.
 |---|---|
 | `tools/include/branes/tools/bench/bench.hpp` | the runner, the report, and the CLI (`bench_main<B>`) |
 | `tools/include/branes/tools/bench/fixture.hpp` | the fixture model, the exact JSON codec, and the capture writer |
-| `tools/include/branes/tools/bench/types.hpp` | the arithmetic types: `double`, `float`, `posit32` (posit<32,2>), `posit16` (posit<16,1>), and `long_double` as the wider-than-double reference |
+| `tools/include/branes/tools/bench/types.hpp` | the arithmetic types: `double`, `float`, `posit32` (posit<32,2>), `posit16` (posit<16,1>), `long_double` as the wider-than-double reference, and `strict_double` (`strict_double.hpp`, #449): double with only explicit conversions out, which must reproduce double bit for bit |
 | `tools/include/branes/tools/bench/variant.hpp` | the variant slot: named alternative implementations of a stage |
 | `tools/include/branes/tools/bench/sweep.hpp` | declarative characterization sweeps and CSV tables |
 | `tools/include/branes/tools/bench/s<N>_<transformation>_bench.hpp` | one stage's bench (the adapter) |
