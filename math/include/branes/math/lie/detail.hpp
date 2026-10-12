@@ -25,6 +25,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 
 namespace branes::math::lie::detail {
@@ -65,6 +66,24 @@ template <Scalar T>
 [[nodiscard]] T log_(const T& x) {
     using std::log;
     return log(x);
+}
+
+/// The angle below which the groups switch from closed forms to their Taylor
+/// series: 1e-5, raised to ε_T^{1/3} for a type too coarse for it (#449). Below
+/// ε^{1/3} the second-order series' truncation error (θ⁴) is under ε, and above
+/// it the closed forms' cancellation error (ε/θ in the Jacobians) is at most
+/// ε^{2/3}. With a fixed 1e-5, float or a posit evaluates (1 − cos θ)/θ² at
+/// angles where 1 − cos θ is a few ulps or zero. ε^{1/3} is below 1e-5 for double
+/// and wider types, so they keep 1e-5 bit for bit. The threshold itself is a
+/// tuning constant, so it is computed in double once per type.
+template <Scalar T>
+[[nodiscard]] T small_angle() {
+    static const T k = [] {
+        const T nominal = T{1} / T{100000};  // 1e-5
+        const T cbrt_eps = T(std::cbrt(static_cast<double>(std::numeric_limits<T>::epsilon())));
+        return nominal < cbrt_eps ? cbrt_eps : nominal;
+    }();
+    return k;
 }
 
 // ── Fixed-size column vector ─────────────────────────────────────────

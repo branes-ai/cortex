@@ -22,6 +22,8 @@
 
 #include <mtl/concepts/scalar.hpp>
 
+#include <limits>
+
 namespace branes::math {
 
 /// A value type with the additive/multiplicative ring operations the
@@ -52,6 +54,21 @@ concept OrderedField = mtl::OrderedField<T>;
 /// name the requirement at solver call sites.
 template <class T>
 concept LinearAlgebraScalar = Field<T>;
+
+/// A ridge or threshold tuned in double, floored at a few roundoff units of T at
+/// the magnitude `scale` it is added to (#449): max(nominal, 16·ε_T·|scale|). A
+/// fixed `T(1e-9)` added to a unit-scale diagonal is absorbed whole in float or
+/// a 16/32-bit posit, so the ridge it was meant to be is gone; floored at 16 ulps
+/// of the entry it survives. Scaling by the entry, not by 1, keeps the floor from
+/// swamping a small diagonal (a well-determined unknown in small units). For
+/// double the floor exceeds 1e-9 only on an entry above ~2.8e5, so double
+/// results are unchanged.
+template <OrderedField T>
+[[nodiscard]] T at_least_roundoff(const T& nominal, const T& scale = T{1}) {
+    const T mag = scale < T{0} ? -scale : scale;
+    const T floor = T{16} * std::numeric_limits<T>::epsilon() * mag;
+    return nominal < floor ? floor : nominal;
+}
 
 // ── Validated arithmetic types ──────────────────────────────────────
 //

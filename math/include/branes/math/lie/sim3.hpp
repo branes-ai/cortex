@@ -168,7 +168,10 @@ public:
     }
 
 private:
-    static constexpr T kSmall = T{1} / T{100000};  // 1e-5
+    // Small-argument threshold (1e-5, or ε_T^{1/3} for a coarser T).
+    static T small() {
+        return detail::small_angle<T>();
+    }
 
     static Tangent neg(const Tangent& tau) {
         Tangent r;
@@ -214,7 +217,7 @@ private:
 
         // For θ→0, (B/θ) and (C/θ²) have finite limits; compute via series.
         T coefF, coefF2;
-        if (theta2 < kSmall * kSmall) {
+        if (theta2 < small() * small()) {
             // exp(uφ^) ≈ I + uφ^ + u²/2 (φ^)²; integrate e^{σu}·u and ·u²/2.
             coefF = scalar_Au(sigma);             // ∫ e^{σu} u du
             coefF2 = scalar_Au2(sigma) * T{0.5};  // ½ ∫ e^{σu} u² du
@@ -235,20 +238,20 @@ private:
 
     // Scalar integrals over u∈[0,1] with small-σ series fallbacks.
     static T scalar_A(const T& sigma) {  // ∫ e^{σu} du
-        if (detail::abs_(sigma) < kSmall) {
+        if (detail::abs_(sigma) < small()) {
             return T{1} + sigma * T{0.5} + sigma * sigma * (T{1} / T{6});
         }
         return (detail::exp_(sigma) - T{1}) / sigma;
     }
     static T scalar_Au(const T& sigma) {  // ∫ e^{σu} u du = (e^σ(σ-1)+1)/σ²
-        if (detail::abs_(sigma) < kSmall) {
+        if (detail::abs_(sigma) < small()) {
             return T{0.5} + sigma * (T{1} / T{3}) + sigma * sigma * (T{1} / T{8});
         }
         const T es = detail::exp_(sigma);
         return (es * (sigma - T{1}) + T{1}) / (sigma * sigma);
     }
     static T scalar_Au2(const T& sigma) {  // ∫ e^{σu} u² du
-        if (detail::abs_(sigma) < kSmall) {
+        if (detail::abs_(sigma) < small()) {
             return T{1} / T{3} + sigma * T{0.25} + sigma * sigma * (T{1} / T{10});
         }
         const T es = detail::exp_(sigma);

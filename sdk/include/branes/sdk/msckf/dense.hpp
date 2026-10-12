@@ -191,12 +191,14 @@ template <math::Scalar T>
 /// True iff `a` is symmetric positive-*semi*-definite (no negative
 /// eigenvalues) to within a small ridge. MSCKF clone augmentation makes
 /// the covariance singular at that instant (the clone is an exact copy of
-/// the IMU pose), so PSD — not strict PD — is the invariant there.
+/// the IMU pose), so PSD — not strict PD — is the invariant there. The ridge on
+/// each diagonal entry is floored at a few ulps of that entry, so a coarse type
+/// still has one (#449).
 template <math::Scalar T>
 [[nodiscard]] bool is_positive_semidefinite(const DynMat<T>& a, T ridge = T(1e-9)) {
     DynMat<T> b = a;
     for (std::size_t i = 0; i < b.rows; ++i)
-        b(i, i) += ridge;
+        b(i, i) += math::at_least_roundoff(ridge, a(i, i));
     DynMat<T> L;
     return cholesky(b, L);
 }

@@ -214,3 +214,19 @@ TEST_CASE("DynMat mul skips zero coefficients: 0 times NaN or inf never enters a
         }
     }
 }
+
+TEST_CASE("the PSD check keeps its ridge in a coarse type", "[sdk][msckf][dense][generic]") {
+    // An exactly singular PSD matrix passes only through the ridge. In float a
+    // fixed 1e-9 is absorbed into the unit diagonal; floored at a few ulps of
+    // float (#449) the ridge survives and the check holds.
+    ms::DynMat<float> a(2, 2);
+    a(0, 0) = 1.0f;
+    a(0, 1) = 1.0f;
+    a(1, 0) = 1.0f;
+    a(1, 1) = 1.0f;
+    REQUIRE(1.0f + 1e-9f == 1.0f);  // the fixed ridge alone would vanish
+    REQUIRE(ms::is_positive_semidefinite(a));
+    ms::DynMat<float> b = a;
+    b(1, 1) = 0.5f;  // indefinite: still rejected
+    REQUIRE_FALSE(ms::is_positive_semidefinite(b));
+}

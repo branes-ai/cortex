@@ -154,6 +154,29 @@ TEST_CASE("SO3 left Jacobian inverse is finite and correct near a half-turn", "[
     }
 }
 
+TEST_CASE("SO3 small-angle hand-off scales with the arithmetic type", "[math][lie][so3][generic]") {
+    // Double keeps 1e-5 bit for bit; float moves up to eps^(1/3) (#449).
+    REQUIRE(det::small_angle<double>() == 1.0 / 100000.0);
+    REQUIRE(det::small_angle<long double>() == 1.0L / 100000.0L);
+    REQUIRE(double(det::small_angle<float>()) > 1e-3);
+
+    // At theta = 1e-4 float's 1 - cos(theta) rounds to 0, so the closed-form
+    // Jacobian loses its W/2 term. Below the scaled hand-off the series holds.
+    const double ang = 1e-4;
+    const det::Vec<double, 3> phid{{ang, -0.5 * ang, 0.25 * ang}};
+    const det::Vec<float, 3> phif{{float(phid[0]), float(phid[1]), float(phid[2])}};
+    const auto Jd = lie::SO3<double>::left_jacobian(phid);
+    const auto Jf = lie::SO3<float>::left_jacobian(phif);
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE(std::abs(double(Jf(i, j)) - Jd(i, j)) < 1e-6);
+    const auto Jfi = lie::SO3<float>::left_jacobian_inverse(phif);
+    const auto Jdi = lie::SO3<double>::left_jacobian_inverse(phid);
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 3; ++j)
+            REQUIRE(std::abs(double(Jfi(i, j)) - Jdi(i, j)) < 1e-6);
+}
+
 // ── SE3 ──────────────────────────────────────────────────────────────
 
 namespace {

@@ -71,7 +71,7 @@ public:
         const T theta2 = detail::dot(phi, phi);
         const T theta = detail::sqrt_(theta2);
         T real, imag;  // quaternion real part, and sin(theta/2)/theta
-        if (theta < kSmall) {
+        if (theta < small()) {
             // Series: cos(theta/2) and sin(theta/2)/theta about theta=0.
             real = T{1} - theta2 * T{0.125};
             imag = T{0.5} - theta2 * (T{1} / T{48});
@@ -92,7 +92,7 @@ public:
         const T nv = detail::norm(v);
         const T w = q_[0];  // canonicalized w >= 0
         T scale;
-        if (nv < kSmall) {
+        if (nv < small()) {
             // theta ~ 0: scale = 2/w * (1 + (nv/w)^2/3 + ...) ~ 2 (w~1).
             scale = T{2} / w - (T{2} / T{3}) * (nv * nv) / (w * w * w);
         } else {
@@ -159,7 +159,7 @@ public:
         const Matrix3 W2 = W * W;
         const T theta2 = detail::dot(phi, phi);
         const Matrix3 I = Matrix3::identity();
-        if (theta2 < kSmall * kSmall) {
+        if (theta2 < small() * small()) {
             // Jl ~ I + 1/2 W + 1/6 W^2.
             return I + W * T{0.5} + W2 * (T{1} / T{6});
         }
@@ -175,7 +175,7 @@ public:
         const Matrix3 W2 = W * W;
         const T theta2 = detail::dot(phi, phi);
         const Matrix3 I = Matrix3::identity();
-        if (theta2 < kSmall * kSmall) {
+        if (theta2 < small() * small()) {
             // Jl^{-1} ~ I - 1/2 W + 1/12 W^2.
             return I - W * T{0.5} + W2 * (T{1} / T{12});
         }
@@ -201,8 +201,11 @@ public:
     }
 
 private:
-    // Small-angle threshold; series expansions kick in below this.
-    static constexpr T kSmall = T{1} / T{100000};  // 1e-5
+    // Small-angle threshold; series expansions kick in below this (1e-5, or
+    // ε_T^{1/3} for a coarser T).
+    static T small() {
+        return detail::small_angle<T>();
+    }
 
     void normalize() {
         T n = detail::sqrt_(q_[0] * q_[0] + q_[1] * q_[1] + q_[2] * q_[2] + q_[3] * q_[3]);

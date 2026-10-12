@@ -293,7 +293,7 @@ private:
         const T c = math::lie::detail::dot(up_body, ez);
         const Vec3 v = math::lie::detail::cross(up_body, ez);
         const T s = math::lie::detail::norm(v);
-        if (!(s > T(1e-9))) {
+        if (!(s > math::at_least_roundoff(T(1e-9)))) {
             // Parallel (already up) or anti-parallel (upside down).
             if (c > T{0})
                 return SO3{};  // identity
@@ -333,7 +333,7 @@ private:
         for (std::size_t i = 0; i < 3; ++i) {
             for (std::size_t j = 0; j < 3; ++j)
                 A(i, j) = H(i, j);
-            A(i, i) += T(1e-9);
+            A(i, i) += T(1e-9);  // fixed, not T-scaled: see the velocity ridge below
             rhs(i, 0) = b[i];
         }
         const DynMat<T> x = spd_solve(A, rhs);
@@ -464,7 +464,10 @@ private:
         }
 
         // The velocities need motion to be observable; a small ridge
-        // regularizes. Factor once and reuse the factor for the solve.
+        // regularizes. Factor once and reuse the factor for the solve. The ridge
+        // is fixed, not T-scaled (#449): it guards a zero diagonal (an unexcited
+        // velocity), where every T represents 1e-9. Floored at a few ulps of each
+        // entry it biased the weakly observed scale (the S1 SfM bench in float).
         for (std::size_t i = 0; i < dim; ++i)
             H(i, i) += T(1e-9);
         DynMat<T> L;
