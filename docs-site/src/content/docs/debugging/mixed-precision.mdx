@@ -6,9 +6,9 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
-  The equivalence gate for the port is in place. Three families run on MTL5 5.15, all
-  bit-identical: the products and sums, the Cholesky factor with its SPD solves, and the Householder
-  QR with the MSCKF null-space projection. The eigen/SVD family keeps cortex's converged Jacobi until
+  The equivalence gate for the port is in place. Four families run on MTL5 5.15, all
+  bit-identical: the products and sums, the Cholesky factor with its SPD solves, the Householder
+  QR with the MSCKF null-space projection, and the square-root form's triangular solves. The eigen/SVD family keeps cortex's converged Jacobi until
   MTL5 has the kernels it needs
   ([mtl5#567](https://github.com/stillwater-sc/mtl5/issues/567)). The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
@@ -45,13 +45,13 @@ storage, and each family below moves its operations onto MTL5 views of it:
 | `msckf::DynMat<T>`, a row-major `std::vector` holding P, F, G, H, S, K | zero-copy `mtl::mat::dense2D<T>` views | done |
 | GEMM, add | `operation/mult.hpp` (dense, and CRS × dense for sparse left operands), `mat/operators.hpp` | done |
 | Cholesky, SPD solve | `cholesky_factor` (term-by-term order), two `trsm` calls | done |
-| GEMV, transpose | `operation/mult.hpp`, `trans.hpp` | |
+| GEMV, transpose | `operation/mult.hpp`, `trans.hpp` | the square-root gain product Kbar·y is `mult`; `transpose` stays a copy |
 | A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` | on `mult` through `mul`; a symmetric primitive is a gap |
 | Householder QR (R only) | `qr_factor` (textbook reflector) | done |
-| Triangular solves (square-root form) | `lower_trisolve.hpp`, `upper_trisolve.hpp`, `trsv.hpp` | |
+| Triangular solves (square-root form) | `trsm` over a `map_view` block | done |
 | MSCKF left null space | `householder` + `apply_householder_left` (textbook reflector) | done |
 | Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` | |
-| Principal-submatrix gather | `mat/view/map_view.hpp` | |
+| Principal-submatrix gather | `mat/view/map_view.hpp` | views where an MTL5 kernel reads the block; plain copies stay loops |
 
 ## How the port is gated
 
@@ -172,6 +172,29 @@ mtl::apply_householder_left(M, h.v, h.vtv, c, c + 1, mtl::tag::textbook_reflecto
 With the tag, the port is bit for bit: all 126 bench outputs at relative 0, and the V1_01, MH_05
 and V2_03 trajectories byte-identical. A column whose norm is NaN is now skipped in the projection,
 as it already was in the QR, instead of being reflected.
+
+### The square-root form's solves
+
+`SqrtCovariance` forward-solves the innovation factor Re twice: in the χ² gate (γ = ‖Re⁻¹r‖²) and in
+the array update (δx = Kbar·Re⁻¹r). Both now call `mtl::trsm` on a `map_view` of Re's block inside
+the triangularized array, so nothing is copied. `trsm` was chosen over `lower_trisolve` and `trsv`
+because of the order in which it sums:
+
+- `trsm`'s generic path subtracts each product from b in turn and divides by the pivot. That is the
+  hand-rolled loop's order, so the results are bit-identical.
+- `lower_trisolve` and `trsv` subtract one accumulated sum, b − Σ. That rounds differently, the same
+  difference as the Cholesky orders above.
+
+A zero pivot still stops the solve where it did. The gate rejects but reports γ over the rows
+solved before the pivot, which the NIS sample records. The update is a no-op. The solve never
+divides by the zero, which matters for types whose division by zero throws. Kbar·y is `mtl::mult`
+over another block view, and its generic product sums in ascending order from zero, as the loop
+did.
+
+The bench gate covers the array update (the S6e `sqrt_array` variant), but the snapshot never calls
+the square-root gate. So the port was also checked against the old header directly: 4,000 random
+systems, 537 of them rejected at a zero pivot, with γ, δx and S identical bit for bit on gcc and
+clang.
 
 ### The eigen and SVD family: a convergence bug first
 
