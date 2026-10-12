@@ -10,6 +10,8 @@
 //
 //   tap boundary   fixtures (bench)
 //   S0             S0_sensor_model    — one per frame and camera (its pixels)
+//   S1             S1_initialization  — one per dynamic-init attempt (the SfM
+//                  window and static IMU window, before the filter starts)
 //   S2             S2_propagation     — one per IMU step (and the hold to a frame)
 //   S3             S3_augmentation
 //   S6             S5_triangulation, S6a_jacobians, S6b_nullspace_projection,
@@ -24,6 +26,7 @@
 // state with the same stage functions, and the recomputed chain is checked
 // against the run: its outcome, NIS and state after must equal the run's bit
 // for bit. A difference is counted (`stats().chain_mismatches`), never hidden.
+// S1 differences are counted separately (`stats().init_mismatches`).
 //
 // Selection (`CaptureOptions`): by stage, by frame range, and by trigger —
 //   • `nis_per_dof_above`: an S6 update whose NIS/dof exceeds the threshold;
@@ -35,6 +38,9 @@
 //
 // Frames: S2 steps belong to the frame they propagate to; everything else to
 // the frame being processed. Frame 0 is the first frame after initialization.
+// S1 attempts come before frame 0: they are captured when the range starts at
+// frame 0 and no trigger is set, named by attempt; their expected output is the
+// S1 bench's `sfm_two_view_pnp` run, checked against the run's window outcome.
 //
 // Header-only, C++20.
 
@@ -43,6 +49,7 @@
 
 #include <branes/sdk/msckf/stage_tap.hpp>
 #include <branes/tools/bench/s0_sensor_model_bench.hpp>
+#include <branes/tools/bench/s1_initialization_bench.hpp>
 #include <branes/tools/bench/s2_propagation_bench.hpp>
 #include <branes/tools/bench/s3_augmentation_bench.hpp>
 #include <branes/tools/bench/s5_triangulation_bench.hpp>
@@ -72,6 +79,7 @@ namespace branes::tools::bench {
 /// The fixture stages a recorder can produce, in pipeline order.
 [[nodiscard]] inline const std::vector<std::string>& capturable_stages() {
     static const std::vector<std::string> s{"S0_sensor_model",
+                                            "S1_initialization",
                                             "S2_propagation",
                                             "S3_augmentation",
                                             "S5_triangulation",
@@ -113,6 +121,8 @@ struct CaptureStats {
     std::size_t boundaries = 0;        ///< boundaries captured
     std::size_t chain_mismatches = 0;  ///< S6 boundaries examined whose recomputed chain differs from the run
     std::size_t skipped = 0;           ///< selected boundaries the recorder cannot express (see `on_s6`)
+    std::size_t init_attempts = 0;     ///< dynamic-init attempts seen (S1, before the filter starts)
+    std::size_t init_mismatches = 0;   ///< S1 attempts whose window the bench rebuilt differently from the run
     std::optional<std::uint64_t> first_violation_frame;  ///< the frame the first-violation trigger fired on
     std::optional<Violation> first_violation;            ///< …and what failed there
 };
@@ -177,6 +187,11 @@ public:
         using TS = sdk::msckf::TapStage;
         if (done())
             return false;
+        // S1 runs before the filter's first frame: captured when the range
+        // starts at the beginning and no (post-init) trigger is set.
+        if (stage == TS::S1_initialization)
+            return selected("S1_initialization") && opt_.first_frame == 0 && !opt_.nis_per_dof_above &&
+                   !opt_.first_violation;
         const std::uint64_t f = stage == TS::S2_propagation ? next_frame_ : frame_;
         if (f < opt_.first_frame || f > opt_.last_frame)
             return false;
@@ -189,6 +204,8 @@ public:
         switch (stage) {
         case TS::S0_sensor_model:
             return !intr_.empty() && selected("S0_sensor_model");
+        case TS::S1_initialization:
+            return false;  // handled above
         case TS::S2_propagation:
             return selected("S2_propagation");
         case TS::S3_augmentation:
@@ -207,6 +224,49 @@ public:
             return selected("S9_marginalization");
         }
         return false;
+    }
+
+    /// One dynamic-init attempt: the SfM window and the static IMU window as an
+    /// S1 fixture, its expected output the `sfm_two_view_pnp` variant (the
+    /// backend's dynamic-init path, recomputed by the bench). A window the bench
+    /// builds differently from the run counts as a chain mismatch.
+    void on_s1(std::span<const sdk::sfm::InitFrame<T>> frames,
+               const sdk::msckf::CameraExtrinsics<T>& extrinsics,
+               std::span<const Vec3> gyro,
+               std::span<const Vec3> accel,
+               T gravity_magnitude,
+               double t,
+               const sdk::sfm::InitWindowResult<T>& window,
+               bool aligned) override {
+        using B = S1InitializationBench;
+        const std::size_t attempt = stats_.init_attempts++;
+        typename B::template Input<T> in;
+        in.gyro.assign(gyro.begin(), gyro.end());
+        in.accel.assign(accel.begin(), accel.end());
+        in.frames.assign(frames.begin(), frames.end());
+        in.extrinsics = extrinsics;
+        in.keyframes = window.keyframes;  // the run's own, for the `dynamic` variant
+        in.t = t;
+        in.gravity_magnitude = gravity_magnitude;
+        const auto out = B::template run<T>(in, "sfm_two_view_pnp");
+        if (out.window.success != window.success || out.window.status != window.status || (out.success != 0) != aligned)
+            ++stats_.init_mismatches;
+        std::string n = std::to_string(attempt);
+        NamedFixture nf;
+        nf.name = "init_attempt" + std::string(n.size() < 4 ? 4 - n.size() : 0, '0') + n + "_" + std::string(B::kStage);
+        nf.fixture = capture(std::string(B::kStage),
+                             std::string(type_name<T>()),
+                             opt_.source + ", dynamic-init attempt " + n + ", t=" + std::to_string(t) + " s, " +
+                                 std::to_string(frames.size()) + " frames",
+                             B::encode_input(in),
+                             B::encode_output(out),
+                             "sfm_two_view_pnp");
+        ++stats_.boundaries;
+        ++stats_.fixtures;
+        if (sink_)
+            sink_(nf);
+        else
+            kept_.push_back(std::move(nf));
     }
 
     void on_s0(std::uint32_t cam, T u, T v, const sdk::msckf::stages::s0_sensor_model::Result<T>& out) override {
@@ -495,6 +555,17 @@ public:
     }
     void on_s0(std::uint32_t cam, T u, T v, const sdk::msckf::stages::s0_sensor_model::Result<T>& out) override {
         each(sdk::msckf::TapStage::S0_sensor_model, [&](Base* x) { x->on_s0(cam, u, v, out); });
+    }
+    void on_s1(std::span<const sdk::sfm::InitFrame<T>> frames,
+               const sdk::msckf::CameraExtrinsics<T>& extrinsics,
+               std::span<const Vec3> gyro,
+               std::span<const Vec3> accel,
+               T gravity_magnitude,
+               double t,
+               const sdk::sfm::InitWindowResult<T>& window,
+               bool aligned) override {
+        each(sdk::msckf::TapStage::S1_initialization,
+             [&](Base* x) { x->on_s1(frames, extrinsics, gyro, accel, gravity_magnitude, t, window, aligned); });
     }
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& p,
