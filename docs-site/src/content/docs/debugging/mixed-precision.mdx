@@ -98,6 +98,9 @@ the moment a narrowing comes back. The `static_cast<double>` that remain on the 
 diagnostics, the NIS telemetry, the `double` timestamp) are explicit and are telemetry or
 timestamps by design.
 
+The type is left out on MSVC, whose Release optimizer crashes (C1001) compiling the stages with it.
+The check runs on gcc and clang, and the posit types already enforce explicit conversions on MSVC.
+
 ### The equivalence gate
 
 Two tools hold a port to "same results". Run each before the port to take a reference, and after it

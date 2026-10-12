@@ -22,6 +22,7 @@
 #include <branes/tools/bench/s6e_ekf_update_bench.hpp>
 #include <branes/tools/bench/s9_marginalization_bench.hpp>
 #include <branes/tools/bench/strict_double.hpp>
+#include <branes/tools/bench/types.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,6 +32,10 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+
+// MSVC's optimizer crashes (C1001) compiling the stages with StrictDouble, so
+// the type is left out of AllTypes there and this check runs on gcc and clang.
+#if BRANES_BENCH_STRICT_DOUBLE
 
 namespace {
 
@@ -104,3 +109,5 @@ TEST_CASE("strict_double is a selectable bench type with double's limits", "[too
     ++x;
     REQUIRE(static_cast<double>(x) == 1.0 + std::numeric_limits<double>::epsilon());
 }
+
+#endif  // BRANES_BENCH_STRICT_DOUBLE
