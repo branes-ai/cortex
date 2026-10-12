@@ -156,6 +156,28 @@ The S4 and S5 benches (#456) found four more:
   IMU stream can produce. Pure IMU propagation from rest is off by ≈1 m/s after one frame
   ([#475](https://github.com/branes-ai/cortex/issues/475)).
 
+### Dynamic initialization from images: S1's SfM front end
+
+The backend's moving-start init builds its keyframes from images: a two-view bootstrap on the frame
+with the most parallax, PnP for the rest, then the visual-inertial alignment. The S1 bench now runs
+that front end on SfM windows ([#472](https://github.com/branes-ai/cortex/issues/472)):
+synthetic windows with known truth, and windows captured from EuRoC MH_05 by the S1 tap. Its sweep
+crosses observation noise, window length and camera speed. It found five things:
+
+- **The eigensolver never converged.** It ran 100 sweeps per call; a window build went from 0.55 s
+  to 28 ms once it stopped at convergence
+  ([#497](https://github.com/branes-ai/cortex/issues/497)).
+- **The metric lever arm is added to up-to-scale positions.** Even exact data comes out 0.2–5.5 % off
+  in scale ([#499](https://github.com/branes-ai/cortex/issues/499)).
+- **The RANSAC gates are tighter than pixel noise.** The two-view gate is ≈0.9 px. At 2 px no window
+  builds, and on EuRoC 82 of 170 attempts fail the two-view while the drone moves. At rest the
+  bootstrap accepts 0.05 px of "parallax" ([#500](https://github.com/branes-ai/cortex/issues/500)).
+- **The alignment accepts badly scaled windows.** A track only ~1 % off aligns with a 21–34 % scale
+  error, because `try_dynamic` checks observability, not consistency
+  ([#501](https://github.com/branes-ai/cortex/issues/501)).
+- **Spacing the keyframes 0.25 s apart helps only in places;** the short-baseline SfM track, with
+  no refinement, is the cause.
+
 ### The MSCKF update, one sub-step at a time: S6
 
 S6 is five transformations, and each has its own bench, input and contract: the Jacobians (S6a)

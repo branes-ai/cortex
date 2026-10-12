@@ -470,8 +470,23 @@ private:
         ++init_diag_.dyn_attempts;
         const auto win =
             sfm::build_init_window<T>(std::span<const sfm::InitFrame<T>>{init_frames_}, cameras_[0].extrinsics);
-        if (!win.success)
+        // The attempt, as the S1 tap sees it: reported before a successful
+        // alignment seeds the filter (which clears the init buffers).
+        const auto report = [&](bool aligned) {
+            if (wants(msckf::TapStage::S1_initialization))
+                stage_tap_->on_s1(std::span<const sfm::InitFrame<T>>{init_frames_},
+                                  cameras_[0].extrinsics,
+                                  std::span<const DVec3>{init_gyro_},
+                                  std::span<const DVec3>{init_accel_},
+                                  static_cast<T>(config_.gravity_magnitude),
+                                  t,
+                                  win,
+                                  aligned);
+        };
+        if (!win.success) {
+            report(false);
             return;  // two-view/PnP bootstrap failed on these tracks
+        }
         ++init_diag_.dyn_window_builds;
         if (static_cast<int>(win.keyframes.size()) > init_diag_.dyn_best_keyframes)
             init_diag_.dyn_best_keyframes = static_cast<int>(win.keyframes.size());
@@ -480,6 +495,7 @@ private:
         // close the best window came to the observability floor (#247).
         if (static_cast<double>(r.resolved_motion) > init_diag_.dyn_best_metric_motion)
             init_diag_.dyn_best_metric_motion = static_cast<double>(r.resolved_motion);
+        report(r.success);
         if (!r.success)
             return;
         apply_dynamic_init(r, win, t);

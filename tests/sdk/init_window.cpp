@@ -43,9 +43,17 @@ T angle_between(const Vec3& a, const Vec3& b) {
     return std::acos(std::max(-1.0, std::min(1.0, c)));
 }
 
-}  // namespace
+/// The planted window: a moving body (frame 0 at the origin, gravity-aligned
+/// world), landmark observations and metric preintegration, plus the truth.
+struct Planted {
+    Vec3 g_world;
+    std::size_t n = 0;
+    std::vector<SO3> R;
+    std::vector<Vec3> p, v;
+    std::vector<sfm::InitFrame<T>> frames;
+};
 
-TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[sdk][sfm][init-window]") {
+Planted planted() {
     const Vec3 g_world{{0.0, 0.0, -9.81}};
     const T dt = 0.1;
     const std::size_t n = 8;
@@ -90,6 +98,13 @@ TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[
         }
     }
 
+    return Planted{g_world, n, R, p, v, frames};
+}
+
+}  // namespace
+
+TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[sdk][sfm][init-window]") {
+    const auto [g_world, n, R, p, v, frames] = planted();
     const auto win = sfm::build_init_window<T>(frames);
     REQUIRE(win.success);
     REQUIRE(win.keyframes.size() == n);
@@ -119,4 +134,27 @@ TEST_CASE("init window drives try_dynamic to scale, gravity, and velocities", "[
 TEST_CASE("init window fails gracefully with too few frames", "[sdk][sfm][init-window]") {
     std::vector<sfm::InitFrame<T>> frames(2);
     REQUIRE_FALSE(sfm::build_init_window<T>(frames).success);
+}
+
+TEST_CASE("init window composes preintegration into spaced keyframes", "[sdk][sfm][init-window]") {
+    // Frames 0.1 s apart, keyframes >= 0.2 s apart: frames 0, 2, 4, 6 and the
+    // last (7) become keyframes, each carrying the composed preintegration since
+    // the previous one; the alignment on them recovers the same metric scale.
+    const auto pl = planted();
+    sfm::InitWindowOptions<T> opt;
+    opt.min_keyframe_dt = 0.2;
+    const auto win = sfm::build_init_window<T>(pl.frames, {}, opt);
+    REQUIRE(win.success);
+    REQUIRE(win.keyframe_frames == std::vector<std::size_t>{0, 2, 4, 6, 7});
+    REQUIRE(win.keyframes.size() == 5);
+    REQUIRE_THAT(win.keyframes[1].dt, Catch::Matchers::WithinAbs(0.2, 1e-12));
+    REQUIRE_THAT(win.keyframes[4].dt, Catch::Matchers::WithinAbs(0.1, 1e-12));
+    // ΔR composes to the relative rotation between the keyframes.
+    const SO3 dR_true = pl.R[2].inverse() * pl.R[4];
+    REQUIRE(ld::norm((win.keyframes[2].dR.inverse() * dR_true).log()) < 1e-12);
+
+    const auto r = bs::ImuInitializer<T>{}.try_dynamic(win.keyframes);
+    REQUIRE(r.success);
+    const Vec3 vis = win.keyframes[1].p_world_imu - win.keyframes[0].p_world_imu;
+    REQUIRE_THAT(r.scale * ld::norm(vis), Catch::Matchers::WithinRel(ld::norm(pl.p[2]), 0.05));
 }

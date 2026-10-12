@@ -74,13 +74,52 @@ template <math::Scalar T>
     return math::lie::SO3<T>(q);
 }
 
+/// Where a window build stopped (`Ok` when it placed every frame).
+enum class InitWindowStatus : int {
+    Ok = 0,
+    TooFewFrames = 1,     ///< fewer than 3 frames
+    MalformedFrame = 2,   ///< a frame's ids and obs differ in length
+    NoBootstrapPair = 3,  ///< no candidate frame shares ≥ 8 features with frame 0
+    TwoViewFailed = 4,    ///< the essential-matrix RANSAC rejected the bootstrap pair
+    TooFewLandmarks = 5,  ///< the bootstrap triangulated < 6 landmarks
+    PnpFailed = 6,        ///< a later frame could not be resectioned (`failed_frame`)
+};
+
+/// How the two-view bootstrap picks its second view.
+enum class InitBootstrap : int {
+    MaxParallax = 0,  ///< the frame with the largest mean disparity to frame 0 (shipped, #247)
+    Adjacent = 1,     ///< frame 1 (the pre-#247 choice; near-zero parallax at camera rates)
+};
+
+template <math::Scalar T>
+struct InitWindowOptions {
+    InitBootstrap bootstrap = InitBootstrap::MaxParallax;
+    /// Minimum time between the keyframes handed to the alignment (s). 0 (the
+    /// shipped behaviour) makes every frame a keyframe. Otherwise the SfM still
+    /// places every frame, but consecutive frames are merged, composing their
+    /// preintegration, until at least this much time has passed. The alignment
+    /// reads metric scale from accelerations, i.e. second differences of the
+    /// positions, so close keyframes amplify a position error by ~1/Δt² (#472).
+    double min_keyframe_dt = 0.0;
+};
+
 /// Result of the window assembly: the per-frame keyframes (one per input frame
 /// successfully placed) and whether enough frames were recovered for a dynamic
-/// alignment (`try_dynamic` needs ≥ 2, and observability wants more).
+/// alignment (`try_dynamic` needs ≥ 2, and observability wants more), plus where
+/// the build stopped and what the bootstrap and resections saw.
 template <math::Scalar T>
 struct InitWindowResult {
     bool success = false;
     std::vector<DynInitKeyframe<T>> keyframes;
+    std::vector<std::size_t> keyframe_frames;  ///< the input frame each keyframe is
+    InitWindowStatus status = InitWindowStatus::TooFewFrames;
+    std::size_t bootstrap_frame = 0;            ///< the bootstrap's second view (0 = none)
+    T bootstrap_parallax = T{0};                ///< its mean disparity to frame 0 (normalized units)
+    std::size_t bootstrap_correspondences = 0;  ///< features it shares with frame 0
+    std::size_t landmarks = 0;                  ///< points the bootstrap triangulated
+    std::size_t failed_frame = 0;               ///< the frame PnP failed on (`PnpFailed`)
+    std::vector<std::size_t> pnp_inliers;       ///< per frame (0 for frame 0 and the bootstrap view)
+    std::vector<T> pnp_rms;                     ///< per frame: reprojection RMS over the PnP inliers
 };
 
 namespace detail {
@@ -109,7 +148,8 @@ void shared(const InitFrame<T>& a,
 /// are placed. `extr` is the camera→IMU pose (identity = camera at the IMU).
 template <math::Scalar T>
 [[nodiscard]] InitWindowResult<T> build_init_window(std::span<const InitFrame<T>> frames,
-                                                    const msckf::CameraExtrinsics<T>& extr = {}) {
+                                                    const msckf::CameraExtrinsics<T>& extr = {},
+                                                    const InitWindowOptions<T>& opt = {}) {
     using SO3 = math::lie::SO3<T>;
     InitWindowResult<T> out;
     const std::size_t n = frames.size();
@@ -118,8 +158,10 @@ template <math::Scalar T>
     // Each frame's ids and obs are parallel arrays; a mismatch would index out
     // of bounds in the correspondence loops below.
     for (const auto& f : frames)
-        if (f.ids.size() != f.obs.size())
+        if (f.ids.size() != f.obs.size()) {
+            out.status = InitWindowStatus::MalformedFrame;
             return out;
+        }
 
     // 1) Two-view bootstrap fixes the points (cam-0 frame, up to scale). cam0 is
     //    the world origin; the second view's world pose is the inverse of the
@@ -130,11 +172,13 @@ template <math::Scalar T>
     //    scale gauge — collapses (#247). Select by a cheap mean-disparity scan,
     //    then run the essential-matrix RANSAC ONCE on the best pair (running it
     //    on every candidate is far too slow for a per-frame init retry).
+    //    InitBootstrap::Adjacent considers frame 1 only.
     std::vector<Vec2<T>> x0, x1;
     std::vector<std::uint64_t> ids01;
     std::size_t b = 0;  // chosen second bootstrap view (0 = none found)
     T best_par = T{0};
-    for (std::size_t f = 1; f < n; ++f) {
+    const std::size_t last = opt.bootstrap == InitBootstrap::Adjacent ? 2 : n;
+    for (std::size_t f = 1; f < last; ++f) {
         std::vector<Vec2<T>> a0, a1;
         std::vector<std::uint64_t> ids;
         detail::shared<T>(frames[0], frames[f], a0, a1, ids);
@@ -152,9 +196,14 @@ template <math::Scalar T>
             ids01 = std::move(ids);
         }
     }
+    out.status = InitWindowStatus::NoBootstrapPair;
     if (b == 0)
         return out;  // no frame shares enough features with frame 0
+    out.bootstrap_frame = b;
+    out.bootstrap_parallax = best_par;
+    out.bootstrap_correspondences = ids01.size();
     const auto tv = estimate_relative_pose<T>(x0, x1);
+    out.status = InitWindowStatus::TwoViewFailed;
     if (!tv.success)
         return out;
 
@@ -165,6 +214,8 @@ template <math::Scalar T>
         land_ids.push_back(ids01[tv.inliers[k]]);
         land_pts.push_back(tv.points_cam0[k]);
     }
+    out.landmarks = land_pts.size();
+    out.status = InitWindowStatus::TooFewLandmarks;
     if (land_pts.size() < 6)
         return out;  // PnP needs ≥ 6 landmarks for the later frames
 
@@ -183,6 +234,8 @@ template <math::Scalar T>
     placed[b] = true;
 
     // 2) PnP every remaining frame against the world landmarks it observes.
+    out.pnp_inliers.assign(n, 0);
+    out.pnp_rms.assign(n, T{0});
     for (std::size_t f = 1; f < n; ++f) {
         if (placed[f])
             continue;
@@ -196,8 +249,18 @@ template <math::Scalar T>
                     break;
                 }
         const auto pose = estimate_pose<T>(P, obs);
-        if (!pose.success)
+        if (!pose.success) {
+            out.status = InitWindowStatus::PnpFailed;
+            out.failed_frame = f;
             return out;
+        }
+        T ss = T{0};
+        for (const std::size_t k : pose.inliers) {
+            const T e = detail::reprojection_error<T>(pose.R, pose.t, P[k], obs[k]);
+            ss += e * e;
+        }
+        out.pnp_inliers[f] = pose.inliers.size();
+        out.pnp_rms[f] = ld::sqrt_(ss / static_cast<T>(pose.inliers.size()));
         // PnP: X_cam = R·X_world + t ⇒ world←cam = (Rᵀ, −Rᵀ t).
         const Mat3<T> Rt = math::lie::detail::transpose(pose.R);
         R_w_cam[f] = so3_from_matrix<T>(Rt);
@@ -209,18 +272,63 @@ template <math::Scalar T>
     //    T_cam_imu = (R_imu_camᵀ, −R_imu_camᵀ p_imu_cam).
     const SO3 R_cam_imu = extr.R_imu_cam.inverse();
     const Vec3<T> p_cam_imu = R_cam_imu * extr.p_imu_cam * (-T{1});
-    out.keyframes.resize(n);
-    for (std::size_t f = 0; f < n; ++f) {
-        DynInitKeyframe<T>& kf = out.keyframes[f];
+    //    With `min_keyframe_dt`, consecutive intervals are composed (i→j then
+    //    j→k) until the keyframe spacing is reached:
+    //      ΔR = ΔR_ij·ΔR_jk,  Δv = Δv_ij + ΔR_ij·Δv_jk,
+    //      Δp = Δp_ij + Δv_ij·Δt_jk + ΔR_ij·Δp_jk,
+    //      ∂ΔR/∂b_g = ΔR_jkᵀ·∂ΔR_ij/∂b_g + ∂ΔR_jk/∂b_g,  Δt = Δt_ij + Δt_jk.
+    //    The last frame always closes a keyframe.
+    const auto keyframe = [&](std::size_t f) {
+        DynInitKeyframe<T> kf;
         kf.R_world_imu = R_w_cam[f] * R_cam_imu;
         kf.p_world_imu = R_w_cam[f] * p_cam_imu + p_w_cam[f];
-        kf.dR = frames[f].dR;
-        kf.dv = frames[f].dv;
-        kf.dp = frames[f].dp;
-        kf.dR_dbg = frames[f].dR_dbg;
-        kf.dt = frames[f].dt;
+        return kf;
+    };
+    if (!(opt.min_keyframe_dt > 0.0)) {
+        out.keyframes.resize(n);
+        for (std::size_t f = 0; f < n; ++f) {
+            DynInitKeyframe<T>& kf = out.keyframes[f];
+            kf = keyframe(f);
+            kf.dR = frames[f].dR;
+            kf.dv = frames[f].dv;
+            kf.dp = frames[f].dp;
+            kf.dR_dbg = frames[f].dR_dbg;
+            kf.dt = frames[f].dt;
+            out.keyframe_frames.push_back(f);
+        }
+    } else {
+        out.keyframes.push_back(keyframe(0));  // the first keyframe has no preintegration
+        out.keyframe_frames.push_back(0);
+        SO3 dR{};
+        Vec3<T> dv{}, dp{};
+        Mat3<T> J{};
+        T dt = T{0};
+        for (std::size_t f = 1; f < n; ++f) {
+            const auto& fr = frames[f];
+            dp = dp + dv * fr.dt + dR * fr.dp;
+            dv = dv + dR * fr.dv;
+            J = fr.dR.inverse().matrix() * J + fr.dR_dbg;
+            dR = dR * fr.dR;
+            dt = dt + fr.dt;
+            if (static_cast<double>(dt) >= opt.min_keyframe_dt || f + 1 == n) {
+                DynInitKeyframe<T> kf = keyframe(f);
+                kf.dR = dR;
+                kf.dv = dv;
+                kf.dp = dp;
+                kf.dR_dbg = J;
+                kf.dt = dt;
+                out.keyframes.push_back(kf);
+                out.keyframe_frames.push_back(f);
+                dR = SO3{};
+                dv = Vec3<T>{};
+                dp = Vec3<T>{};
+                J = Mat3<T>{};
+                dt = T{0};
+            }
+        }
     }
     out.success = true;
+    out.status = InitWindowStatus::Ok;
     return out;
 }
 

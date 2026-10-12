@@ -5,6 +5,10 @@
 // variants agree; the S1 dynamic alignment resolves in double and long double;
 // the sweeps emit their rows; and the fixture variant tag binds an expected
 // output to the implementation that produced it.
+//
+// The S1 SfM front end (#472): an exact window is recovered to rounding; on
+// noisy and real (EuRoC) windows the bench pins what it found — #499, #500,
+// #501 — so a fix shows up as a test to update, not a silent change.
 
 #include <branes/tools/bench/s0_sensor_model_bench.hpp>
 #include <branes/tools/bench/s1_initialization_bench.hpp>
@@ -33,6 +37,15 @@ void require_pass(const bn::NamedFixture& nf, std::string_view variant, const st
                      << (bad ? std::string(bad->name) + " = " + std::to_string(bad->value) : std::string("-")));
         REQUIRE(t.report.all_pass());
     }
+}
+
+/// The named result of a single-type run (fails the test if absent).
+const branes::sdk::eval::inv::InvariantResult& result(const bn::FixtureRun& run, std::string_view name) {
+    for (const auto& r : run.types.front().report.results())
+        if (r.name == name)
+            return r;
+    FAIL("no result named " << name);
+    return run.types.front().report.results().front();
 }
 
 }  // namespace
@@ -126,4 +139,93 @@ TEST_CASE("S0 bench rejects a ragged output fixture", "[tools][bench][s0]") {
     auto f = S0::known_answer();
     f.expected.at("valid").push_back(1);  // one more flag than points
     REQUIRE_THROWS_AS(S0::decode_output<double>(f.expected), std::invalid_argument);
+}
+
+TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every native type", "[tools][bench][s1][sfm]") {
+    require_pass<S1>({"ka", S1::known_answer()}, "sfm_two_view_pnp", {"double", "float", "long_double"});
+}
+
+TEST_CASE("S1 SfM bench: the 0.1 px window builds and matches the truth, but its scale is off (#501)",
+          "[tools][bench][s1][sfm]") {
+    const auto run = bn::run_fixture<S1>({"gt", S1::ground_truth()}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
+    REQUIRE(result(run, "sfm.window_built").pass);
+    REQUIRE(result(run, "sfm.pnp_reprojection_rms").pass);
+    REQUIRE(result(run, "init.resolved").pass);
+    REQUIRE(result(run, "truth.sfm_rotation_error").pass);
+    REQUIRE(result(run, "truth.sfm_position_error").pass);
+    // The alignment accepts a ~21 % scale error from a ~1 % track error.
+    const auto& scale = result(run, "truth.sfm_scale_error");
+    REQUIRE_FALSE(scale.pass);
+    REQUIRE(scale.value > 10.0);
+}
+
+TEST_CASE("S1 SfM bench: a 1 px window fails the PnP inlier gate (#500)", "[tools][bench][s1][sfm]") {
+    const auto f = S1::captured();
+    const auto out = S1::run<double>(S1::decode_input<double>(f.input), "sfm_two_view_pnp");
+    REQUIRE_FALSE(out.window.success);
+    REQUIRE(out.window.status == branes::sdk::sfm::InitWindowStatus::PnpFailed);
+}
+
+TEST_CASE("S1 SfM bench: the alternatives on the same windows", "[tools][bench][s1][sfm]") {
+    // The pre-#247 bootstrap on frame 1 loses the 0.1 px window the shipped one builds.
+    const auto gt = S1::ground_truth();
+    const auto in = S1::decode_input<double>(gt.input);
+    REQUIRE(S1::run<double>(in, "sfm_two_view_pnp").window.success);
+    const auto adj = S1::run<double>(in, "sfm_adjacent_bootstrap");
+    REQUIRE_FALSE(adj.window.success);
+    REQUIRE(adj.window.bootstrap_frame == 1);
+    // Keyframes >= 0.25 s apart: the composed preintegration still aligns an
+    // exact window, from fewer keyframes.
+    const auto ka = S1::known_answer();
+    require_pass<S1>({"ka", ka}, "sfm_keyframes_4hz", {"double"});
+    const auto k4 = S1::run<double>(S1::decode_input<double>(ka.input), "sfm_keyframes_4hz");
+    REQUIRE(k4.window.keyframes.size() < S1::decode_input<double>(ka.input).frames.size());
+    REQUIRE(k4.window.keyframe_frames.front() == 0);
+}
+
+TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they did", "[tools][bench][s1][sfm]") {
+    const std::filesystem::path dir = std::filesystem::path(BRANES_BENCH_FIXTURE_DIR) / "s1_initialization";
+    using St = branes::sdk::sfm::InitWindowStatus;
+    const std::pair<const char*, St> cases[] = {
+        {"captured_euroc_mh05_at_rest", St::PnpFailed},                     // ~0.05 px of disparity
+        {"captured_euroc_mh05_moving_two_view_failed", St::TwoViewFailed},  // > 100 px of disparity (#500)
+        {"captured_euroc_mh05_aligned", St::Ok},
+    };
+    for (const auto& [name, status] : cases) {
+        INFO(name);
+        const bn::NamedFixture nf{name, bn::load(dir / (std::string(name) + ".json"))};
+        REQUIRE(nf.fixture.variant == "sfm_two_view_pnp");
+        const auto run = bn::run_fixture<S1>(nf, nf.fixture.variant, bn::AllTypes{}, {"double"});
+        // Bit-identical on the platform it was captured on (Linux); elsewhere the
+        // math library differs, and the replay must keep its shape and finiteness.
+        if (nf.fixture.platform == bn::current_platform())
+            REQUIRE(result(run, "replay.bit_identical").value == 0.0);
+        else
+            REQUIRE(result(run, "replay.same_shape_and_finiteness").pass);
+        const auto out = S1::run<double>(S1::decode_input<double>(nf.fixture.input), "sfm_two_view_pnp");
+        REQUIRE(out.window.status == status);
+        REQUIRE((out.success == 1) == (status == St::Ok));
+    }
+}
+
+TEST_CASE("S1 SfM sweep: an exact window builds and aligns; 2 px of noise never builds (#500)",
+          "[tools][bench][s1][sfm]") {
+    const bn::Point base{{"window", 50.0}, {"imu_noise", 0.01}, {"excitation", 1.5}, {"frames", 10.0}, {"speed", 0.5}};
+    auto exact = base;
+    exact["obs_noise_px"] = 0.0;
+    const auto m = S1::sweep_point<double>(exact);
+    REQUIRE(m.size() == S1::sweep_columns().size());
+    REQUIRE(m[4] == 1.0);  // sfm_window_built
+    REQUIRE(m[7] == 1.0);  // sfm_resolved
+    REQUIRE(m[8] < 1e-6);  // rotation error, deg
+    auto noisy = base;
+    noisy["obs_noise_px"] = 2.0;
+    const auto n = S1::sweep_point<double>(noisy);
+    REQUIRE(n[4] == 0.0);
+    REQUIRE(n[5] == static_cast<double>(branes::sdk::sfm::InitWindowStatus::TwoViewFailed));
+    // Emulated types skip the SfM columns (its RANSAC is far too costly there).
+    const auto p = S1::sweep_point<bn::Posit32>(exact);
+    REQUIRE(std::isnan(p[4]));
+    REQUIRE_FALSE(S1::runs_by_default("sfm_two_view_pnp", "posit32"));
+    REQUIRE(S1::runs_by_default("shipped", "posit32"));
 }
