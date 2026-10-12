@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.76.1](https://github.com/branes-ai/cortex/compare/v0.76.0...v0.76.1) (2026-10-12)
+
+
+### Code Refactoring
+
+* **sdk:** qr and msckf null space on mtl5 5.15 textbook reflector ([#505](https://github.com/branes-ai/cortex/issues/505)) ([530a918](https://github.com/branes-ai/cortex/commit/530a9181cab0217d98c00ea26a59f3e4f5179282))
+
 ## [0.76.0](https://github.com/branes-ai/cortex/compare/v0.75.3...v0.76.0) (2026-10-12)
 
 
