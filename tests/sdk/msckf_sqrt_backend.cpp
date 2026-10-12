@@ -26,6 +26,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace {
@@ -180,4 +181,33 @@ TEST_CASE("the square-root covariance factor stays well-conditioned over a long 
     // without limit. This loose bound only catches blow-up, not drift.
     REQUIRE(max_trace < 1e4);
     REQUIRE(ms::is_positive_semidefinite(backend.state().covariance()));
+}
+
+TEST_CASE("the square-root gate and update stop at a singular innovation", "[sdk][msckf][sqrt]") {
+    // S = I over 3 states; H's second row is zero and R = 0, so the innovation
+    // factor Re = diag(±1, 0) has a zero pivot in row 1. The gate rejects, with
+    // γ over the rows solved before the pivot (r0², which NIS records), and the
+    // update is a no-op that leaves S as it was.
+    ms::SqrtCovariance<T> cov(T{1}, 3);
+    ms::DynMat<T> H(2, 3);
+    H(0, 0) = T{1};
+    const std::vector<T> r{T{0.5}, T{2}};
+    const std::vector<T> R_diag{T{0}, T{0}};
+
+    T gamma = T{-1};
+    REQUIRE_FALSE(cov.mahalanobis(H, std::span<const T>{r}, T{0}, gamma));
+    REQUIRE(gamma == T{0.25});
+
+    const ms::DynMat<T> before = cov.S;
+    const std::vector<T> dx = cov.update(H, std::span<const T>{r}, std::span<const T>{R_diag});
+    REQUIRE(dx == std::vector<T>(3, T{0}));
+    REQUIRE(cov.S.d == before.d);
+
+    // With R > 0 the same update solves through, and only state 0 moves.
+    const std::vector<T> R_pos{T{1}, T{1}};
+    REQUIRE(cov.mahalanobis(H, std::span<const T>{r}, T{1}, gamma));
+    const std::vector<T> dx2 = cov.update(H, std::span<const T>{r}, std::span<const T>{R_pos});
+    REQUIRE_THAT(dx2[0], Catch::Matchers::WithinRel(0.25, 1e-12));  // P H^T (H P H^T + R)^-1 r = 0.5/2
+    REQUIRE(dx2[1] == T{0});
+    REQUIRE(dx2[2] == T{0});
 }

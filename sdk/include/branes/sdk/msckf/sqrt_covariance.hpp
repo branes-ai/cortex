@@ -18,15 +18,58 @@
 #ifndef BRANES_SDK_MSCKF_SQRT_COVARIANCE_HPP
 #define BRANES_SDK_MSCKF_SQRT_COVARIANCE_HPP
 
+#include <branes/math/lie/detail.hpp>  // detail::sqrt_
 #include <branes/sdk/msckf/covariance.hpp>
 #include <branes/sdk/msckf/qr.hpp>
 
+#include <mtl/mat/view/map_view.hpp>
+#include <mtl/operation/mult.hpp>
+#include <mtl/operation/trsm.hpp>
+
 #include <cstddef>
+#include <numeric>
 #include <span>
 #include <utility>
 #include <vector>
 
 namespace branes::sdk::msckf {
+
+namespace sqrt_detail {
+/// The block of `m` at rows [r0, r0 + nr) and columns [c0, c0 + nc), as an MTL5
+/// view (no copy). `m` must outlive the view.
+template <math::Scalar T>
+[[nodiscard]] mtl::mat::view::map_view<mtl_view::Dense<T>>
+block(const mtl_view::Dense<T>& m, std::size_t r0, std::size_t nr, std::size_t c0, std::size_t nc) {
+    using Index = typename mtl_view::Dense<T>::size_type;
+    std::vector<Index> rows(nr), cols(nc);
+    std::iota(rows.begin(), rows.end(), static_cast<Index>(r0));
+    std::iota(cols.begin(), cols.end(), static_cast<Index>(c0));
+    return {m, rows, cols};
+}
+
+/// Forward-solve L y = b with L the leading n×n lower triangle of `l`, up to its
+/// first zero pivot. Returns the number of rows solved: n, or the index of that
+/// pivot, past which y keeps b. MTL5's trsm subtracts L(i,0)·y(0), L(i,1)·y(1), …
+/// from b(i) in turn and divides by the pivot, as the hand-rolled substitution
+/// did, so y is the same to the bit.
+template <math::Scalar T>
+std::size_t forward_solve(const DynMat<T>& l, std::size_t n, DynMat<T>& y) {
+    std::size_t m = 0;
+    while (m < n && !(l(m, m) == T{0}))
+        ++m;
+    if (m == 0)
+        return 0;
+    const auto L = mtl_view::of(l);
+    DynMat<T> ym(m, 1);
+    for (std::size_t i = 0; i < m; ++i)
+        ym(i, 0) = y(i, 0);
+    auto Y = mtl_view::of(ym);
+    mtl::trsm(T{1}, block(L, 0, m, 0, m), Y, /*upper=*/false);
+    for (std::size_t i = 0; i < m; ++i)
+        y(i, 0) = ym(i, 0);
+    return m;
+}
+}  // namespace sqrt_detail
 
 /// Square-root error-state covariance: stores S with P = S·Sᵀ. S is square
 /// lower-triangular when full rank; clone augmentation transiently produces a
@@ -106,16 +149,11 @@ struct SqrtCovariance {
         // full-covariance path, whose spd_solve no-ops on a non-PD innovation.
         // With gating enabled (the default) the gate already rejects this
         // before update() runs; the guard covers the gating-disabled path.
-        std::vector<T> y(k, T{0});
-        for (std::size_t i = 0; i < k; ++i) {
-            T s = r[i];
-            for (std::size_t j = 0; j < i; ++j)
-                s -= post(i, j) * y[j];
-            const T diag = post(i, i);
-            if (diag == T{0})
-                return std::vector<T>(d, T{0});  // singular innovation ⇒ no-op
-            y[i] = s / diag;
-        }
+        DynMat<T> y(k, 1);
+        for (std::size_t i = 0; i < k; ++i)
+            y(i, 0) = r[i];
+        if (sqrt_detail::forward_solve(post, k, y) < k)
+            return std::vector<T>(d, T{0});  // singular innovation ⇒ no-op
 
         // Commit the updated factor S' = post[k:, k:] and form the correction
         // δx = Kbar y (Kbar = post[k:, 0:k]) now that the solve has succeeded.
@@ -123,15 +161,15 @@ struct SqrtCovariance {
         for (std::size_t i = 0; i < d; ++i)
             for (std::size_t j = 0; j < d; ++j)
                 Sn(i, j) = post(k + i, k + j);
-        std::vector<T> dx(d, T{0});
-        for (std::size_t i = 0; i < d; ++i) {
-            T acc = T{0};
-            for (std::size_t j = 0; j < k; ++j)
-                acc += post(k + i, j) * y[j];
-            dx[i] = acc;
+        // Each δx(i) is 0 + Kbar(i,0)·y(0) + Kbar(i,1)·y(1) + … in ascending j,
+        // MTL5's generic product, which is the order of the loop it replaced.
+        DynMat<T> dx(d, 1);
+        if (d > 0 && k > 0) {
+            auto DX = mtl_view::of(dx);
+            mtl::mult(sqrt_detail::block(mtl_view::of(post), k, d, 0, k), mtl_view::of(y), DX);
         }
         S = std::move(Sn);
-        return dx;
+        return std::move(dx.d);
     }
 
     /// Mahalanobis distance γ = rᵀ (H P Hᵀ + r2·I)⁻¹ r = ‖Re⁻¹ r‖², with
@@ -148,19 +186,15 @@ struct SqrtCovariance {
         }
         const DynMat<T> Re = retriangularize(B);  // k×k lower-triangular
 
+        // On a zero pivot γ holds the rows solved before it (NIS records it).
+        DynMat<T> y(k, 1);
+        for (std::size_t i = 0; i < k; ++i)
+            y(i, 0) = r[i];
+        const std::size_t solved = sqrt_detail::forward_solve(Re, k, y);
         gamma = T{0};
-        std::vector<T> y(k, T{0});
-        for (std::size_t i = 0; i < k; ++i) {
-            T s = r[i];
-            for (std::size_t j = 0; j < i; ++j)
-                s -= Re(i, j) * y[j];
-            const T diag = Re(i, i);
-            if (diag == T{0})
-                return false;  // singular innovation ⇒ reject
-            y[i] = s / diag;
-            gamma += y[i] * y[i];
-        }
-        return true;
+        for (std::size_t i = 0; i < solved; ++i)
+            gamma += y(i, 0) * y(i, 0);
+        return solved == k;  // a zero pivot is a singular innovation ⇒ reject
     }
 
     /// Dense covariance P = S·Sᵀ (for inspection and PSD checks).
