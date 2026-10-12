@@ -11,6 +11,8 @@
 #ifndef BRANES_TOOLS_BENCH_TYPES_HPP
 #define BRANES_TOOLS_BENCH_TYPES_HPP
 
+#include <branes/tools/bench/strict_double.hpp>
+
 #include <universal/number/posit/posit.hpp>
 
 #include <string>
@@ -31,8 +33,11 @@ using DefaultTypes = TypeList<double, float, Posit32>;
 
 /// Every type a bench knows how to name (for `--types` selection). `long double`
 /// is the wider-than-double reference (80-bit extended on x86; equal to double
-/// on MSVC, where it still runs but adds no precision).
-using AllTypes = TypeList<double, float, Posit32, Posit16, long double>;
+/// on MSVC, where it still runs but adds no precision). `strict_double` is double
+/// with only explicit conversions out (#449): instantiating every stage in it
+/// makes any implicit T → double narrowing a compile error, and its results
+/// must equal double's bit for bit.
+using AllTypes = TypeList<double, float, Posit32, Posit16, long double, StrictDouble>;
 
 /// Stable, CLI-friendly name of an arithmetic type ("double", "posit32", …).
 template <class T>
@@ -56,6 +61,10 @@ template <>
 template <>
 [[nodiscard]] constexpr std::string_view type_name<long double>() {
     return "long_double";
+}
+template <>
+[[nodiscard]] constexpr std::string_view type_name<StrictDouble>() {
+    return "strict_double";
 }
 
 /// Call `f.template operator()<T>()` for each T in the list, in order.
