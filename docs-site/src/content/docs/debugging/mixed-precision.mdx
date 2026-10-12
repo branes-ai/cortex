@@ -6,11 +6,11 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
-  The equivalence gate for the port is in place. Two families run on MTL5 5.14: the products and
-  sums, and the Cholesky factor with its SPD solves. Both are bit-identical. QR and the null space
-  wait on an opt-in reflector in MTL5
-  ([mtl5#559](https://github.com/stillwater-sc/mtl5/issues/559)), and the eigen/SVD family waits on
-  the SfM front-end benches ([#472](https://github.com/branes-ai/cortex/issues/472)). The issues:
+  The equivalence gate for the port is in place. Three families run on MTL5 5.15, all
+  bit-identical: the products and sums, the Cholesky factor with its SPD solves, and the Householder
+  QR with the MSCKF null-space projection. The eigen/SVD family keeps cortex's converged Jacobi until
+  MTL5 has the kernels it needs
+  ([mtl5#567](https://github.com/stillwater-sc/mtl5/issues/567)). The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -47,9 +47,9 @@ storage, and each family below moves its operations onto MTL5 views of it:
 | Cholesky, SPD solve | `cholesky_factor` (term-by-term order), two `trsm` calls | done |
 | GEMV, transpose | `operation/mult.hpp`, `trans.hpp` | |
 | A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` | on `mult` through `mul`; a symmetric primitive is a gap |
-| Householder QR (R only), retriangularize | `qr.hpp`, `lq.hpp` | |
+| Householder QR (R only) | `qr_factor` (textbook reflector) | done |
 | Triangular solves (square-root form) | `lower_trisolve.hpp`, `upper_trisolve.hpp`, `trsv.hpp` | |
-| MSCKF left null space | `householder.hpp` + `apply_householder_left` | |
+| MSCKF left null space | `householder` + `apply_householder_left` (textbook reflector) | done |
 | Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` | |
 | Principal-submatrix gather | `mat/view/map_view.hpp` | |
 
@@ -156,8 +156,22 @@ v = x − αe₁, α = −sign(x₀)‖x‖). A prototype port showed:
 - one of 16,265 update decisions flipping on V2_03, after which the run diverges;
 - a different, equally valid, null-space basis from S6b.
 
-As with the Cholesky factor, MTL5 is asked for an opt-in textbook reflector
-([mtl5#559](https://github.com/stillwater-sc/mtl5/issues/559)) so this family can port bit for bit.
+As with the Cholesky factor, MTL5 was asked for an opt-in textbook reflector
+([mtl5#559](https://github.com/stillwater-sc/mtl5/issues/559)). MTL5 5.15 has it as
+`mtl::tag::textbook_reflector`, taken by `householder`, `apply_householder_left` and `qr_factor`:
+
+```cpp
+// R of A (qr.hpp): MTL5 overwrites V with R on and above the diagonal
+mtl::qr_factor(V, tau, mtl::tag::textbook_reflector{});
+
+// MSCKF null-space projection (msckf_nullspace.hpp), column c of H_f
+auto h = mtl::householder(x, mtl::tag::textbook_reflector{});
+mtl::apply_householder_left(M, h.v, h.vtv, c, c + 1, mtl::tag::textbook_reflector{});
+```
+
+With the tag, the port is bit for bit: all 126 bench outputs at relative 0, and the V1_01, MH_05
+and V2_03 trajectories byte-identical. A column whose norm is NaN is now skipped in the projection,
+as it already was in the QR, instead of being reflected.
 
 ### The eigen and SVD family: a convergence bug first
 
@@ -178,8 +192,16 @@ AᵀA systems with a known null vector (N = 9):
 | `mtl::svd` of A (one-sided Jacobi) | 3.2e-9 | 69 µs |
 
 Fixing the stopping rule made the solver 22× faster with the same accuracy. One window build in the
-backend dropped from about 0.55 s to about 28 ms (Release). The MTL5 choice for this family is
-measured on the SfM benches of #472 once they land.
+backend dropped from about 0.55 s to about 28 ms (Release).
+
+The SfM benches of [#472](https://github.com/branes-ai/cortex/issues/472) are now in place, and none
+of MTL5's current kernels is a drop-in for this family. `eigen_symmetric` is fast but less
+accurate on the null vector, and `svd` of A is accurate but 10× slower than the converged Jacobi. So
+cortex keeps its Jacobi, and the kernels this family needs are filed upstream under
+[mtl5#567](https://github.com/stillwater-sc/mtl5/issues/567):
+- a cyclic Jacobi symmetric eigensolver (mtl5#564);
+- deflation and an ε-scaled default tolerance in `eigen_symmetric` (mtl5#565);
+- a V-only mode and QR preconditioning for `svd` (mtl5#566).
 
 ## The MTL5 gap register (#451)
 
@@ -194,7 +216,9 @@ interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
 - a symmetric A·P·Aᵀ primitive;
 - a left-null-space helper;
 - an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556): **done,
-  MTL5 5.14**. Multi-RHS solves need nothing new: two `trsm` calls do it;
+  MTL5 5.14**;
+- an opt-in textbook Householder reflector for QR and the null space (mtl5#559): **done, MTL5
+  5.15**. Multi-RHS solves need nothing new: two `trsm` calls do it;
 - a matrix exponential.
 
 Lie-group exp/log and Jacobians stay in `branes::math::lie`; they are not MTL5's job.
