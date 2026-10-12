@@ -338,8 +338,9 @@ private:
         for (std::size_t i = 0; i < 3; ++i) {
             for (std::size_t j = 0; j < 3; ++j)
                 A(i, j) = H(i, j);
-            // A REGULARIZER, fixed at 1e-9 in every T (#449). It must stay far
-            // below the bias modes' eigenvalues; see the velocity ridge below.
+            // A REGULARIZER, a fixed 1e-9, not scaled with T (#449). It must
+            // stay far below the bias modes' eigenvalues, and it is 0 in IEEE
+            // half and Q16.16; see the velocity ridge below.
             A(i, i) += T(1e-9);
             rhs(i, 0) = b[i];
         }
@@ -474,12 +475,14 @@ private:
         // regularizes. Factor once and reuse the factor for the solve.
         //
         // NUMERICAL NOTE (#449). The ridge λ is a REGULARIZER, so it is a fixed
-        // 1e-9 in every T, deliberately not scaled with ε_T. It makes an
+        // 1e-9, deliberately not scaled with ε_T. (Double, float and posit32
+        // hold 1e-9 and posit16 rounds it up to 3.7e-9; IEEE half and Q16.16
+        // round it to 0 and have no ridge at all.) It makes an
         // unexcited direction (an exactly zero or near-null mode) factorable. It
         // also shrinks the solution along every eigenvector of H by λ/(σᵢ + λ).
         // On the S1 known-answer window:
         //  - the refined pass's smallest eigenvalue is 5.5e-6 (cond 7e5), and
-        //    that mode carries the scale;
+        //    its eigenvector includes the scale;
         //  - λ = 1e-9 shrinks it by 0.02 %;
         //  - λ = 16·ε_float = 1.9e-6 shrank it by 26 %, a 17 % scale error;
         //  - λ = 16 ulps of each diagonal entry gave 25–29 %.

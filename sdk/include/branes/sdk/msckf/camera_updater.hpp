@@ -522,13 +522,21 @@ public:
             for (std::size_t a = 0; a < 3; ++a) {
                 for (std::size_t bb = 0; bb < 3; ++bb)
                     Hn(a, bb) = H(a, bb);
-                // A REGULARIZER, fixed at 1e-9 in every T (#449). It keeps a
-                // depth-degenerate H (a feature seen along one ray) factorable,
-                // and must stay far below H's informative eigenvalues: a ridge λ
-                // shrinks the solution along each eigenvector by λ/(σᵢ + λ).
-                // Do not scale it with ε_T: a T-scaled ridge biased the
-                // initializer's alignment solve by 17 % in float (imu_init.hpp,
-                // docs-site …/debugging/numerical-thresholds.mdx).
+                // A REGULARIZER, a fixed 1e-9, not scaled with T (#449). It keeps
+                // a depth-degenerate H (a feature seen along one ray)
+                // factorable, and must stay far below H's informative
+                // eigenvalues: a ridge λ shrinks the solution along each
+                // eigenvector by λ/(σᵢ + λ). Do not scale it with ε_T: a T-scaled
+                // ridge biased the initializer's alignment solve by 17 % in float
+                // (imu_init.hpp).
+                // Representability: double, float and posit32 hold 1e-9, and
+                // posit16 rounds it up to its minpos (3.7e-9). IEEE half and
+                // Q16.16 fixed point round it to 0, so in those types there is no
+                // ridge: a degenerate H fails the Cholesky below and refinement
+                // stops at the current estimate. Supporting such a type needs a
+                // rescaled problem or a ridge policy of its own, not
+                // at_least_roundoff (a tolerance helper). See docs-site
+                // …/debugging/numerical-thresholds.mdx.
                 Hn(a, a) += T(1e-9);
                 gn(a, 0) = g[a];
             }

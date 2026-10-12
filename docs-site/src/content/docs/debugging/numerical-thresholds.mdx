@@ -83,8 +83,13 @@ Posits are different (see below).
 
 ### Measured
 
-The maximum entry error of $J_l$ over $\theta \in [10^{-6}, 0.1]$, against an exact long-double
-reference evaluated at the same T-rounded $\phi$:
+The maximum entry error of $J_l$ over $\theta \in [10^{-6}, 0.1]$, evaluated at the same T-rounded
+$\phi$. This table, and the $J_l^{-1}$ and exponential figures below, come from a one-off sweep
+that is not in the tree. It compared against $a$ and $b$ summed as Taylor series in long double, an
+exact reference at these angles. The regression test that guards these numbers
+(`so3_jacobian_sweep_error` in `tests/math/lie_groups.cpp`) compares against `SO3<double>` instead.
+For float and the posits, double is accurate enough to reproduce the bounds, but it cannot measure
+double's own error.
 
 | Type | $\varepsilon_T$ at 1 | hand-off 1e-5 (before) | hand-off $\max(10^{-5}, \varepsilon^{1/3})$ (#512) | threshold used |
 |---|---|---|---|---|
@@ -149,7 +154,8 @@ $\sigma$ is the log-scale rate. The closed forms cancel, and more deeply as $k$ 
 | $I_2$ | $(e^\sigma(\sigma^2-2\sigma+2)-2)/\sigma^3$ | $\sigma^3/3$ | $\sim 6\varepsilon/\sigma^3$ |
 
 The code used SO(3)'s hand-off and a three-term series for all three, which is wrong for every
-type. CodeRabbit flagged it on PR #512, and a measurement against an exact reference showed:
+type. CodeRabbit flagged it on PR #512, and a one-off sweep against the series summed in long double
+showed:
 
 | Arithmetic, hand-off | worst $I_2$ error |
 |---|---|
