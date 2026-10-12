@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.76.0](https://github.com/branes-ai/cortex/compare/v0.75.3...v0.76.0) (2026-10-12)
+
+
+### Features
+
+* **tools:** s1 bench sfm front-end variants on observation fixtures ([#504](https://github.com/branes-ai/cortex/issues/504)) ([f776280](https://github.com/branes-ai/cortex/commit/f776280f4d23611030790bdfa509d3aaee40f07f))
+
+
+### Bug Fixes
+
+* **sdk:** sfm jacobi_eigh stops at convergence instead of after 100 sweeps ([#498](https://github.com/branes-ai/cortex/issues/498)) ([c20d4c8](https://github.com/branes-ai/cortex/commit/c20d4c8aad17d69d02a7948dfc1745460920916b))
+
 ## [0.75.3](https://github.com/branes-ai/cortex/compare/v0.75.2...v0.75.3) (2026-10-11)
 
 
