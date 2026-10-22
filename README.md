@@ -4,6 +4,47 @@
 
 Core Embodied AI Framework for perception
 
+## Where cortex fits
+
+```text
++--------------+ +-------------------+ +-----------+ +------------+
+| racing-drone | | interceptor-drone | | isr-drone | | nano-drone | ...  Mission
++--------------+ +-------------------+ +-----------+ +------------+
+        |                  |                 |              |
+        v                  v                 v              v
++---------------------+ +---------------------+ +---------------------+
+|    Branes Cortex    | |   Branes Synapse    | |    Branes Reflex    |  Platform
+| perception (VIO,    | | tensor graph engine | | stabilization, MPC, |
+| SLAM), VLA, world   | | for GGUF models,    | | state propagation,  |
+| model, planning     | | static memory plan  | | fault recovery      |
++---------------------+ +---------------------+ +---------------------+
+           |                       |                       |
+           v                       v                       v
++---------------------------------+ +---------------------------------+
+|              MTL5               | |            Universal            |  Math
+| high-performance linear algebra | |       computer arithmetic       |
++---------------------------------+ +---------------------------------+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
++-----------+ +-------------------+ +-------------------+ +-----------+
+|    CPU    | |     CPU + GPU     | |     CPU + KPU     | |    KPU    |  Hardware
++-----------+ +-------------------+ +-------------------+ +-----------+
+```
+
+The Branes.AI stack has four tiers:
+
+- **Mission**: one repo per vehicle and mission (`racing-drone`, `interceptor-drone`, `isr-drone`, `nano-drone`, ...). It owns the mission capability and composes platform components; algorithms do not live there.
+- **Platform**: three sister repos, `cortex`, `synapse`, and `reflex`, that provide the functionality and services a mission is built from. None of them sits above the others.
+- **Math**: [MTL5](https://github.com/stillwater-sc/mtl5) provides high-performance linear algebra and [Universal](https://github.com/stillwater-sc/universal) provides computer arithmetic (posits, intervals, mixed precision, hardware-aligned types).
+- **Hardware**: the targets the stack runs on: CPU, CPU + GPU, CPU + KPU, and KPU.
+
+| Repo | Biological analogue | Responsibility |
+|---|---|---|
+| **`cortex`** (this repo) | Cerebral cortex | Perception (VIO, LIO, SLAM, SfM), vision-language-action models, world building, path planning |
+| [`synapse`](https://github.com/branes-ai/synapse) | The synapses: where signals are transmitted and computed | Tensor storage, graph construction, memory planning, and execution of ML models |
+| [`reflex`](https://github.com/branes-ai/reflex) | Brainstem, spinal cord, autonomic system | Hard real-time control and safety: stabilization, IMU state propagation, MPC, fault recovery |
+
+## Repository layout
+
 Create the `branes-ai/cortex` repository and establish the root folder structure. This strictly enforces the boundaries between your Rust hardware layer, your math, your algorithms, and your middleware.
 
 ```text
