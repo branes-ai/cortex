@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.79.2](https://github.com/branes-ai/cortex/compare/v0.79.1...v0.79.2) (2026-10-25)
+
+
+### Build System
+
+* **deps:** bump MTL5 to v5.20.0 and Universal to v5.11.0 ([#518](https://github.com/branes-ai/cortex/issues/518)) ([5a368ef](https://github.com/branes-ai/cortex/commit/5a368ef90dfddbc5f4817538eced647a4c821250)), closes [#517](https://github.com/branes-ai/cortex/issues/517)
+
 ## [0.79.1](https://github.com/branes-ai/cortex/compare/v0.79.0...v0.79.1) (2026-10-24)
 
 
