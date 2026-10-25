@@ -35,8 +35,8 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 # their warnings visible has surfaced real bugs (stillwater-sc/universal#1259,
 # #1262). Switch to SYSTEM INTERFACE once the warning-clean epic
 # stillwater-sc/universal#1265 closes.
-set(BRANES_MTL5_VERSION      5.15.0)
-set(BRANES_UNIVERSAL_VERSION 5.1.0)
+set(BRANES_MTL5_VERSION      5.20.0)
+set(BRANES_UNIVERSAL_VERSION 5.11.0)
 
 find_package(MTL5 CONFIG QUIET)
 if(MTL5_FOUND)
