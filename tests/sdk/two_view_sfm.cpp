@@ -128,10 +128,9 @@ TEST_CASE("two-view SfM degrades gracefully on too few points", "[sdk][sfm][two-
     REQUIRE_FALSE(r.success);
 }
 
-TEST_CASE("jacobi_eigh converges in a few sweeps and diagonalizes to working precision", "[sdk][sfm][jacobi]") {
+TEST_CASE("jacobi_eigh diagonalizes to working precision with orthonormal eigenvectors", "[sdk][sfm][jacobi]") {
     // A 9x9 normal matrix like the 8-point solver's: AtA of a 27x9 system with
-    // a fixed pseudo-random fill. The exact-zero stopping test this replaced
-    // ran all 100 sweeps on every such matrix (#497).
+    // a fixed pseudo-random fill.
     constexpr std::size_t N = 9;
     ld::Mat<T, N, N> M{};
     std::vector<T> A(27 * N);
@@ -145,8 +144,17 @@ TEST_CASE("jacobi_eigh converges in a few sweeps and diagonalizes to working pre
                 M(i, j) += A[r * N + i] * A[r * N + j];
     ld::Mat<T, N, N> V;
     ld::Vec<T, N> w;
-    const int sweeps = sfm::jacobi_eigh<T, N>(M, V, w);
-    REQUIRE(sweeps < 20);
+    sfm::jacobi_eigh<T, N>(M, V, w);
+    for (std::size_t k = 1; k < N; ++k)
+        REQUIRE(w[k - 1] <= w[k]);  // ascending
+    // Vt V = I.
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j) {
+            T s = 0;
+            for (std::size_t k = 0; k < N; ++k)
+                s += V(k, i) * V(k, j);
+            REQUIRE(std::abs(s - (i == j ? T{1} : T{0})) < 1e-14);
+        }
     // M = V diag(w) Vt, relative to |M|_F.
     T frob = 0, res = 0;
     for (std::size_t i = 0; i < N; ++i)
@@ -161,9 +169,9 @@ TEST_CASE("jacobi_eigh converges in a few sweeps and diagonalizes to working pre
 }
 
 TEST_CASE("jacobi_eigh converges on a matrix whose squared entries overflow", "[sdk][sfm][jacobi]") {
-    // Entries near 1e160: their squares overflow double, so a convergence test
-    // on unscaled sums would see an infinite tolerance and stop after zero
-    // sweeps. The test scales by the largest entry first.
+    // Entries near 1e160: their squares overflow double, so a solver that
+    // squares an entry (an unscaled off-diagonal mass, theta^2) would stop
+    // early or produce infinities. MTL5's Jacobi squares none.
     constexpr std::size_t N = 4;
     ld::Mat<T, N, N> M{};
     const T base[N][N] = {{4, 1, 0.5, 0.2}, {1, 3, 0.3, 0.1}, {0.5, 0.3, 2, 0.4}, {0.2, 0.1, 0.4, 1}};
@@ -172,9 +180,7 @@ TEST_CASE("jacobi_eigh converges on a matrix whose squared entries overflow", "[
             M(i, j) = base[i][j] * 1e160;
     ld::Mat<T, N, N> V;
     ld::Vec<T, N> w;
-    const int sweeps = sfm::jacobi_eigh<T, N>(M, V, w);
-    REQUIRE(sweeps > 0);
-    REQUIRE(sweeps < 20);
+    sfm::jacobi_eigh<T, N>(M, V, w);
     for (std::size_t i = 0; i < N; ++i)
         for (std::size_t j = 0; j < N; ++j) {
             T s = 0;
