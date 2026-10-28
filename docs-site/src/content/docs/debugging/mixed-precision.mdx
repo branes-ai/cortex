@@ -352,7 +352,8 @@ MTL5 has `syrk`, `symm` and `syr2k`, but none of them is the A·P·Aᵀ congruen
 
 What would help is a triangular-output product, BLAS `gemmt` or a fused A·P·Aᵀ that computes one
 triangle and mirrors it. That halves the second product and makes `symmetrize` unnecessary. It is
-the entry in the register below.
+filed as [mtl5#656](https://github.com/stillwater-sc/mtl5/issues/656). Adopting it won't be
+bit-identical: averaging the two triangles rounds differently from mirroring one.
 
 ## The MTL5 gap register (#451)
 
@@ -365,7 +366,7 @@ interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
 - a non-owning CRS view over caller arrays (`compressed2D` copies them);
 - block insert/scatter into `dense2D`;
 - a symmetric A·P·Aᵀ congruence (a `gemmt`-style triangular-output product; `syrk`/`symm` exist
-  but don't fit, see above);
+  but don't fit, see above) (mtl5#656);
 - a left-null-space helper;
 - an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556): **done,
   MTL5 5.14**;
