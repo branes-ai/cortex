@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.79.3](https://github.com/branes-ai/cortex/compare/v0.79.2...v0.79.3) (2026-10-28)
+
+
+### Code Refactoring
+
+* **sdk:** sfm eigen family on mtl5 5.20 eigen_symmetric_jacobi ([#448](https://github.com/branes-ai/cortex/issues/448)) ([#520](https://github.com/branes-ai/cortex/issues/520)) ([ad44ab2](https://github.com/branes-ai/cortex/commit/ad44ab2b8c0f023971b6f5879e34fe8389e42d67))
+
 ## [0.79.2](https://github.com/branes-ai/cortex/compare/v0.79.1...v0.79.2) (2026-10-25)
 
 
