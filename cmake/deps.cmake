@@ -38,7 +38,10 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
 set(BRANES_MTL5_VERSION      5.20.0)
 set(BRANES_UNIVERSAL_VERSION 5.11.0)
 
-find_package(MTL5 CONFIG QUIET)
+# The pin is also the floor for an installed package (MTL5's config is
+# SameMajorVersion, so this accepts any 5.x at or above the pin): the SfM
+# eigensolver needs eigen_symmetric_jacobi from 5.20.
+find_package(MTL5 ${BRANES_MTL5_VERSION} CONFIG QUIET)
 if(MTL5_FOUND)
     message(STATUS "MTL5: using installed package ${MTL5_VERSION} (${MTL5_DIR})")
 else()

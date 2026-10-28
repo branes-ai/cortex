@@ -58,7 +58,10 @@ storage, and each family below moves its operations onto MTL5 views of it:
 1. **Safety gate first.** At `T = double`, the MTL5 port must reproduce today's results: the same
    EuRoC trajectories to ≤ 1e-9 relative, and all current tests, gates and inspector outputs
    unchanged. The bit-identical equivalence harness used for the
-   [stage refactor](/debugging/stages-as-transformations/) is the model.
+   [stage refactor](/debugging/stages-as-transformations/) is the model. One family is exempt
+   from bit identity: the SfM eigensolver, whose MTL5 kernel rounds differently. Its six `sfm_*`
+   bench outputs are gated on the same decisions and on null-vector accuracy instead (see
+   [the eigen family](#the-eigen-family-on-eigen_symmetric_jacobi)).
 2. **Stage by stage, each behind its bench.** A stage is ported only when its bench passes on its
    fixtures in every type. A whole-pipeline check closes the port.
 3. **Fix the sites that break or narrow a non-IEEE `T`:**

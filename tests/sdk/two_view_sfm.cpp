@@ -168,6 +168,61 @@ TEST_CASE("jacobi_eigh diagonalizes to working precision with orthonormal eigenv
     REQUIRE(std::sqrt(res / frob) < 1e-14);
 }
 
+TEST_CASE("jacobi_eigh keeps the null vector of a badly scaled normal matrix", "[sdk][sfm][jacobi]") {
+    // M = S G S with G = BtB, the rows of B orthogonal to a unit vector u, and
+    // S diagonal over six decades: M's null vector is S^-1 u. A Frobenius-mass
+    // stopping test leaves the two smallest eigenvalues coupled here: the
+    // hand-rolled Jacobi it replaced missed this null vector by 5.6e-10, the
+    // relative test lands at 2e-16.
+    constexpr std::size_t N = 9, R = 27;
+    T u[N], s[N], un = 0;
+    for (std::size_t j = 0; j < N; ++j) {
+        const T h = std::sin(static_cast<T>(j + 1) * 78.233) * 43758.5453;
+        u[j] = h - std::floor(h) - 0.5;
+        un += u[j] * u[j];
+        s[j] = std::pow(T{10}, T{6} * (static_cast<T>(j) / (N - 1) - T{0.5}));
+    }
+    for (auto& x : u)
+        x /= std::sqrt(un);
+    std::vector<T> B(R * N);
+    for (std::size_t r = 0; r < R; ++r) {
+        T d = 0;
+        for (std::size_t j = 0; j < N; ++j) {
+            const T h = std::sin(static_cast<T>(r * N + j) * 12.9898) * 43758.5453;
+            B[r * N + j] = h - std::floor(h) - 0.5;
+            d += B[r * N + j] * u[j];
+        }
+        for (std::size_t j = 0; j < N; ++j)
+            B[r * N + j] = (B[r * N + j] - d * u[j]) * s[j];  // rows of B S
+    }
+    ld::Mat<T, N, N> M{};
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < N; ++j)
+            for (std::size_t r = 0; r < R; ++r)
+                M(i, j) += B[r * N + i] * B[r * N + j];
+    T z[N], zn = 0;
+    for (std::size_t j = 0; j < N; ++j) {
+        z[j] = u[j] / s[j];
+        zn += z[j] * z[j];
+    }
+    for (auto& x : z)
+        x /= std::sqrt(zn);
+
+    ld::Mat<T, N, N> V;
+    ld::Vec<T, N> w;
+    sfm::jacobi_eigh<T, N>(M, V, w);
+    for (std::size_t k = 1; k < N; ++k)
+        REQUIRE(w[k - 1] <= w[k]);
+    T dot = 0;
+    for (std::size_t i = 0; i < N; ++i)
+        dot += V(i, 0) * z[i];
+    const T sg = dot < 0 ? T{-1} : T{1};
+    T err = 0;
+    for (std::size_t i = 0; i < N; ++i)
+        err += (V(i, 0) - sg * z[i]) * (V(i, 0) - sg * z[i]);
+    REQUIRE(std::sqrt(err) < 1e-12);
+}
+
 TEST_CASE("jacobi_eigh converges on a matrix whose squared entries overflow", "[sdk][sfm][jacobi]") {
     // Entries near 1e160: their squares overflow double, so a solver that
     // squares an entry (an unscaled off-diagonal mass, theta^2) would stop
