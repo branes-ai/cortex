@@ -20,10 +20,12 @@
 
 #include <branes/math/lie/detail.hpp>
 
+#include <mtl/mat/dense2D.hpp>
+#include <mtl/operation/eigenvalue_symmetric_jacobi.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <vector>
 
@@ -38,77 +40,31 @@ using Vec3 = ld::Vec<T, 3>;
 template <math::Scalar T>
 using Mat3 = ld::Mat<T, 3, 3>;
 
-/// Symmetric eigendecomposition A = V·diag(w)·Vᵀ by cyclic Jacobi rotations.
-/// `A` is read by value; on return the columns of `V` are eigenvectors and
-/// `w` the eigenvalues (unsorted). Generic over the dimension N — used here at
-/// N=9 (the 8-point null space) and N=3 (3×3 SVD via the normal matrices).
-/// Clean-room generalization of the 4×4 Horn-alignment solver.
+/// Symmetric eigendecomposition A = V·diag(w)·Vᵀ by cyclic Jacobi rotations,
+/// on MTL5's `eigen_symmetric_jacobi` (#448). `A` is read by value; on return
+/// the columns of `V` are eigenvectors and `w` the eigenvalues, ascending.
+/// Generic over the dimension N — used here at N=9 (the 8-point null space),
+/// N=4 (triangulation), N=12 (the DLT PnP) and N=3 (3×3 SVD via the normal
+/// matrices).
 ///
-/// Converged when the off-diagonal mass is below ε²·‖A‖²_F (‖A‖_F is invariant
-/// under the rotations): the rotations hold the off-diagonal at the rounding
-/// level rather than driving it to exactly zero, so an exact-zero test never
-/// fires and ran all 100 sweeps (#497). Both masses are summed over entries
-/// divided by A's largest magnitude, so neither overflows (entries ≳ 1e154 in
-/// double) or underflows. Returns the sweeps it took.
+/// Jacobi rather than tridiagonal QR because every caller wants the null
+/// vector of a normal matrix AᵀA, and Jacobi computes the small eigenvalues of
+/// a positive semidefinite matrix, and their eigenvectors, to high relative
+/// accuracy. MTL5 skips a pair once |a_pq| ≤ ε·√|a_pp|·√|a_qq| (Demmel &
+/// Veselić) and stops after a sweep that rotates nothing; no entry is squared,
+/// so matrices scaled near the overflow threshold converge too.
 template <math::Scalar T, std::size_t N>
-int jacobi_eigh(ld::Mat<T, N, N> A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
-    V = ld::Mat<T, N, N>::identity();
-    T scale = T{0};
-    for (std::size_t p = 0; p < N; ++p)
-        for (std::size_t q = 0; q < N; ++q)
-            if (ld::abs_(A(p, q)) > scale)
-                scale = ld::abs_(A(p, q));
-    int sweep = 0;
-    if (scale > T{0}) {  // a zero matrix is already diagonal (and a NaN one has no scale)
-        T frob2 = T{0};
-        for (std::size_t p = 0; p < N; ++p)
-            for (std::size_t q = 0; q < N; ++q) {
-                const T a = A(p, q) / scale;
-                frob2 += a * a;
-            }
-        const T eps = std::numeric_limits<T>::epsilon();
-        const T tol = eps * eps * frob2;
-        for (; sweep < 100; ++sweep) {
-            T off = T{0};
-            for (std::size_t p = 0; p < N; ++p)
-                for (std::size_t q = p + 1; q < N; ++q) {
-                    const T a = A(p, q) / scale;
-                    off += a * a;
-                }
-            if (!(off > tol))
-                break;  // diagonal to working precision
-            for (std::size_t p = 0; p < N; ++p) {
-                for (std::size_t q = p + 1; q < N; ++q) {
-                    const T apq = A(p, q);
-                    if (apq == T{0})
-                        continue;
-                    const T theta = (A(q, q) - A(p, p)) / (T{2} * apq);
-                    const T t = (theta >= T{0} ? T{1} : T{-1}) / (ld::abs_(theta) + ld::sqrt_(theta * theta + T{1}));
-                    const T c = T{1} / ld::sqrt_(t * t + T{1});
-                    const T s = t * c;
-                    // Apply the Givens rotation G(p,q,θ) on both sides: A ← GᵀAG.
-                    for (std::size_t k = 0; k < N; ++k) {
-                        const T akp = A(k, p), akq = A(k, q);
-                        A(k, p) = c * akp - s * akq;
-                        A(k, q) = s * akp + c * akq;
-                    }
-                    for (std::size_t k = 0; k < N; ++k) {
-                        const T apk = A(p, k), aqk = A(q, k);
-                        A(p, k) = c * apk - s * aqk;
-                        A(q, k) = s * apk + c * aqk;
-                    }
-                    for (std::size_t k = 0; k < N; ++k) {
-                        const T vkp = V(k, p), vkq = V(k, q);
-                        V(k, p) = c * vkp - s * vkq;
-                        V(k, q) = s * vkp + c * vkq;
-                    }
-                }
-            }
-        }
-    }
+void jacobi_eigh(const ld::Mat<T, N, N>& A, ld::Mat<T, N, N>& V, ld::Vec<T, N>& w) {
+    mtl::mat::dense2D<T> M(N, N);
     for (std::size_t i = 0; i < N; ++i)
-        w[i] = A(i, i);
-    return sweep;
+        for (std::size_t j = 0; j < N; ++j)
+            M(i, j) = A(i, j);
+    const auto r = mtl::eigen_symmetric_jacobi(M);
+    for (std::size_t j = 0; j < N; ++j) {
+        w[j] = r.eigenvalues(j);
+        for (std::size_t i = 0; i < N; ++i)
+            V(i, j) = r.eigenvectors(i, j);
+    }
 }
 
 /// Thin SVD of a 3×3 matrix M = U·diag(S)·Vᵀ with the singular values in S
