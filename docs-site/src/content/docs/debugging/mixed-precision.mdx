@@ -6,11 +6,11 @@ description: Moving the VIO pipeline's linear algebra onto MTL5, generic in the 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="note" title="Status: in progress">
-  The equivalence gate for the port is in place. Four families run on MTL5 5.15, all
+  The equivalence gate for the port is in place. All five families run on MTL5. Four are
   bit-identical: the products and sums, the Cholesky factor with its SPD solves, the Householder
-  QR with the MSCKF null-space projection, and the square-root form's triangular solves. The eigen/SVD family keeps cortex's converged Jacobi until
-  MTL5 has the kernels it needs
-  ([mtl5#567](https://github.com/stillwater-sc/mtl5/issues/567)). The issues:
+  QR with the MSCKF null-space projection, and the square-root form's triangular solves. The
+  fifth, the SfM eigen/SVD family, runs on MTL5 5.20's `eigen_symmetric_jacobi`. It cannot keep
+  its bits, but it gives the same decisions and a more accurate null vector. The issues:
   [#448](https://github.com/branes-ai/cortex/issues/448) (MTL5 port),
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
@@ -46,11 +46,11 @@ storage, and each family below moves its operations onto MTL5 views of it:
 | GEMM, add | `operation/mult.hpp` (dense, and CRS × dense for sparse left operands), `mat/operators.hpp` | done |
 | Cholesky, SPD solve | `cholesky_factor` (term-by-term order), two `trsm` calls | done |
 | GEMV, transpose | `operation/mult.hpp`, `trans.hpp` | the square-root gain product Kbar·y is `mult`; `transpose` stays a copy |
-| A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` + `syrk`/`symm` | on `mult` through `mul`; a symmetric primitive is a gap |
+| A·P·Aᵀ sandwiches (clone, predict, S, Joseph) | `mult` (`syrk`/`symm` don't fit, see below) | on `mult` through `mul`; a congruence primitive is a gap |
 | Householder QR (R only) | `qr_factor` (textbook reflector) | done |
 | Triangular solves (square-root form) | `trsm` over a `map_view` block | done |
 | MSCKF left null space | `householder` + `apply_householder_left` (textbook reflector) | done |
-| Symmetric eigen, 3×3 SVD | `eigenvalue_symmetric.hpp`, `svd.hpp` | |
+| Symmetric eigen, 3×3 SVD | `eigen_symmetric_jacobi` (MTL5 5.20); `svd3` builds on it | done, not bit-identical (see below) |
 | Principal-submatrix gather | `mat/view/map_view.hpp` | views where an MTL5 kernel reads the block; plain copies stay loops |
 
 ## How the port is gated
@@ -58,7 +58,10 @@ storage, and each family below moves its operations onto MTL5 views of it:
 1. **Safety gate first.** At `T = double`, the MTL5 port must reproduce today's results: the same
    EuRoC trajectories to ≤ 1e-9 relative, and all current tests, gates and inspector outputs
    unchanged. The bit-identical equivalence harness used for the
-   [stage refactor](/debugging/stages-as-transformations/) is the model.
+   [stage refactor](/debugging/stages-as-transformations/) is the model. One family is exempt
+   from bit identity: the SfM eigensolver, whose MTL5 kernel rounds differently. Its six `sfm_*`
+   bench outputs are gated on the same decisions and on null-vector accuracy instead (see
+   [the eigen family](#the-eigen-family-on-eigen_symmetric_jacobi)).
 2. **Stage by stage, each behind its bench.** A stage is ported only when its bench passes on its
    fixtures in every type. A whole-pipeline check closes the port.
 3. **Fix the sites that break or narrow a non-IEEE `T`:**
@@ -153,7 +156,7 @@ Two tools hold a port to "same results". Run each before the port to take a refe
 to compare:
 
 ```bash
-# Stage benches: every built-in fixture, every variant, in double (117 outputs).
+# Stage benches: every built-in fixture, every variant, in double (132 outputs).
 ./build/tools/bench_snapshot --write before.json              # before the port
 ./build/tools/bench_snapshot --compare before.json            # after: 1e-12 normwise, per output
 
@@ -289,14 +292,89 @@ AᵀA systems with a known null vector (N = 9):
 Fixing the stopping rule made the solver 22× faster with the same accuracy. One window build in the
 backend dropped from about 0.55 s to about 28 ms (Release).
 
-The SfM benches of [#472](https://github.com/branes-ai/cortex/issues/472) are now in place, and none
-of MTL5's current kernels is a drop-in for this family. `eigen_symmetric` is fast but less
-accurate on the null vector, and `svd` of A is accurate but 10× slower than the converged Jacobi. So
-cortex keeps its Jacobi, and the kernels this family needs are filed upstream under
+The SfM benches of [#472](https://github.com/branes-ai/cortex/issues/472) were in place by then,
+and none of MTL5's kernels at the time was a drop-in for this family. `eigen_symmetric` was fast but
+less accurate on the null vector, and `svd` of A was accurate but 10× slower than the converged
+Jacobi. The missing kernels were filed upstream under
 [mtl5#567](https://github.com/stillwater-sc/mtl5/issues/567):
 - a cyclic Jacobi symmetric eigensolver (mtl5#564);
 - deflation and an ε-scaled default tolerance in `eigen_symmetric` (mtl5#565);
 - a V-only mode and QR preconditioning for `svd` (mtl5#566).
+
+All three shipped, and MTL5 5.20 is pinned.
+
+### The eigen family on `eigen_symmetric_jacobi`
+
+`sfm::jacobi_eigh` is now a thin wrapper over `mtl::eigen_symmetric_jacobi`. Its eigenvalues come
+back ascending. Every caller takes the argmin, and `svd3` sorts on its own, so no call site changed.
+`svd3` stays a 3×3 built from the eigendecomposition of MᵀM, now on the MTL5 solver: `svd` of A
+would cost 10× more for no accuracy the callers use.
+
+MTL5's Jacobi applies the same rotation as cortex's did, but rounds differently in two places:
+- **Stopping rule.** It skips a pair once |a_pq| ≤ ε·√|a_pp|·√|a_qq| (Demmel & Veselić) and stops
+  after a sweep that rotates nothing. cortex stopped once the off-diagonal mass was below ε²‖A‖²_F.
+- **Update.** It updates through τ = s/(1+c) instead of c and s directly.
+
+So this family cannot keep its bits. It is gated on what it decides and on how accurate it is.
+
+The relative stopping rule is a real accuracy gain. Null-vector error ‖v ∓ z‖ against an exact null
+vector z, on AᵀA with A = 3N×N, rows orthogonal to a known vector, then columns scaled over the given
+range. 500 trials per row, worst case (Release):
+
+| Column scale | N = 4: old / MTL5 | N = 9: old / MTL5 | N = 12: old / MTL5 |
+|---|---|---|---|
+| 1 | 1.1e-15 / 1.2e-15 | 1.9e-15 / 1.3e-15 | 2.7e-15 / 1.9e-15 |
+| 10⁴ | 1.5e-9 / 1.7e-13 | 2.2e-8 / 3.1e-14 | 2.4e-8 / 1.8e-13 |
+| 10⁶ | 3.9e-8 / 3.9e-12 | 2.9e-4 / 2.4e-13 | 2.4e-4 / 1.4e-12 |
+| 10⁸ | 3.4e-1 / 1.4e-12 | 3.2e-1 / 1.1e-12 | 7.1e-1 / 2.8e-12 |
+
+The Frobenius stop treats an entry below ε‖A‖ as converged even when it still couples the two
+smallest eigenvalues. Once the scales spread, that loses the null vector. MTL5's stop does not. On
+well-scaled matrices both are at the rounding floor. A call costs 5–20% more (about 7 µs → 7.3 µs at
+N = 9).
+
+The gate:
+- **Bench snapshot:** 126 of 132 outputs are bit-identical. The 6 that change are the `sfm_*`
+  variants of S1, the only callers, by at most 1.8e-12 relative (normwise).
+- **Captured EuRoC SfM windows:**
+  - MH_05 at rest (PnP fails) and moving with two-view failing replay bit for bit.
+  - MH_05 aligned keeps its outcome (window built, alignment succeeds). Its outputs move by at most
+    1.7e-11 absolute, which is rounding-level change in the null vectors carried through RANSAC, PnP
+    and the visual-inertial alignment. Its expected output was re-recorded from its unchanged input.
+
+The 1e-12 compare above rejects those six outputs, so the exception has its own procedure, run
+against a snapshot taken before the change:
+
+```bash
+# 1. Only the exempt outputs moved: prints nothing.
+./build/tools/bench_snapshot --compare before.json --rel 0 | grep DIFFERS \
+    | grep -v '^ *DIFFERS  S1_initialization/[^/ ]*/sfm_'
+# 2. ...and only by rounding: passes (worst 1.8e-12).
+./build/tools/bench_snapshot --compare before.json --rel 1e-11
+# 3. Same decisions, and the null vector kept on a badly scaled matrix.
+ctest --test-dir build -R "S1 SfM|jacobi_eigh"
+```
+
+Step 3 covers the decisions: the captured EuRoC windows stop where they did, and the aligned one
+replays its re-recorded output bit for bit. It also covers the accuracy test. The exception covers
+this change only. A snapshot taken after it is the reference for the next port, and the plain 1e-12
+compare applies again.
+
+### Why `syrk` and `symm` don't carry the sandwiches
+
+MTL5 has `syrk`, `symm` and `syr2k`, but none of them is the A·P·Aᵀ congruence the covariance needs:
+- `syrk` forms A·Aᵀ. Using it means factoring P = LLᵀ first, which is the square-root form, already
+  on MTL5.
+- `symm` forms P·B for a symmetric P. Its generic path is a full GEMM that reads both triangles, and
+  its BLAS path is for column-major operands only, while `DynMat`'s views are row-major. It saves
+  nothing over `mult`, and it would compute (G·P)·Gᵀ as G·(P·Gᵀ), which rounds differently.
+- F and G are sparse. `mul` already takes them through the CRS × dense product, which beats either
+  dense kernel.
+
+What would help is a triangular-output product, BLAS `gemmt` or a fused A·P·Aᵀ that computes one
+triangle and mirrors it. That halves the second product and makes `symmetrize` unnecessary. It is
+filed as [mtl5#656](https://github.com/stillwater-sc/mtl5/issues/656). Adopting it won't be
+bit-identical: averaging the two triangles rounds differently from mirroring one.
 
 ## The MTL5 gap register (#451)
 
@@ -308,7 +386,8 @@ interim workaround, and an upstream issue (stillwater-sc/mtl5). Known so far:
   in mtl5#552: **done, MTL5 5.14**;
 - a non-owning CRS view over caller arrays (`compressed2D` copies them);
 - block insert/scatter into `dense2D`;
-- a symmetric A·P·Aᵀ primitive;
+- a symmetric A·P·Aᵀ congruence (a `gemmt`-style triangular-output product; `syrk`/`symm` exist
+  but don't fit, see above) (mtl5#656);
 - a left-null-space helper;
 - an opt-in term-by-term ordering in `cholesky_factor`, and NaN-pivot rejection (mtl5#556): **done,
   MTL5 5.14**;
