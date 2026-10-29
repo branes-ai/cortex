@@ -338,6 +338,34 @@ struct S9MarginalizationBench {
         return {static_cast<double>(s.dim()), inv_sub.back().value, static_cast<double>(ev.front()), us};
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return state_groups(out.state);
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"dim", "log10_cond_P"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        return {static_cast<double>(in.state.dim()), log10_cond_sym(in.state.cov.P)};
+    }
+    /// Remove the oldest of 8 clones from a P of κ ≈ 10^0 … 10^12. S9 is a
+    /// gather, so it adds no rounding: the stage error must be 0 in every type.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double lc : {0.0, 4.0, 8.0, 12.0}) {
+            State<double> s(0.1);
+            for (std::size_t c = 0; c < 8; ++c)
+                s.clones.push_back({{}, {{0.3 * double(c), 0.0, 0.0}}, double(c)});
+            s.cov.P = correlated_spd(s.dim(), lc);
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_log10_cond_" + std::to_string(static_cast<int>(lc)),
+                                         encode_input(Input<double>{s, 0}),
+                                         "8 clones, P of condition ~10^" + std::to_string(static_cast<int>(lc))));
+        }
+        return out;
+    }
+
 private:
     template <class T>
     [[nodiscard]] static std::vector<std::size_t> keep_of(const State<T>& s, std::size_t idx) {

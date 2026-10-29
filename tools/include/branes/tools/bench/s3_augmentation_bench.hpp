@@ -310,6 +310,36 @@ struct S3AugmentationBench {
         return {static_cast<double>(out.state.dim()), blocks.back().value, static_cast<double>(ev.front()) / scale, us};
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return state_groups(out.state);
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"dim", "log10_cond_P"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        return {static_cast<double>(in.state.dim()), log10_cond_sym(in.state.cov.P)};
+    }
+    /// Clone a 5-clone state whose P has κ ≈ 10^0 … 10^12. S3 copies blocks of
+    /// P (J P Jᵀ with J a selection), so it adds no rounding either.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double lc : {0.0, 4.0, 8.0, 12.0}) {
+            Input<double> in;
+            in.state = State<double>(0.1);
+            for (std::size_t k = 0; k < 5; ++k)
+                in.state.clones.push_back({{}, {{0.3 * double(k), 0.0, 0.0}}, double(k)});
+            in.state.cov.P = S2PropagationBench::correlated_spd(in.state.dim(), 1e-2 * std::pow(10.0, -lc));
+            in.t = 100.0;
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_log10_cond_" + std::to_string(static_cast<int>(lc)),
+                                         encode_input(in),
+                                         "5 clones, P of condition ~10^" + std::to_string(static_cast<int>(lc))));
+        }
+        return out;
+    }
+
 private:
     /// J: the 6×n Jacobian of the new clone (δθ_c, δp_c) w.r.t. the error
     /// state — identity onto the IMU δθ and δp blocks.

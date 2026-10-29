@@ -385,6 +385,47 @@ struct S10OnlineCalibrationBench {
         return cols;
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        auto mat = [](const s6::Mat<T>& m) {
+            std::vector<double> d;
+            for (const T& x : m.d)
+                d.push_back(static_cast<double>(x));
+            return d;
+        };
+        const auto& q = out.R_ic.quaternion();
+        return {
+            {"applied", {static_cast<double>(out.applied)}},
+            {"R_ic",
+             {static_cast<double>(q[0]),
+              static_cast<double>(q[1]),
+              static_cast<double>(q[2]),
+              static_cast<double>(q[3])}},
+            {"p_ic",
+             {static_cast<double>(out.p_ic[0]), static_cast<double>(out.p_ic[1]), static_cast<double>(out.p_ic[2])}},
+            {"calib_cov", mat(out.calib_cov)},
+            {"P_after", mat(out.p_after)},
+            {"nis", {out.nis_sum}, 1.0}};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"rot_prior_deg", "log10_cond_P"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        return {in.rot_sigma / kDeg, log10_cond_sym(in.state.cov.P)};
+    }
+    /// A 1° extrinsic error under a 0.5°, 2° and 5° prior.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double pr : {0.5, 2.0, 5.0}) {
+            std::ostringstream name;
+            name << "ladder_prior_" << pr << "deg";
+            out.push_back(ladder_fixture(
+                kStage, name.str(), encode_input(scenario(true, 1.0, pr).first), "true poses, extrinsic 1 deg off"));
+        }
+        return out;
+    }
+
     /// The scene with S10 applied to the fresh state: the believed extrinsic is
     /// the true one rotated by `rot_error_deg` about a fixed axis and shifted
     /// 1 cm; the prior is (`rot_prior_deg`, 2 cm). Returns the input and the

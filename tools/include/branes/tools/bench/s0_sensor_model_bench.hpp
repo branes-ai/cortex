@@ -339,16 +339,7 @@ struct S0SensorModelBench {
             throw std::invalid_argument("s0 bench sweep: distortion_scale must be in [0, 4]");
         if (!std::isfinite(rf) || rf <= 0.0 || rf > 1.0)
             throw std::invalid_argument("s0 bench sweep: radius_frac must be in (0, 1]");
-        Input<double> in0;
-        in0.intr = euroc(ds);
-        const double half_diag = 0.5 * std::sqrt(752.0 * 752.0 + 480.0 * 480.0);
-        for (int k = 0; k < 16; ++k) {
-            const double a = 2.0 * std::numbers::pi * k / 16.0;
-            const double u = std::clamp(in0.intr.cx + rf * half_diag * std::cos(a), 0.0, 751.0);
-            const double v = std::clamp(in0.intr.cy + rf * half_diag * std::sin(a), 0.0, 479.0);
-            in0.pixels.push_back({u, v});
-        }
-        const auto in = decode_input<T>(encode_input(in0));
+        const auto in = decode_input<T>(encode_input(circle_input(ds, rf)));
         const auto out = run<T>(in, kShipped);
         const auto cam = in.intr.camera();
         double rt = 0.0, rot = 0.0, toff = 0.0;
@@ -369,6 +360,57 @@ struct S0SensorModelBench {
             toff = std::max(toff, shifted(1e-3));
         }
         return {rt, jacobian_check<T>(in, out).value, rot, toff};
+    }
+
+    /// 16 pixels on a circle of radius `radius_frac` × the image half-diagonal,
+    /// through a camera with EuRoC distortion × `distortion_scale`.
+    [[nodiscard]] static Input<double> circle_input(double distortion_scale, double radius_frac) {
+        Input<double> in;
+        in.intr = euroc(distortion_scale);
+        const double half_diag = 0.5 * std::sqrt(752.0 * 752.0 + 480.0 * 480.0);
+        for (int k = 0; k < 16; ++k) {
+            const double a = 2.0 * std::numbers::pi * k / 16.0;
+            const double u = std::clamp(in.intr.cx + radius_frac * half_diag * std::cos(a), 0.0, 751.0);
+            const double v = std::clamp(in.intr.cy + radius_frac * half_diag * std::sin(a), 0.0, 479.0);
+            in.pixels.push_back({u, v});
+        }
+        return in;
+    }
+
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        OutputGroup valid{"valid", {}}, norm{"normalized", {}}, rep{"reprojected", {}};
+        for (const int v : out.valid)
+            valid.values.push_back(v);
+        for (const auto& x : out.normalized)
+            norm.values.insert(norm.values.end(), {static_cast<double>(x[0]), static_cast<double>(x[1])});
+        for (const auto& x : out.reprojected)
+            rep.values.insert(rep.values.end(), {static_cast<double>(x[0]), static_cast<double>(x[1])});
+        return {valid, norm, rep};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"k1", "max_radius_px"};
+    }
+    /// The distortion strength and how far from the principal point the pixels
+    /// reach: the undistortion iteration is hardest at the image corners.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        double r = 0.0;
+        for (const auto& px : in.pixels)
+            r = std::max(r, std::hypot(px[0] - in.intr.cx, px[1] - in.intr.cy));
+        return {in.intr.k1, r};
+    }
+    /// No, EuRoC and twice-EuRoC distortion, at 40 % and 100 % of the half-diagonal.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double ds : {0.0, 1.0, 2.0})
+            for (const double rf : {0.4, 1.0}) {
+                std::ostringstream name;
+                name << "ladder_distortion_" << ds << "_radius_" << rf;
+                out.push_back(ladder_fixture(
+                    kStage, name.str(), encode_input(circle_input(ds, rf)), "16 pixels on a circle, EuRoC cam0"));
+            }
+        return out;
     }
 
 private:

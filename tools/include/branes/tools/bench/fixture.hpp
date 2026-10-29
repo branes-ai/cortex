@@ -212,12 +212,37 @@ template <math::Scalar T>
     return pack(r.quaternion());
 }
 
+namespace detail {
+/// The unit roundoff of the type a payload was rounded in, while a
+/// `DecodeFromRounded` is alive on this thread (0 otherwise).
+inline thread_local double rounded_source_eps = 0.0;
+}  // namespace detail
+
+/// Decoding, in a wider type, a payload that was rounded in a narrower one
+/// (the precision mode's rounded-input reference, #450): a quaternion that is
+/// unit-norm to the narrow type's precision is accepted and renormalized in
+/// the wide type — a perturbation of the order of that rounding.
+class DecodeFromRounded {
+public:
+    explicit DecodeFromRounded(double source_eps) : saved_(detail::rounded_source_eps) {
+        detail::rounded_source_eps = source_eps;
+    }
+    ~DecodeFromRounded() {
+        detail::rounded_source_eps = saved_;
+    }
+    DecodeFromRounded(const DecodeFromRounded&) = delete;
+    DecodeFromRounded& operator=(const DecodeFromRounded&) = delete;
+
+private:
+    double saved_;
+};
+
 /// Restore a rotation exactly. The stored quaternion must be canonical (w ≥ 0)
 /// and unit-norm to the precision of T; anything else is a malformed fixture
 /// (rejected here, never handed to SO3::from_unit_quaternion's precondition).
 template <math::Scalar T>
 [[nodiscard]] math::lie::SO3<T> unpack_so3(const json& j) {
-    const auto q = unpack_fixed<T, 4>(j);
+    auto q = unpack_fixed<T, 4>(j);
     double n2 = 0.0;
     for (std::size_t i = 0; i < 4; ++i) {
         const double x = static_cast<double>(q[i]);
@@ -229,10 +254,20 @@ template <math::Scalar T>
     // precision even when T is wider (long double): floor ε at double's.
     const double eps =
         std::max(static_cast<double>(std::numeric_limits<T>::epsilon()), std::numeric_limits<double>::epsilon());
-    if (std::abs(std::sqrt(n2) - 1.0) > 64.0 * eps)
+    const double norm = std::sqrt(n2);
+    if (std::abs(norm - 1.0) > 64.0 * std::max(eps, detail::rounded_source_eps))
         throw std::invalid_argument("fixture: rotation quaternion is not unit-norm");
     if (static_cast<double>(q[0]) < 0.0)
         throw std::invalid_argument("fixture: rotation quaternion is not canonical (w < 0)");
+    if (std::abs(norm - 1.0) > 64.0 * eps) {  // only under DecodeFromRounded
+        using std::sqrt;
+        T m2{0};
+        for (std::size_t i = 0; i < 4; ++i)
+            m2 += q[i] * q[i];
+        const T m = sqrt(m2);
+        for (std::size_t i = 0; i < 4; ++i)
+            q[i] /= m;
+    }
     return math::lie::SO3<T>::from_unit_quaternion(q);
 }
 

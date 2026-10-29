@@ -75,7 +75,11 @@ cmake --build build --target s9_marginalization_bench
 ./build/tools/s9_marginalization_bench --variant all           # shipped vs research variants
 ./build/tools/s9_marginalization_bench --fixture F.json        # e.g. a fixture captured from EuRoC
 ./build/tools/s9_marginalization_bench --sweep clones=2,4,8 --csv out/
+./build/tools/s9_marginalization_bench --precision --csv out/  # bits lost per type (#450)
 ```
+
+`--precision` is the per-stage precision characterization; it is described under
+[Mixed precision](/debugging/mixed-precision/#per-stage-precision-characterization-450).
 
 The bench prints the stage's contract from the registry, then one report per fixture, variant and
 type. This is real output:

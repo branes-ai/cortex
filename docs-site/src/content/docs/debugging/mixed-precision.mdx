@@ -15,7 +15,9 @@ import { Aside } from '@astrojs/starlight/components';
   [#449](https://github.com/branes-ai/cortex/issues/449) (genericity over non-IEEE types),
   [#450](https://github.com/branes-ai/cortex/issues/450) (per-stage arithmetic and precision
   characterization) and [#451](https://github.com/branes-ai/cortex/issues/451) (the MTL5 gap
-  register). The benches and the type-scaled invariants they rely on are in place.
+  register). The benches and the type-scaled invariants they rely on are in place, and every stage
+  bench measures the bits it loses in each type (`--precision`, see
+  [below](#per-stage-precision-characterization-450)).
 </Aside>
 
 The same effort that makes every stage observable also puts the pipeline's linear algebra on
@@ -407,6 +409,88 @@ What would help is a triangular-output product, BLAS `gemmt` or a fused A·P·A�
 triangle and mirrors it. That halves the second product and makes `symmetrize` unnecessary. It is
 filed as [mtl5#656](https://github.com/stillwater-sc/mtl5/issues/656). Adopting it won't be
 bit-identical: averaging the two triangles rounds differently from mirroring one.
+
+## Per-stage precision characterization (#450)
+
+Every stage bench has a `--precision` mode. It runs the stage once per arithmetic type (double,
+float, `posit<32,2>`, `posit<16,1>` and long double) on the bench's fixtures and on a **conditioning
+ladder**, a short series of inputs along the axis that makes the stage hard: the condition number of
+P, parallax, depth, measurement σ, step count. For each output group (attitudes, positions, P, δx,
+NIS …) it reports how many of the type's bits the stage lost:
+
+```bash
+./build/tools/s6e_ekf_update_bench --precision --csv out/   # → out/S6e_ekf_update_precision.csv
+```
+
+```text
+  ladder_sigma_0.05px [known_answer]  variant=shipped  log10_cond_P=15.65  log10_cond_S=4.279
+    float        dx 0.0027 14.5/14.7       P_plus 0.00024 11.0/11.5  invariants 10/10
+    posit32      dx 0.00028 15.2/15.3      P_plus 1.6e-05 11.1/11.4  invariants 10/10
+    posit16      dx 1 12.0/0.0             P_plus 0.96 11.9/0.0      invariants 1/2  first FAIL innovation.spd
+    long_double  dx 3e-12 13.7/13.7        P_plus 1e-12 12.2/12.2    invariants 10/10
+```
+
+Each cell is `<group> <relative error> <bits lost>/<stage bits lost>`:
+
+- **Relative error.** The error is ‖y_T − y_double‖∞ / max(‖y_double‖∞, floor). The floor is the
+  group's noise level: half a pixel for a residual, 1 for an NIS, 1 µ for δx. Without it, a
+  quantity that is about zero in double, such as a residual at the true poses, would count as having
+  lost every bit.
+- **Bits lost.** This is log₂(relative error / ε_T), capped at T's precision. It is the stage's
+  error amplification at that input, an empirical condition number.
+- **Stage bits lost.** This measures the same thing against double run on the input *as T holds
+  it*. It separates the stage's own arithmetic from the input's rounding into T. Total and stage
+  agree when the stage, not the input, is the source.
+- **Long double.** The reference is the double run, so a long double row measures **double's own**
+  error, counted in ε_double.
+
+The invariants run in every type, so a type that breaks the stage's contract shows up as a failure.
+The mode is a characterization: it exits non-zero only if the double reference itself fails.
+
+### What the stages lose
+
+The worst bits lost over each stage's fixtures and ladder, of the 23 a float carries, 27 for posit32
+near 1, 12 for posit16, and 52 for double. "fail" counts the fixtures on which an invariant broke.
+"flip" counts the fixtures on which a decision changed: a feature resolved or not, an update
+accepted or not.
+
+| Stage | float | posit32 | posit16 | long double (double's own) | What drives it |
+|---|---|---|---|---|---|
+| S0 sensor model | 1.4 | 2.7 | 9.8, 1/9 fail | 0.5 | distortion at the image corner; posit32's loss is the pixel coordinates' rounding (hundreds, where its taper leaves fewer bits); posit16's finite-difference Jacobian fails at the corner |
+| S1 initialization | 2.4 | 3.4 | 6.0 | 2.0 | the gravity and bias estimates over the window |
+| S2 propagation | 5.9 | 6.6 | 9.0 | 5.4 | step count: 200 steps cost about 5 bits in every type, 25 steps about 2 |
+| S3 augmentation | 0.0 | 0.0 | 0.8 | 0.0 | none: block copies, exact at κ(P) from 10² to 10¹⁴ |
+| S5 triangulation | 2.9 | 3.7 | 12.0, 2/7 fail | 3.8 | pixel noise at low parallax (noise-free, even 0.25° costs float nothing); posit16 cannot resolve a feature at 1° or less |
+| S6a Jacobians | 9.1 (r) | 8.8 (r) | 9.8 (r) | 9.0 (r) | the residual z − h(x) cancels: its error is ε·\|z\| in every type, 9 bits of the half-pixel floor |
+| S6b null space | 4.1 | 5.0 | 8.1 | 4.0 | depth; posit32 loses more at 64 m, where H_f's entries are far from 1 |
+| S6c compression | 0.0 | 0.0 | 1.8 | 0.0 | none: QR is backward stable |
+| S6d gating | 3.4 | 6.7 | 12.0, 2/6 fail | 6.0 | κ(S), dof; posit16's S is not SPD at 15 rows and up |
+| S6e EKF update | 14.5 | 15.3 | 12.0, 3/7 fail | 13.7 | **κ(S)**: δx loses log₂ κ(S) to log₂ κ(S) + 3 bits in every type |
+| S9 marginalization | 0.0 | 0.0 | 0.0 | 0.0 | none: a gather |
+| S10 online calibration | 10.4 | 11.3 | 12.0, 5 flip | 10.6 | the window's updates, as in S6e |
+| C filter loop | 9.5 | 10.6 | 12.0, 3/3 fail, 3 flip | 9.4 | the updates and the propagation, compounded over 54 operations (the run takes 46 min, nearly all of it posit16) |
+
+What the table shows:
+
+- **The losses are the problems', not the types'.** In every stage, float and posit32 lose about
+  as many bits as double itself does (the long double column). The sensitivity is the conditioning
+  of the problem the stage solves, not an algorithm that amplifies rounding. The total and stage
+  bits agree to within a bit wherever a stage loses more than two, with two exceptions, both input
+  rounding: S0 in posit32 (the pixel coordinates), and the noise-free S6a ladder, where the residual
+  of the rounded input is not zero in double.
+- **The update is the precision-sensitive stage.** S6e loses up to log₂ κ(S) + 3 bits. At σ = 0.05 px,
+  κ(S) ≈ 2·10⁴, and that is 14 of a float's 23 bits, and 14 of double's 52. S10 inherits the same loss
+  through its updates. A stage type narrower than float would land here first.
+- **Data movement is free.** S3 (augmentation), S9 (marginalization) and S6c (QR compression) lose
+  no bits in any type, at any conditioning on the ladder.
+- **posit16 is too narrow for the estimator.** It breaks S5, S6d and S6e at ordinary conditioning,
+  and flips S10's update decisions. It is usable only for the data-movement stages, and marginally
+  for S0 and S1.
+- **posit32's taper shows.** It beats float wherever values are near 1, but loses more where they
+  are not: S6b at 64 m, and the NIS in S6d.
+
+These measurements choose the per-stage types for the end-to-end EuRoC check, the next step of
+#450.
 
 ## The MTL5 gap register (#451)
 
