@@ -261,6 +261,57 @@ struct S6aJacobiansBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        auto vec = [](const std::vector<T>& v) {
+            std::vector<double> d;
+            for (const T& x : v)
+                d.push_back(static_cast<double>(x));
+            return d;
+        };
+        return {{"ok", {static_cast<double>(out.ok)}},
+                {"Hf", vec(out.system.Hf)},
+                {"Hx", vec(out.system.Hx)},
+                {"r", vec(out.system.r), kResidualFloor}};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"observations", "depth_m"};
+    }
+    /// The track length and the feature's distance from the first observing
+    /// clone: H_f scales as 1/depth, and its rows lose relative precision as
+    /// the depth grows and the rays become parallel.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        double depth = std::numeric_limits<double>::quiet_NaN();
+        if (!in.track.observations.empty() && in.track.observations.front().clone_index < in.state.clones.size()) {
+            const auto& c = in.state.clones[in.track.observations.front().clone_index].p;
+            depth = std::sqrt((in.p_f[0] - c[0]) * (in.p_f[0] - c[0]) + (in.p_f[1] - c[1]) * (in.p_f[1] - c[1]) +
+                              (in.p_f[2] - c[2]) * (in.p_f[2] - c[2]));
+        }
+        return {static_cast<double>(in.track.observations.size()), depth};
+    }
+    /// The sweep's five-clone baseline, feature 1 m … 64 m ahead.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double depth : {1.0, 4.0, 16.0, 64.0}) {
+            Input<double> in;
+            in.state = s6::State<double>(0.1);
+            const s6::Vec3<double> F{{0.1, -0.05, depth}};
+            for (std::size_t c = 0; c < 5; ++c) {
+                sdk::msckf::StateHelper<double>::augment_clone(in.state);
+                in.state.clones.back().p = {{0.2 * static_cast<double>(c), 0.0, 0.0}};
+                const auto& pk = in.state.clones.back().p;
+                in.track.observations.push_back({c, 0, {{(F[0] - pk[0]) / F[2], (F[1] - pk[1]) / F[2]}}});
+            }
+            in.p_f = F;
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_depth_" + std::to_string(static_cast<int>(depth)) + "m",
+                                         encode_input(in),
+                                         "5 clones on a 0.2 m baseline"));
+        }
+        return out;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

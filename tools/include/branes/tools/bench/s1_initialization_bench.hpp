@@ -545,6 +545,22 @@ struct S1InitializationBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    /// The initializer's verdict, the state it builds, and its gravity and
+    /// scale estimates. No ladder: the fixtures (static, noisy, EuRoC MH_05
+    /// at rest and moving) span the conditions S1 meets.
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        auto g = state_groups(out.state);
+        g.insert(g.begin(), {"verdict", {static_cast<double>(out.success), static_cast<double>(out.method)}});
+        g.push_back({"gravity",
+                     {static_cast<double>(out.gravity_world[0]),
+                      static_cast<double>(out.gravity_world[1]),
+                      static_cast<double>(out.gravity_world[2])}});
+        g.push_back({"scale", {static_cast<double>(out.scale)}});
+        return g;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

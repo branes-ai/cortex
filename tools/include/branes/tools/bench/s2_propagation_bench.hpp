@@ -461,6 +461,39 @@ struct S2PropagationBench {
                     std::max(1e-300, static_cast<double>(inv::la::max_abs(shipped.state.cov.P)))};
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return state_groups(out.state);
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"steps", "dt", "max_gyro_rad_s", "log10_cond_P0"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        double dt = 0.0, w = 0.0;
+        for (const auto& s : in.samples) {
+            dt = std::max(dt, s.dt);
+            w = std::max(w, std::sqrt(s.gyro[0] * s.gyro[0] + s.gyro[1] * s.gyro[1] + s.gyro[2] * s.gyro[2]));
+        }
+        return {static_cast<double>(in.samples.size()), dt, w, log10_cond_sym(in.state.cov.P)};
+    }
+    /// 0.5 s of the static, tumbling and aggressive trajectories at 400 Hz and
+    /// 50 Hz: propagation accumulates rounding over its steps, so the error
+    /// grows with the step count as well as with the dynamics.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const int dyn : {0, 1, 2})
+            for (const double dt : {0.0025, 0.02}) {
+                const auto traj = trajectory(dyn, dt, static_cast<std::size_t>(std::lround(0.5 / dt)));
+                out.push_back(ladder_fixture(kStage,
+                                             "ladder_dynamics_" + std::to_string(dyn) + "_dt_" +
+                                                 std::to_string(static_cast<int>(std::lround(dt * 1e4))) + "e-4",
+                                             encode_input(traj.input),
+                                             "0.5 s of trajectory " + std::to_string(dyn)));
+            }
+        return out;
+    }
+
     // ── Helpers (also used by the S3 bench) ─────────────────────────────────
     /// A dense SPD matrix B·Bᵀ + ridge·I with a fixed, rank-deficient B.
     [[nodiscard]] static DynMat<double> correlated_spd(std::size_t n, double ridge = 1e-4) {

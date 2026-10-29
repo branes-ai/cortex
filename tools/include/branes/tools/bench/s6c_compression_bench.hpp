@@ -188,6 +188,39 @@ struct S6cCompressionBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        OutputGroup H{"H", {}}, r{"r", {}, kResidualFloor};
+        for (const T& x : out.compressed.H.d)
+            H.values.push_back(static_cast<double>(x));
+        for (const T& x : out.compressed.r)
+            r.values.push_back(static_cast<double>(x));
+        return {{"shape", {static_cast<double>(out.rows_out), static_cast<double>(out.applied)}}, H, r};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"rows_in", "log10_cond_H"};
+    }
+    /// κ of the stacked H over its rank (the nonzero spectrum of the smaller
+    /// Gram matrix: H has zero columns for the states no track touches). QR
+    /// compression is backward stable, so its error should not track it.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        const auto& H = in.stacked.H;
+        const auto Ht = sdk::msckf::transpose(H);
+        const auto G = H.rows <= H.cols ? sdk::msckf::mul(H, Ht) : sdk::msckf::mul(Ht, H);
+        return {static_cast<double>(H.rows), 0.5 * log10_cond_range(G)};
+    }
+    /// 1, 4 and 16 stacked tracks of the six-clone scene.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const std::size_t k : {1u, 4u, 16u})
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_features_" + std::to_string(k),
+                                         encode_input(stack(s6::build_scene(false, 6, 64), k)),
+                                         "stacked tracks of the six-clone scene"));
+        return out;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

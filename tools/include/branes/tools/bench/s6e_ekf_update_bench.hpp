@@ -328,6 +328,40 @@ struct S6eEkfUpdateBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        // δx below a micro-unit (µrad, µm) moves no estimate.
+        OutputGroup dx{"dx", {}, 1e-6}, P{"P_plus", {}};
+        for (const T& x : out.dx)
+            dx.values.push_back(static_cast<double>(x));
+        for (const T& x : out.p_plus.d)
+            P.values.push_back(static_cast<double>(x));
+        return {dx, P};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"log10_cond_P", "log10_cond_S"};
+    }
+    /// κ of the prior P and of the innovation covariance S the gain solves with.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        const double var = in.options.normalized_sigma * in.options.normalized_sigma +
+                           in.options.calib_rot_sigma * in.options.calib_rot_sigma;
+        return {log10_cond_sym(in.state.cov.P), log10_cond_sym(s6::innovation(in.state.cov.P, in.projected.H, var))};
+    }
+    /// The captured track's update at 0.05 … 4 px: the smaller σ, the closer
+    /// S is to the singular H P Hᵀ, and the larger the gain.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double sp : {0.05, 0.25, 1.0, 4.0}) {
+            auto in = input_of(s6::build_scene(false));
+            in.options.normalized_sigma = sp / 458.654;
+            std::ostringstream name;
+            name << "ladder_sigma_" << sp << "px";
+            out.push_back(ladder_fixture(kStage, name.str(), encode_input(in), "the captured track at sigma_px"));
+        }
+        return out;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

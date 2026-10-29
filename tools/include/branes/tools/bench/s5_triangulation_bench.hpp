@@ -340,6 +340,50 @@ struct S5TriangulationBench {
         return {err / draws, kappa, rejected / draws, alt_err[0] / draws, alt_err[1] / draws, alt_err[2] / draws};
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return {{"ok", {static_cast<double>(out.ok)}},
+                {"p_f",
+                 {static_cast<double>(out.p_f[0]), static_cast<double>(out.p_f[1]), static_cast<double>(out.p_f[2])}}};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"max_parallax_deg", "log10_kappa"};
+    }
+    /// The ray geometry at the double solution: parallax and κ of the normal
+    /// matrix Σ (I − d̂ d̂ᵀ), the triangulation's own condition number.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        const auto out = run<double>(in, kShipped);
+        if (!out.ok)
+            return {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+        const auto g = geometry(in, out.p_f);
+        return {g.max_parallax_deg, std::log10(inv::report_condition_number(g.normal, kInvStage).value)};
+    }
+    /// The sweep's four-clone baseline at 0.25° … 15° parallax, no pixel noise,
+    /// the feature off the axis (so no coordinate is exact in any type): κ grows
+    /// as the rays close, and with it the depth's sensitivity.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        const double depth = 5.0;
+        const Vec3<double> F{{0.13, -0.07, depth}};
+        for (const double par : {0.25, 1.0, 5.0, 15.0}) {
+            const double half = depth * std::tan(par * std::numbers::pi / 360.0);
+            Input<double> in;
+            in.state = State<double>(0.1);
+            for (int c = 0; c < 4; ++c) {
+                const Vec3<double> pc{{-half + 2.0 * half * c / 3.0, 0.0, 0.0}};
+                in.state.clones.push_back({{}, pc, double(c)});
+                in.track.observations.push_back(
+                    {static_cast<std::size_t>(c), 0, {{(F[0] - pc[0]) / F[2], (F[1] - pc[1]) / F[2]}}});
+            }
+            in.state.cov.P = sdk::msckf::DynMat<double>::identity(in.state.dim());
+            std::ostringstream name;
+            name << "ladder_parallax_" << par << "deg";
+            out.push_back(ladder_fixture(kStage, name.str(), encode_input(in), "4 clones, feature 5 m ahead"));
+        }
+        return out;
+    }
+
 private:
     template <class T>
     struct Geometry {

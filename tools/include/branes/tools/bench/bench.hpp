@@ -58,6 +58,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -401,6 +402,407 @@ inline void write_report_csv(const std::vector<FixtureRun>& runs, const std::fil
                     << t.max_diff_vs_double << '\n';
 }
 
+// ── Precision characterization (#450) ───────────────────────────────────────
+//
+// `--precision` runs the stage once per arithmetic type on each fixture and on
+// the bench's conditioning ladder, and measures how much of each type's
+// precision survives the stage. Per output group, the normwise relative error
+// against the `double` run,
+//
+//     rel_err = ‖y_T − y_double‖∞ / ‖y_double‖∞,
+//
+// is reported in units of the type's unit roundoff (the error amplification,
+// an empirical condition number of the stage at that input) and as bits lost,
+// log₂ of the amplification. A backward-stable stage on a well-conditioned
+// input loses a few bits; amplification that tracks the input's conditioning
+// says the stage's sensitivity is the problem's, and amplification well above
+// it says the algorithm is. The invariants run in every type, so a type that
+// breaks the stage's contract is reported too.
+//
+// That error has two sources: the input rounded into T (which any algorithm
+// pays, times the problem's condition number) and the stage's own arithmetic.
+// `stage_err` separates the second: the T run against a double run on the
+// input as T holds it (decoded in T, re-encoded, decoded in double).
+//
+// The reference is the `double` run, so a type wider than double measures the
+// double run's own error: its rows use ε_double, and their amplification is
+// double's. A posit's precision tapers away from 1; the rows use its ε at 1.
+//
+// Optional bench hooks:
+//
+//   template <class T> static std::vector<OutputGroup> precision_groups(const Output<T>&);
+//       the output split into groups of like quantities ("P", "mean", "dx"),
+//       so a group's error is not drowned by a larger one; default: one group,
+//       the flattened output
+//   static std::vector<std::string> conditioning_columns();
+//   static std::vector<double> conditioning(const Input<double>&);
+//       the conditioning of an input (κ(P), parallax, depth …)
+//   static std::vector<NamedFixture> precision_fixtures();
+//       inputs along the stage's conditioning axis (the ladder)
+
+/// A named slice of a stage output, compared across types as one vector.
+/// `floor` is the magnitude below which the group's values are noise for the
+/// stage (half a pixel for a residual, 1 for an NIS): the error is relative to
+/// max(‖y_double‖∞, floor), so a quantity that is ~0 in double — a residual at
+/// the true poses — is not reported as having lost every bit.
+struct OutputGroup {
+    std::string name;
+    std::vector<double> values;
+    double floor = 0.0;
+};
+
+/// The normalized-image-coordinate floor of a residual: half a pixel at the
+/// EuRoC focal length.
+inline constexpr double kResidualFloor = 0.5 / 458.654;
+
+/// One fixture, in one arithmetic type, against the `double` run.
+struct PrecisionRow {
+    std::string fixture;
+    FixtureKind kind = FixtureKind::KnownAnswer;
+    std::string variant;
+    std::string type;
+    std::vector<double> conditioning;
+    double eps = 0.0;                                     ///< the unit the error is counted in
+    std::vector<std::pair<std::string, double>> rel_err;  ///< per output group, vs double on the input
+    std::vector<double> abs_err;                          ///< per output group, ‖y_T − y_double‖∞
+    std::vector<double> stage_err;                        ///< per output group, vs double on the input rounded to T
+    std::size_t invariants = 0, failed = 0;
+    double worst_margin = 0.0;  ///< the tightest Upper-bound invariant, value ÷ threshold
+    std::string first_failed;   ///< the first invariant that failed, if any
+    std::string status = "ok";  ///< "ok", or why the run produced no output
+
+    [[nodiscard]] static double amplification(double rel, double eps) {
+        return eps > 0.0 ? rel / eps : rel;
+    }
+    /// log₂ of the amplification, capped at the type's precision −log₂ ε: an
+    /// error as large as the value itself leaves no correct bit, however large.
+    [[nodiscard]] static double bits_lost(double rel, double eps) {
+        const double cap = eps > 0.0 ? -std::log2(eps) : 0.0;
+        const double a = amplification(rel, eps);
+        if (std::isnan(a))
+            return cap;
+        return std::min(cap, std::log2(std::max(a, 1.0)));
+    }
+};
+
+/// ‖y − ref‖∞, the normwise difference. A value non-finite in y but not in
+/// ref, infinities of opposite sign, or a shape change, is ∞; NaN in both, or
+/// the same infinity in both, is not a difference (the type reproduced the
+/// reference's own failure).
+[[nodiscard]] inline double normwise_abs_err(const std::vector<double>& y, const std::vector<double>& ref) {
+    if (y.size() != ref.size())
+        return inv::detail::kInf;
+    double num = 0.0;
+    for (std::size_t i = 0; i < y.size(); ++i) {
+        const bool fy = std::isfinite(y[i]), fr = std::isfinite(ref[i]);
+        if (!fy && !fr) {
+            if (std::isnan(y[i]) == std::isnan(ref[i]) && (std::isnan(y[i]) || y[i] == ref[i]))
+                continue;
+            return inv::detail::kInf;
+        }
+        if (fy != fr)
+            return inv::detail::kInf;
+        num = std::max(num, std::abs(y[i] - ref[i]));
+    }
+    return num;
+}
+
+/// The normwise relative difference ‖y − ref‖∞ / max(‖ref‖∞, floor) (absolute
+/// when both are zero), with `normwise_abs_err`'s non-finite rules.
+[[nodiscard]] inline double
+normwise_rel_err(const std::vector<double>& y, const std::vector<double>& ref, double floor = 0.0) {
+    if (y.size() != ref.size())
+        return inv::detail::kInf;
+    double num = 0.0, den = floor;
+    for (std::size_t i = 0; i < y.size(); ++i) {
+        const bool fy = std::isfinite(y[i]), fr = std::isfinite(ref[i]);
+        if (!fy && !fr) {
+            if (std::isnan(y[i]) == std::isnan(ref[i]) && (std::isnan(y[i]) || y[i] == ref[i]))
+                continue;
+            return inv::detail::kInf;
+        }
+        if (fy != fr)
+            return inv::detail::kInf;
+        num = std::max(num, std::abs(y[i] - ref[i]));
+        den = std::max(den, std::abs(ref[i]));
+    }
+    return den > 0.0 ? num / den : num;
+}
+
+/// The groups of a filter state: every attitude (quaternions: nav, calibration,
+/// clones), every position (m), the velocity and biases, and the covariance.
+/// Timestamps are double in every type by design and are left out.
+template <class T>
+[[nodiscard]] std::vector<OutputGroup> state_groups(const sdk::msckf::State<T>& s) {
+    OutputGroup rot{"rot", {}}, pos{"pos", {}}, vb{"vel_bias", {}}, P{"P", {}};
+    auto put = [](OutputGroup& g, const auto& x, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i)
+            g.values.push_back(static_cast<double>(x[i]));
+    };
+    put(rot, s.R.quaternion(), 4);
+    put(pos, s.p, 3);
+    put(vb, s.v, 3);
+    put(vb, s.bg, 3);
+    put(vb, s.ba, 3);
+    for (const auto& c : s.calib) {
+        put(rot, c.R_imu_cam.quaternion(), 4);
+        put(pos, c.p_imu_cam, 3);
+    }
+    for (const auto& c : s.clones) {
+        put(rot, c.R.quaternion(), 4);
+        put(pos, c.p, 3);
+    }
+    for (const T& x : s.cov.P.d)
+        P.values.push_back(static_cast<double>(x));
+    return {rot, pos, vb, P};
+}
+
+/// log₁₀ of the 2-norm condition number of a symmetric matrix, λ_max / λ_min,
+/// with λ_min floored at ε_double·λ_max: 16 means singular in double (P after
+/// clone augmentation is exactly singular). NaN for a non-finite or zero matrix.
+[[nodiscard]] inline double log10_cond_sym(const sdk::msckf::DynMat<double>& a) {
+    if (a.rows == 0)
+        return std::numeric_limits<double>::quiet_NaN();
+    for (const double x : a.d)
+        if (!std::isfinite(x))
+            return std::numeric_limits<double>::quiet_NaN();
+    const auto ev = inv::la::symmetric_eigenvalues(a);
+    double lo = inv::detail::kInf, hi = 0.0;
+    for (const double e : ev) {
+        lo = std::min(lo, std::abs(e));
+        hi = std::max(hi, std::abs(e));
+    }
+    if (!(hi > 0.0))
+        return std::numeric_limits<double>::quiet_NaN();
+    return std::log10(hi / std::max(lo, std::numeric_limits<double>::epsilon() * hi));
+}
+
+/// log₁₀ of λ_max / λ_min over the nonzero spectrum of a symmetric PSD matrix:
+/// eigenvalues at or below n·ε_double·λ_max are its null space and do not
+/// count. For a Gram matrix HᵀH this is κ(H)² over H's rank, so a Jacobian with
+/// zero columns (states a measurement does not touch) is not reported singular.
+/// NaN for a non-finite or zero matrix.
+[[nodiscard]] inline double log10_cond_range(const sdk::msckf::DynMat<double>& a) {
+    if (a.rows == 0)
+        return std::numeric_limits<double>::quiet_NaN();
+    for (const double x : a.d)
+        if (!std::isfinite(x))
+            return std::numeric_limits<double>::quiet_NaN();
+    const auto ev = inv::la::symmetric_eigenvalues(a);
+    double hi = 0.0;
+    for (const double e : ev)
+        hi = std::max(hi, std::abs(e));
+    if (!(hi > 0.0))
+        return std::numeric_limits<double>::quiet_NaN();
+    const double tol = static_cast<double>(a.rows) * std::numeric_limits<double>::epsilon() * hi;
+    double lo = hi;
+    for (const double e : ev)
+        if (std::abs(e) > tol)
+            lo = std::min(lo, std::abs(e));
+    return std::log10(hi / lo);
+}
+
+/// A dense n × n SPD matrix of condition number exactly 10^log10_cond (up to
+/// rounding): (1 − r)·G/λ_max(G) + r·I with r = 10^−log10_cond and G = B·Bᵀ for
+/// a fixed, rank-deficient B, so λ_max = 1 and λ_min = r. log10_cond = 0 is the
+/// identity. The conditioning ladders build P with it.
+[[nodiscard]] inline sdk::msckf::DynMat<double> spd_of_condition(std::size_t n, double log10_cond) {
+    const std::size_t k = n / 2 + 1;  // rank k < n: G has a null space for every n ≥ 3
+    sdk::msckf::DynMat<double> G(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j <= i; ++j) {
+            double s = 0.0;
+            for (std::size_t c = 0; c < k; ++c)
+                s += std::sin(0.7 * double(i + 1) + 1.3 * double(c + 1)) *
+                     std::sin(0.7 * double(j + 1) + 1.3 * double(c + 1));
+            G(i, j) = G(j, i) = s;
+        }
+    double hi = 0.0;
+    for (const double e : inv::la::symmetric_eigenvalues(G))
+        hi = std::max(hi, std::abs(e));
+    const double r = std::pow(10.0, -log10_cond);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j)
+            G(i, j) = (1.0 - r) * G(i, j) / hi + (i == j ? r : 0.0);
+    return G;
+}
+
+/// A point on a bench's conditioning ladder: an input with no expected output
+/// (the precision mode compares types against double, not against an answer).
+[[nodiscard]] inline NamedFixture
+ladder_fixture(std::string_view stage, std::string name, json input, std::string description) {
+    Fixture f;
+    f.stage = std::string(stage);
+    f.kind = FixtureKind::KnownAnswer;
+    f.source = "precision ladder (#450)";
+    f.description = std::move(description);
+    f.input = std::move(input);
+    return {std::move(name), std::move(f)};
+}
+
+template <class B, class T>
+[[nodiscard]] std::vector<OutputGroup> precision_groups_of(const typename B::template Output<T>& out) {
+    if constexpr (requires { B::template precision_groups<T>(out); })
+        return B::template precision_groups<T>(out);
+    else
+        return {{"output", B::template flatten<T>(out)}};
+}
+
+template <class B>
+[[nodiscard]] std::vector<std::string> conditioning_columns_of() {
+    if constexpr (requires { B::conditioning_columns(); })
+        return B::conditioning_columns();
+    else
+        return {};
+}
+
+/// Run bench `B` on `nf` in every type of `selected`, against the `double` run.
+template <class B, class... Ts>
+[[nodiscard]] std::vector<PrecisionRow> precision_rows(const NamedFixture& nf,
+                                                       std::string_view variant,
+                                                       TypeList<Ts...> types,
+                                                       const std::vector<std::string>& selected) {
+    const auto ref_in = B::template decode_input<double>(nf.fixture.input);
+    std::vector<double> cond;
+    if constexpr (requires { B::conditioning(ref_in); })
+        cond = B::conditioning(ref_in);
+    const auto ref = precision_groups_of<B, double>(B::template run<double>(ref_in, variant));
+
+    std::vector<PrecisionRow> rows;
+    for_each_type(types, [&]<class T>() {
+        const std::string name(type_name<T>());
+        if (std::find(selected.begin(), selected.end(), name) == selected.end())
+            return;
+        PrecisionRow row;
+        row.fixture = nf.name;
+        row.kind = nf.fixture.kind;
+        row.variant = std::string(variant);
+        row.type = name;
+        row.conditioning = cond;
+        row.eps =
+            std::max(static_cast<double>(std::numeric_limits<T>::epsilon()), std::numeric_limits<double>::epsilon());
+        if constexpr (std::is_same_v<T, double>)
+            row.eps = std::numeric_limits<double>::epsilon();
+        try {
+            const auto in = B::template decode_input<T>(nf.fixture.input);
+            const auto out = B::template run<T>(in, variant);
+            const auto groups = precision_groups_of<B, T>(out);
+            const auto ref_rounded = [&] {
+                const DecodeFromRounded scope(row.eps);
+                return precision_groups_of<B, double>(
+                    B::template run<double>(B::template decode_input<double>(B::encode_input(in)), variant));
+            }();
+            for (std::size_t g = 0; g < ref.size(); ++g) {
+                const bool have = g < groups.size() && g < ref_rounded.size();
+                const double floor = ref[g].floor;
+                row.rel_err.emplace_back(
+                    ref[g].name, have ? normwise_rel_err(groups[g].values, ref[g].values, floor) : inv::detail::kInf);
+                row.abs_err.push_back(have ? normwise_abs_err(groups[g].values, ref[g].values) : inv::detail::kInf);
+                row.stage_err.push_back(have ? normwise_rel_err(groups[g].values, ref_rounded[g].values, floor)
+                                             : inv::detail::kInf);
+            }
+            for (const auto& r : B::template invariants<T>(in, out, nf.fixture)) {
+                ++row.invariants;
+                if (!r.pass && row.failed++ == 0)
+                    row.first_failed = std::string(r.name);
+                if (r.bound == inv::Bound::Upper)
+                    row.worst_margin = std::max(row.worst_margin, r.margin());
+            }
+        } catch (const std::exception& e) {
+            // A type that cannot run the stage (a posit NaR, an exhausted
+            // iteration) is a result, not a bench failure.
+            row.status = std::string("threw: ") + e.what();
+            row.rel_err.clear();
+            row.abs_err.clear();
+            row.stage_err.clear();
+            for (const auto& g : ref) {
+                row.rel_err.emplace_back(g.name, inv::detail::kInf);
+                row.abs_err.push_back(inv::detail::kInf);
+                row.stage_err.push_back(inv::detail::kInf);
+            }
+        }
+        rows.push_back(std::move(row));
+    });
+    return rows;
+}
+
+/// The types `--precision` runs when no `--types` is given: the issue's set
+/// (#450), minus any the bench leaves out for the variant (`runs_by_default`).
+template <class B>
+[[nodiscard]] std::vector<std::string> precision_types_for(std::string_view variant) {
+    std::vector<std::string> names{"double", "float", "posit32", "posit16", "long_double"};
+    if constexpr (requires { B::runs_by_default(variant, std::string_view{}); })
+        std::erase_if(names, [&](const std::string& t) { return !B::runs_by_default(variant, t); });
+    return names;
+}
+
+inline void print_precision(const std::vector<PrecisionRow>& rows, const std::vector<std::string>& cond_cols) {
+    std::cout << "\n  precision vs double, per output group:  <group> <rel err> <bits lost>/<stage bits lost>\n"
+              << "    rel err    ‖y_T − y_double‖∞ / max(‖y_double‖∞, the group's noise floor)\n"
+              << "    bits lost  log₂(rel err / ε_T), at most T's precision — for long_double, of the double run's\n"
+              << "               own error (ε_double)\n"
+              << "    stage      the same, against double on the input as T holds it: the stage's own arithmetic\n";
+    std::string last;
+    for (const auto& r : rows) {
+        if (r.fixture != last) {
+            std::cout << "\n  " << r.fixture << " [" << to_string(r.kind) << "]  variant=" << r.variant;
+            for (std::size_t i = 0; i < cond_cols.size() && i < r.conditioning.size(); ++i)
+                std::cout << "  " << cond_cols[i] << '=' << fmt(r.conditioning[i]);
+            std::cout << '\n';
+            last = r.fixture;
+        }
+        std::cout << "    " << std::left << std::setw(13) << r.type;
+        if (r.status != "ok") {
+            std::cout << r.status << '\n';
+            continue;
+        }
+        for (std::size_t g = 0; g < r.rel_err.size(); ++g) {
+            const double e = r.rel_err[g].second;
+            std::ostringstream cell;
+            cell << std::setprecision(2) << r.rel_err[g].first << ' ' << e << ' ' << std::fixed << std::setprecision(1)
+                 << PrecisionRow::bits_lost(e, r.eps) << '/' << PrecisionRow::bits_lost(r.stage_err[g], r.eps);
+            std::cout << std::left << std::setw(26) << cell.str();
+        }
+        std::cout << "invariants " << (r.invariants - r.failed) << '/' << r.invariants;
+        if (r.failed)
+            std::cout << "  first FAIL " << r.first_failed;
+        std::cout << '\n';
+    }
+}
+
+/// One row per fixture × type × output group.
+inline void write_precision_csv(const std::vector<PrecisionRow>& rows,
+                                const std::vector<std::string>& cond_cols,
+                                const std::filesystem::path& path) {
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path);
+    if (!out)
+        throw std::runtime_error("cannot open " + path.string());
+    out << "fixture,kind,variant,type";
+    for (const auto& c : cond_cols)
+        out << ',' << csv_field(c);
+    out << ",group,eps,abs_err,rel_err,amplification,bits_lost,stage_rel_err,stage_bits_lost,invariants,failed,"
+           "worst_margin,"
+           "first_failed,status\n";
+    out.precision(17);
+    for (const auto& r : rows)
+        for (std::size_t gi = 0; gi < r.rel_err.size(); ++gi) {
+            const auto& [g, e] = r.rel_err[gi];
+            const double se = r.stage_err[gi];
+            out << csv_field(r.fixture) << ',' << to_string(r.kind) << ',' << csv_field(r.variant) << ',' << r.type;
+            for (std::size_t i = 0; i < cond_cols.size(); ++i)
+                out << ',' << (i < r.conditioning.size() ? r.conditioning[i] : inv::detail::kInf);
+            out << ',' << csv_field(g) << ',' << r.eps << ',' << r.abs_err[gi] << ',' << e << ','
+                << PrecisionRow::amplification(e, r.eps) << ',' << PrecisionRow::bits_lost(e, r.eps) << ',' << se << ','
+                << PrecisionRow::bits_lost(se, r.eps) << ',' << r.invariants << ',' << r.failed << ',' << r.worst_margin
+                << ',' << csv_field(r.first_failed) << ',' << csv_field(r.status) << '\n';
+        }
+    out.flush();
+    if (!out)
+        throw std::runtime_error("cannot write " + path.string());
+}
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
 struct BenchArgs {
@@ -411,6 +813,7 @@ struct BenchArgs {
     std::vector<std::string> sweeps;    ///< --sweep name=v1,v2,… (repeatable); presence runs the sweep
     bool sweep = false;                 ///< --sweep given (with or without overrides)
     std::string capture;                ///< --capture <dir>: write the built-in fixtures as files
+    bool precision = false;             ///< --precision: the per-type precision characterization (#450)
     bool help = false;
 };
 
@@ -445,6 +848,8 @@ struct BenchArgs {
             a.csv = next();
         else if (v == "--capture")
             a.capture = next();
+        else if (v == "--precision")
+            a.precision = true;
         else if (v == "--sweep") {
             a.sweep = true;
             if (i + 1 < argc && std::string_view(argv[i + 1]).find('=') != std::string_view::npos)
@@ -508,6 +913,65 @@ void run_sweep(const BenchArgs& a, TypeList<Ts...> types) {
     });
 }
 
+/// `--precision`: the fixtures (the built-ins, or `--fixture`'s) and, with the
+/// built-ins, the bench's conditioning ladder, in every selected type. Writes
+/// `<stage>_precision.csv`. A characterization, so a non-double type breaking
+/// the contract is reported, not failed; returns non-zero only if the double
+/// run itself breaks it, nothing ran, or the CSV could not be written. double
+/// always runs, whatever `--types` selects: it is the reference the exit
+/// status checks.
+template <class B>
+int precision_main(const BenchArgs& a, std::vector<NamedFixture> fixtures) {
+    if constexpr (requires { B::precision_fixtures(); })
+        if (a.fixtures.empty())
+            for (auto& nf : B::precision_fixtures())
+                fixtures.push_back(std::move(nf));
+    const auto cond_cols = conditioning_columns_of<B>();
+    std::vector<PrecisionRow> rows;
+    bool ok = true;
+    for (const auto& v : select_variants(B::variants(), a.variant)) {
+        auto types = a.types.empty() ? precision_types_for<B>(v.name) : a.types;
+        if (std::find(types.begin(), types.end(), "double") == types.end())
+            types.insert(types.begin(), "double");
+        for (const auto& nf : fixtures) {
+            if (nf.fixture.stage != B::kStage)
+                continue;
+            try {
+                for (auto& r : precision_rows<B>(nf, v.name, bench_types<B>(), types)) {
+                    if (r.type == "double" && (r.status != "ok" || r.failed))
+                        ok = false;
+                    rows.push_back(std::move(r));
+                }
+            } catch (const std::exception& e) {  // the double reference could not run
+                std::cerr << "  " << nf.name << ": " << e.what() << '\n';
+                ok = false;
+            }
+        }
+    }
+    // The double rows are added, not asked for: a --types list none of whose
+    // names ran is still "nothing ran".
+    const bool asked_ran = a.types.empty() || std::any_of(rows.begin(), rows.end(), [&](const PrecisionRow& r) {
+                               return std::find(a.types.begin(), a.types.end(), r.type) != a.types.end();
+                           });
+    if (rows.empty() || !asked_ran) {
+        std::cerr << "  " << B::kStage << ": no precision run — check --fixture / --types\n";
+        return 1;
+    }
+    print_precision(rows, cond_cols);
+    const std::filesystem::path dir =
+        a.csv.empty() ? std::filesystem::path("build/stage_benches") / B::kStage : std::filesystem::path(a.csv);
+    const auto file = dir / (std::string(B::kStage) + "_precision.csv");
+    try {
+        write_precision_csv(rows, cond_cols, file);
+    } catch (const std::exception& e) {
+        std::cerr << "  " << B::kStage << ": " << e.what() << '\n';
+        return 1;
+    }
+    std::cout << "\n  precision: " << rows.size() << " runs → " << file.string() << '\n';
+    std::cout << "\n  " << B::kStage << ": " << (ok ? "double reference PASS" : "DOUBLE REFERENCE FAILURES") << '\n';
+    return ok ? 0 : 1;
+}
+
 /// The `main` of a bench executable. Returns 0 iff every invariant passed.
 template <class B>
 int bench_main(int argc, char** argv) {
@@ -524,6 +988,7 @@ int bench_main(int argc, char** argv) {
         std::cout << "\n  usage: " << B::kStage
                   << "_bench [--fixture F.json]... [--types double,float,posit32,posit16]\n"
                   << "         [--variant NAME|all] [--csv DIR] [--sweep [name=v1,v2,...]]... [--capture DIR]\n"
+                  << "         [--precision]\n"
                   << "  variants:";
         for (const auto& v : B::variants())
             std::cout << "  " << v.name;
@@ -542,6 +1007,9 @@ int bench_main(int argc, char** argv) {
             save(nf.fixture, std::filesystem::path(a.capture) / (nf.name + ".json"));
         std::cout << "  wrote " << fixtures.size() << " fixture(s) to " << a.capture << '\n';
     }
+
+    if (a.precision)
+        return precision_main<B>(a, fixtures);
 
     std::vector<FixtureRun> runs;
     bool ok = true;

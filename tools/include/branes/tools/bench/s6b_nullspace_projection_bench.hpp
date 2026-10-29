@@ -246,6 +246,58 @@ struct S6bNullspaceProjectionBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        OutputGroup H{"H", {}}, r{"r", {}, kResidualFloor};
+        for (const T& x : out.projected.H.d)
+            H.values.push_back(static_cast<double>(x));
+        for (const T& x : out.projected.r)
+            r.values.push_back(static_cast<double>(x));
+        return {{"ok", {static_cast<double>(out.ok)}}, H, r};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"rows", "log10_cond_Hf"};
+    }
+    /// The 2-norm condition number of H_f (2m × 3), the matrix whose left null
+    /// space S6b computes: near-parallel rays make it ill-conditioned.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        const auto& sys = in.system;
+        sdk::msckf::DynMat<double> G(3, 3);
+        for (std::size_t i = 0; i < sys.rows; ++i)
+            for (std::size_t a = 0; a < 3; ++a)
+                for (std::size_t b = 0; b < 3; ++b)
+                    G(a, b) += sys.Hf[i * 3 + a] * sys.Hf[i * 3 + b];
+        return {static_cast<double>(sys.rows), 0.5 * log10_cond_sym(G)};
+    }
+    /// The sweep's five yawing clones, feature 1 m … 64 m ahead.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double depth : {1.0, 4.0, 16.0, 64.0}) {
+            s6::State<double> st(0.1);
+            const s6::Vec3<double> F{{0.1, -0.05, depth}};
+            s6::Track<double> tr;
+            for (std::size_t c = 0; c < 5; ++c) {
+                sdk::msckf::StateHelper<double>::augment_clone(st);
+                auto& cl = st.clones.back();
+                cl.R = s6::State<double>::SO3::exp({{0.0, 0.0, 0.035 * static_cast<double>(c)}});
+                cl.p = {{0.2 * static_cast<double>(c), 0.0, 0.0}};
+                const auto pc = cl.R.inverse() * (F - cl.p);
+                tr.observations.push_back({c, 0, {{pc[0] / pc[2], pc[1] / pc[2]}}});
+            }
+            const sdk::msckf::CameraUpdater<double> upd({sdk::msckf::CameraExtrinsics<double>{}});
+            Input<double> in;
+            if (!upd.measurement_system(st, tr.observations, F, in.system))
+                throw std::logic_error("s6b bench ladder: feature behind a camera");
+            in.unobservable = s6::unobservable_basis(st);
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_depth_" + std::to_string(static_cast<int>(depth)) + "m",
+                                         encode_input(in),
+                                         "5 yawing clones on a 0.2 m baseline"));
+        }
+        return out;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

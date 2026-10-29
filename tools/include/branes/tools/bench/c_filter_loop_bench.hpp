@@ -631,6 +631,28 @@ struct CFilterLoopBench {
                        encode_output(tape.output));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    /// The final state, and each update's outcome and NIS. No ladder: the
+    /// three fixtures are the filter's own trajectory of conditions.
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        auto g = state_groups(out.state);
+        OutputGroup outcome{"outcome", {}}, nis{"nis", {}, 1.0};
+        for (const auto& u : out.updates) {
+            outcome.values.push_back(u.outcome);
+            nis.values.push_back(u.nis);
+        }
+        g.push_back(outcome);
+        g.push_back(nis);
+        return g;
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"ops", "log10_cond_P0"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        return {static_cast<double>(in.ops.size()), log10_cond_sym(in.state.cov.P)};
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;
