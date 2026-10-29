@@ -9,7 +9,9 @@
 
 #include <branes/sdk/vio_estimator.hpp>
 
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <universal/number/posit/posit.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -48,19 +50,27 @@ branes::cv::OwnedImage<std::uint8_t> render(double ox, double oy) {
     return img;
 }
 
-bs::ImuMeasurement<T> level_sample(double t) {
-    bs::ImuMeasurement<T> m;
+template <class S = T>
+bs::ImuMeasurement<S> level_sample(double t) {
+    bs::ImuMeasurement<S> m;
     m.timestamp_s = t;
-    m.angular_velocity = bs::Vec3<T>{{0, 0, 0}};
-    m.linear_acceleration = bs::Vec3<T>{{0, 0, 9.81}};  // at rest, level
+    m.angular_velocity = bs::Vec3<S>{{S{0}, S{0}, S{0}}};
+    m.linear_acceleration = bs::Vec3<S>{{S{0}, S{0}, S{9.81}}};  // at rest, level
     return m;
 }
 
 // A calibrated backend (so pixel→bearing unprojection is sane).
-Estimator make_estimator() {
-    Backend::CameraCalibration cal;
-    cal.intrinsics = Backend::Camera(200.0, 200.0, 120.0, 90.0, 0.0, 0.0, 0.0, 0.0);
-    return Estimator(Backend(std::vector<Backend::CameraCalibration>{cal}));
+template <class S = T>
+bs::VioEstimator<S> make_estimator() {
+    using B = bs::MsckfBackend<S>;
+    typename B::CameraCalibration cal;
+    cal.intrinsics = typename B::Camera(S{200}, S{200}, S{120}, S{90}, S{0}, S{0}, S{0}, S{0});
+    return bs::VioEstimator<S>(B(std::vector<typename B::CameraCalibration>{cal}));
+}
+
+template <class S>
+bool finite(const S& x) {
+    return std::isfinite(static_cast<double>(x));
 }
 
 }  // namespace
@@ -198,4 +208,47 @@ TEST_CASE("S4 forward-backward gate drops tracks that fail the round trip", "[sd
     auto strict = build(1e-9);
     REQUIRE(ids_after_two_frames(off) > 0);      // FB disabled → tracks persist
     REQUIRE(ids_after_two_frames(strict) == 0);  // strict FB → all dropped + re-detected
+}
+
+// Genericity end to end (#449): the same front end → backend run in every
+// arithmetic type the stage benches use. The KLT front end stays IEEE inside by
+// design and hands T-valued observations to a backend that runs entirely in T.
+// Fewer frames than the double run above: posit32 is emulated in software.
+using posit32 = sw::universal::posit<32, 2>;
+TEMPLATE_TEST_CASE(
+    "the estimator runs end to end in every arithmetic type", "[sdk][vio][types]", float, posit32, long double) {
+    using S = TestType;
+    auto est = make_estimator<S>();
+    bs::VioConfig cfg;
+    cfg.max_clones = 5;
+    est.configure(cfg);
+    est.activate();
+
+    double t = 0.0;
+    std::vector<bs::ImuMeasurement<S>> batch;
+    for (int k = 0; k < 80; ++k, t += 0.005)
+        batch.push_back(level_sample<S>(t));
+    est.feed_imu(std::span<const bs::ImuMeasurement<S>>{batch});
+    REQUIRE(est.backend().initialized());
+
+    std::size_t max_clones_seen = 0;
+    for (int f = 0; f < 8; ++f) {
+        std::vector<bs::ImuMeasurement<S>> imus;
+        for (int k = 0; k < 10; ++k, t += 0.005)
+            imus.push_back(level_sample<S>(t));
+        est.feed_imu(std::span<const bs::ImuMeasurement<S>>{imus});
+
+        const auto img = render(1.0 * f, 0.5 * f);
+        est.feed_image(t, img.view());
+
+        REQUIRE(est.num_tracked_features() > 0);
+        REQUIRE(est.current_state().timestamp_s == t);  // the clock stays double
+        REQUIRE(branes::sdk::msckf::is_positive_semidefinite(est.backend().state().covariance()));
+        max_clones_seen = std::max(max_clones_seen, est.backend().state().clones.size());
+        const auto pose = est.current_pose().translation();
+        for (std::size_t i = 0; i < 3; ++i)
+            REQUIRE(finite(pose[i]));
+    }
+    REQUIRE(max_clones_seen > 1);
+    REQUIRE(max_clones_seen <= static_cast<std::size_t>(cfg.max_clones));
 }

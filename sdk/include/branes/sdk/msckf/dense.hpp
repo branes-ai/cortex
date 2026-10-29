@@ -195,16 +195,28 @@ template <math::Scalar T>
 ///
 /// NUMERICAL NOTE (#449). Here `ridge` is a TOLERANCE, not a regularizer: it is
 /// how far below zero an eigenvalue may sit and still count as rounding. A
-/// covariance computed in T has rounding of about ε_T·|P(i,i)| on its
-/// diagonal, so the ridge on each entry is floored at 16 ulps of that entry. A
-/// fixed 1e-9 is below float's rounding on a unit-scale entry and is absorbed
-/// whole (1.0f + 1e-9f == 1.0f), so the check would fail exactly singular PSD
-/// matrices. For double the floor exceeds 1e-9 only on entries above ~2.8e5.
+/// covariance computed in T carries rounding of about ε_T·‖P‖ in every entry,
+/// so an exactly singular P (a clone copied from the pose it duplicates) has
+/// its zero eigenvalue land near −ε_T·‖P‖, not near −ε_T·|P(i,i)|: the error
+/// on a small-variance row comes from the large entries it is coupled to. The
+/// ridge is therefore floored at 16 ulps of ‖P‖, measured by the largest
+/// diagonal entry (‖P‖₂ ≤ trace, and ≥ max diag, for a PSD P). A fixed 1e-9
+/// is below float's rounding on a unit-scale P and is absorbed whole
+/// (1.0f + 1e-9f == 1.0f); a per-entry floor (16·ε_T·|P(i,i)|) is too small
+/// on rows with variance far below ‖P‖, which an end-to-end float run hits
+/// within a few frames (λ_min ≈ −1e-7·‖P‖, with diagonals spread 27×). For
+/// double the floor exceeds 1e-9 only once max diag passes ~2.8e5.
 template <math::Scalar T>
 [[nodiscard]] bool is_positive_semidefinite(const DynMat<T>& a, T ridge = T(1e-9)) {
+    using std::abs;
+    T scale{0};
+    for (std::size_t i = 0; i < a.rows; ++i)
+        if (abs(a(i, i)) > scale)
+            scale = abs(a(i, i));
+    const T r = math::at_least_roundoff(ridge, scale);
     DynMat<T> b = a;
     for (std::size_t i = 0; i < b.rows; ++i)
-        b(i, i) += math::at_least_roundoff(ridge, a(i, i));
+        b(i, i) += r;
     DynMat<T> L;
     return cholesky(b, L);
 }
