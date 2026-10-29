@@ -106,6 +106,11 @@ public:
         nav_.ba = ba;
         nav_.timestamp = t;
     }
+    /// Set the filter clock. `propagate` advances it by T(dt), which a narrow T
+    /// rounds; a driver that holds the double sample times resets it to them.
+    void set_timestamp(double t) noexcept {
+        nav_.timestamp = t;
+    }
 
     /// S10_online_calibration: turn on online extrinsic calibration — append a
     /// calibration block.

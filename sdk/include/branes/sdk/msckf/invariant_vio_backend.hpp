@@ -88,8 +88,10 @@ public:
             return;
         if (have_last_) {
             const double dt = t - last_imu_time_;
-            if (dt > 0.0)
+            if (dt > 0.0) {
                 be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                be_.set_timestamp(t);  // the clock stays the double sample time, not Σ T(dt)
+            }
         }
         last_imu_time_ = t;
         have_last_ = true;
@@ -106,6 +108,7 @@ public:
                 return;
             if (dt > 0.0) {
                 be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                be_.set_timestamp(t);
                 last_imu_time_ = t;
             }
         }

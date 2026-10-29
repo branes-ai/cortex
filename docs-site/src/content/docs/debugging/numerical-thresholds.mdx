@@ -27,7 +27,7 @@ implementation of these stages.
 |---|---|---|---|
 | small-angle hand-off, 1e-5 | `math/lie/so3.hpp`, `sim3.hpp` (θ) | tolerance (a choice between two error sources) | $\max(10^{-5},\ \varepsilon_T^{1/3})$ via `lie::detail::small_angle<T>()` |
 | scale-rate hand-off, 1e-5 | `math/lie/sim3.hpp` (σ integrals) | tolerance, but no single value works | series summed to convergence for $\lvert\sigma\rvert < 1$, closed form above |
-| PSD check slack, 1e-9 | `sdk/msckf/dense.hpp` `is_positive_semidefinite` | tolerance | floored at $16\,\varepsilon_T\,\lvert P_{ii}\rvert$ per entry via `math::at_least_roundoff` |
+| PSD check slack, 1e-9 | `sdk/msckf/dense.hpp` `is_positive_semidefinite` | tolerance | floored at $16\,\varepsilon_T\,\max_i P_{ii}$ (a norm of P) via `math::at_least_roundoff` |
 | up-vector degeneracy, 1e-9 | `sdk/imu_init.hpp` `align_to_world_up` | tolerance on a sine in [0, 1] | floored at $16\,\varepsilon_T$ |
 | alignment ridge, 1e-9 | `sdk/imu_init.hpp` `solve_alignment` | **regularizer** | fixed 1e-9 in every T |
 | gyro-bias ridge, 1e-9 | `sdk/imu_init.hpp` | **regularizer** | fixed 1e-9 in every T |
@@ -283,10 +283,17 @@ Two 1e-9 constants really are tolerances, and they now scale with T through
 `math::at_least_roundoff(nominal, scale)` $= \max(\text{nominal},\ 16\,\varepsilon_T\,\lvert\text{scale}\rvert)$:
 
 - **The PSD check's slack** (`is_positive_semidefinite`). This is how far below zero an
-  eigenvalue may sit and still count as rounding. A covariance computed in T has rounding of about
-  $\varepsilon_T\,\lvert P_{ii}\rvert$ on its diagonal, so the slack is floored per entry. With a
-  fixed 1e-9, float would reject an exactly singular PSD matrix, because $1 + 10^{-9}$ rounds to
-  $1$. A test covers this (`the PSD check keeps its ridge in a coarse type`).
+  eigenvalue may sit and still count as rounding. A covariance computed in T carries rounding of
+  about $\varepsilon_T\,\lVert P\rVert$ in every entry, and an exactly singular P (a clone copied
+  from its pose) has its zero eigenvalue land near $-\varepsilon_T\,\lVert P\rVert$. So the slack
+  is floored at $16\,\varepsilon_T\,\max_i P_{ii}$ on every diagonal entry. With a fixed 1e-9,
+  float would reject an exactly singular PSD matrix, because $1 + 10^{-9}$ rounds to $1$. A floor
+  per entry, $16\,\varepsilon_T\,\lvert P_{ii}\rvert$, was the first fix and was not enough: on a
+  row whose variance is far below $\lVert P\rVert$ the rounding comes from the large entries it is
+  coupled to. An end-to-end float run of the estimator broke it within seven frames
+  ($\lambda_{\min} \approx -10^{-7}\lVert P\rVert$, diagonals spread 27×). Two tests cover this
+  (`the PSD check keeps its ridge in a coarse type`, `the PSD check measures rounding against the
+  norm of P`).
 - **The up-vector degeneracy test** (`align_to_world_up`). This compares $s = \lvert u \times \hat z\rvert$,
   a sine in [0, 1], against 1e-9. In float, $s$ carries about $10^{-7}$ of rounding, so a fixed 1e-9
   would accept rounding noise as a rotation axis.

@@ -230,3 +230,33 @@ TEST_CASE("the PSD check keeps its ridge in a coarse type", "[sdk][msckf][dense]
     b(1, 1) = 0.5f;  // indefinite: still rejected
     REQUIRE_FALSE(ms::is_positive_semidefinite(b));
 }
+
+TEST_CASE("the PSD check measures rounding against the norm of P", "[sdk][msckf][dense][generic]") {
+    // A singular P whose variances are spread 1e4 apart: c = sqrt(ab) exactly
+    // would make it rank one. In T, the off-diagonal carries rounding of about
+    // ε·‖P‖, here a relative 1e-5 on c, i.e. 1e-7 absolute against ‖P‖ = 1. That
+    // pushes λ_min to about −2e-9, below a ridge scaled by the small entry b
+    // (16·ε·b, or the fixed 1e-9), but well inside 16·ε·‖P‖ (#449). A real
+    // indefiniteness, 5 % on c, is still rejected.
+    ms::DynMat<float> a(2, 2);
+    a(0, 0) = 1.0f;
+    a(1, 1) = 1e-4f;
+    a(0, 1) = a(1, 0) = 1e-2f * (1.0f + 1e-5f);
+    REQUIRE(ms::is_positive_semidefinite(a));
+    ms::DynMat<float> b = a;
+    b(0, 1) = b(1, 0) = 1e-2f * 1.05f;
+    REQUIRE_FALSE(ms::is_positive_semidefinite(b));
+}
+
+TEST_CASE("the PSD check rejects a non-finite diagonal", "[sdk][msckf][dense][generic]") {
+    // An infinite variance must not lift a negative one through the shared,
+    // norm-scaled ridge: diag(+inf, -1) is a diverged covariance, not PSD.
+    for (const double bad : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        ms::DynMat<double> a(2, 2);
+        a(0, 0) = bad;
+        a(1, 1) = -1.0;
+        REQUIRE_FALSE(ms::is_positive_semidefinite(a));
+        a(1, 1) = 1.0;
+        REQUIRE_FALSE(ms::is_positive_semidefinite(a));
+    }
+}

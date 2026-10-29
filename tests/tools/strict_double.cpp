@@ -7,6 +7,7 @@
 // composition bench (C_filter_loop) runs the whole estimator — so being generic
 // costs nothing at T = double.
 
+#include <branes/test/synthetic_frames.hpp>
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/s0_sensor_model_bench.hpp>
 #include <branes/tools/bench/s10_online_calibration_bench.hpp>
@@ -108,6 +109,43 @@ TEST_CASE("strict_double is a selectable bench type with double's limits", "[too
     S x(1.0);
     ++x;
     REQUIRE(static_cast<double>(x) == 1.0 + std::numeric_limits<double>::epsilon());
+}
+
+TEST_CASE("strict_double runs the estimator end to end, bit for bit with double", "[tools][generic][vio]") {
+    // The whole VioEstimator (front end and backend) over the synthetic scene,
+    // in double and in strict_double: an implicit T -> double narrowing anywhere
+    // on that path fails to compile here, and the poses must agree to the bit.
+    auto run = []<class T>(std::type_identity<T>) {
+        auto est = branes::test::make_estimator<T>();
+        branes::sdk::VioConfig cfg;
+        cfg.max_clones = 5;
+        est.configure(cfg);
+        est.activate();
+        std::size_t accepted = 0;
+        est.backend().set_update_observer(
+            [&](const auto&, const auto&, const auto&, bool ok, const auto&) { accepted += ok ? 1 : 0; });
+        std::vector<double> out;
+        branes::test::drive_estimator(est, 8, [&](int, double) {
+            const auto pose = est.current_pose();
+            const auto p = pose.translation();
+            for (std::size_t i = 0; i < 3; ++i)
+                out.push_back(static_cast<double>(p[i]));
+            const auto R = pose.rotation().matrix();
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = 0; j < 3; ++j)
+                    out.push_back(static_cast<double>(R(i, j)));
+        });
+        out.push_back(static_cast<double>(accepted));
+        return out;
+    };
+    const auto ref = run(std::type_identity<double>{});
+    const auto got = run(std::type_identity<S>{});
+    REQUIRE(ref.back() > 0.0);  // S6 updates ran
+    REQUIRE(got.size() == ref.size());
+    for (std::size_t i = 0; i < ref.size(); ++i) {
+        INFO("output " << i << ": " << got[i] << " vs " << ref[i]);
+        REQUIRE(same_bits(got[i], ref[i]));
+    }
 }
 
 #endif  // BRANES_BENCH_STRICT_DOUBLE
