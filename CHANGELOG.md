@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.79.5](https://github.com/branes-ai/cortex/compare/v0.79.4...v0.79.5) (2026-10-29)
+
+
+### Bug Fixes
+
+* **sdk:** estimator runs end to end in float, posit32 and long double ([#449](https://github.com/branes-ai/cortex/issues/449)) ([#524](https://github.com/branes-ai/cortex/issues/524)) ([99056c8](https://github.com/branes-ai/cortex/commit/99056c8e987a70b9709f2456d0d815284c82d711))
+
+
+### Documentation
+
+* publish the plans and adrs on the architecture site ([#525](https://github.com/branes-ai/cortex/issues/525)) ([ca7d17a](https://github.com/branes-ai/cortex/commit/ca7d17a8937b75ccbadda1070754453292db1845))
+
 ## [0.79.4](https://github.com/branes-ai/cortex/compare/v0.79.3...v0.79.4) (2026-10-28)
 
 
