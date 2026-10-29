@@ -118,8 +118,12 @@ that vanish in a coarse type. Measured in the benches, they split into two kinds
   for |σ| < 1, accurate to about an ulp in every type. Sim(3) is not on the VIO path. Two more
   tolerances use
   `math::at_least_roundoff(nominal, scale)` = max(nominal, 16·ε_T·|scale|):
-  - the PSD check's ridge, floored at a few ulps of each diagonal entry, so that rounding at float's
-    level is not read as a negative eigenvalue;
+  - the PSD check's ridge, floored at 16 ulps of ‖P‖ (its largest diagonal entry), so that rounding
+    at float's level is not read as a negative eigenvalue. A floor per diagonal entry was not
+    enough: the clone copies make P exactly singular, and rounding puts that zero eigenvalue near
+    −ε·‖P‖, which on a low-variance row is far below ε times its own diagonal. An end-to-end float
+    run hits this within seven frames. The check is a diagnostic (probes and inspectors); no
+    estimation decision reads it;
   - the initializer's up-vector degeneracy test, which compares a sine in [0, 1].
 - **Regularizing ridges stay fixed.** Triangulation's Gauss-Newton ridge and the initializer's
   gyro-bias and velocity ridges guard a zero diagonal, an unexcited unknown. Every bench type
@@ -147,8 +151,36 @@ What stays IEEE by design, outside T:
 |---|---|---|
 | KLT tracker (`cv/klt.hpp`) | double internally, `float` points | an image-domain front end; pixels are the measurement, not the estimate |
 | `VioConfig` | double | a parsed configuration POD (see the configuration discipline); cast to T once when the backend initializes |
-| Timestamps | double | time is an index, not a state; `dt` is cast to T for the propagation step |
+| Timestamps | double | time is an index, not a state; `dt` is cast to T for the propagation step, and the backends then reset the clock to the double sample time, so a narrow T's rounded Σ T(dt) never reaches the reported pose times |
 | `eval/` telemetry (NEES, NIS, innovation statistics) | double | diagnostics accumulate over a whole run; they read the estimate, never feed it |
+
+### End to end in every type (#449)
+
+The C_filter_loop composition runs the whole backend loop (S2 propagation through S9
+marginalization) in each type. The estimator itself, front end and backend together, also runs end
+to end on a synthetic scene whose IMU and images agree: a level body accelerating at 2 m/s² under a
+plane of landmarks 3 m away, projected through the estimator's pinhole camera, so triangulation
+sees parallax and every S6 update passes the gate. The front end stays IEEE inside (see the table
+above) and hands T-valued observations to a backend that runs entirely in T.
+- `tests/sdk/vio_estimator.cpp` runs it in float, `posit<32,2>` and long double. It requires accepted
+  updates, and positions within an absolute 1000·max(ε_T, ε_double) m of the double run (1000 ulps
+  at a 1 m scale; double's ε bounds long double, whose deviation is double's own rounding). Measured
+  over 16 cm: float 1.4e-5 m (bound 1.2e-4), posit32 5.4e-7 m (bound 7.5e-6), long double
+  9.0e-15 m (bound 2.2e-13).
+- `tests/tools/strict_double.cpp` runs it in `strict_double` and requires every pose to match
+  double's bits.
+
+Every invariant passes in every type. Worst |output − double output| on the loop's fixtures:
+
+| Fixture | float | posit32 | long double |
+|---|---|---|---|
+| `known_answer_constant_velocity` | 1.0e-7 | 4.7e-9 | 1.1e-16 |
+| `ground_truth_synthetic_three_frames` | 7.9e-5 | 1.1e-5 | 1.4e-13 |
+| `captured_synthetic_three_frames` | 9.9e-4 | 7.6e-5 | 1.7e-12 |
+
+posit32 lands 7–22× closer to double than float on the loop. It also runs about 1,300× slower than
+float on the three-frame fixtures, because it is emulated in software. S4 (the KLT front end) is the one bench that runs in double only, by the
+design above.
 
 ### The equivalence gate
 
