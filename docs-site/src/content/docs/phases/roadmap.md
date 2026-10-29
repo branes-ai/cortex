@@ -3,7 +3,7 @@ title: Roadmap
 description: The 12-phase plan for Cortex and where the project stands today.
 ---
 
-Cortex is built phase by phase against a 12-phase roadmap (`docs/plan/bootstrap-plan.md`).
+Cortex is built phase by phase against a 12-phase roadmap, the [bootstrap plan](https://branes-ai.github.io/architecture/cortex/plan/bootstrap-plan/).
 Each phase is an epic of single-issue PRs, landed on green CI.
 
 ## Phases
