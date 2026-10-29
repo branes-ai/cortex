@@ -459,14 +459,14 @@ accepted or not.
 | S0 sensor model | 1.4 | 2.7 | 9.8, 1/9 fail | 0.5 | distortion at the image corner; posit32's loss is the pixel coordinates' rounding (hundreds, where its taper leaves fewer bits); posit16's finite-difference Jacobian fails at the corner |
 | S1 initialization | 2.4 | 3.4 | 6.0 | 2.0 | the gravity and bias estimates over the window |
 | S2 propagation | 5.9 | 6.6 | 9.0 | 5.4 | step count: 200 steps cost about 5 bits in every type, 25 steps about 2 |
-| S3 augmentation | 0.0 | 0.0 | 0.8 | 0.0 | none: block copies, exact at κ(P) from 10² to 10¹⁴ |
+| S3 augmentation | 0.0 | 0.0 | 0.8 | 0.0 | none: block copies, exact at κ(P) from 10⁰ to 10¹² |
 | S5 triangulation | 2.9 | 3.7 | 12.0, 2/7 fail | 3.8 | pixel noise at low parallax (noise-free, even 0.25° costs float nothing); posit16 cannot resolve a feature at 1° or less |
 | S6a Jacobians | 9.1 (r) | 8.8 (r) | 9.8 (r) | 9.0 (r) | the residual z − h(x) cancels: its error is ε·\|z\| in every type, 9 bits of the half-pixel floor |
 | S6b null space | 4.1 | 5.0 | 8.1 | 4.0 | depth; posit32 loses more at 64 m, where H_f's entries are far from 1 |
 | S6c compression | 0.0 | 0.0 | 1.8 | 0.0 | none: QR is backward stable |
 | S6d gating | 3.4 | 6.7 | 12.0, 2/6 fail | 6.0 | κ(S), dof; posit16's S is not SPD at 15 rows and up |
 | S6e EKF update | 14.5 | 15.3 | 12.0, 3/7 fail | 13.7 | **κ(S)**: δx loses log₂ κ(S) to log₂ κ(S) + 3 bits in every type |
-| S9 marginalization | 0.0 | 0.0 | 0.0 | 0.0 | none: a gather |
+| S9 marginalization | 0.0 | 0.0 | 1.0 | 0.0 | none: a gather |
 | S10 online calibration | 10.4 | 11.3 | 12.0, 5 flip | 10.6 | the window's updates, as in S6e |
 | C filter loop | 9.5 | 10.6 | 12.0, 3/3 fail, 3 flip | 9.4 | the updates and the propagation, compounded over 54 operations (the run takes 46 min, nearly all of it posit16) |
 
@@ -481,8 +481,9 @@ What the table shows:
 - **The update is the precision-sensitive stage.** S6e loses up to log₂ κ(S) + 3 bits. At σ = 0.05 px,
   κ(S) ≈ 2·10⁴, and that is 14 of a float's 23 bits, and 14 of double's 52. S10 inherits the same loss
   through its updates. A stage type narrower than float would land here first.
-- **Data movement is free.** S3 (augmentation), S9 (marginalization) and S6c (QR compression) lose
-  no bits in any type, at any conditioning on the ladder.
+- **Data movement is free.** S3 (augmentation), S9 (marginalization) and S6c (QR compression) add
+  no error of their own in any type, at any conditioning on the ladder: their stage bits lost are 0.
+  posit16's total of up to 1.8 bits is its rounding of the input.
 - **posit16 is too narrow for the estimator.** It breaks S5, S6d and S6e at ordinary conditioning,
   and flips S10's update decisions. It is usable only for the data-movement stages, and marginally
   for S0 and S1.

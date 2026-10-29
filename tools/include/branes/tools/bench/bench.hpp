@@ -568,6 +568,56 @@ template <class T>
     return std::log10(hi / std::max(lo, std::numeric_limits<double>::epsilon() * hi));
 }
 
+/// log₁₀ of λ_max / λ_min over the nonzero spectrum of a symmetric PSD matrix:
+/// eigenvalues at or below n·ε_double·λ_max are its null space and do not
+/// count. For a Gram matrix HᵀH this is κ(H)² over H's rank, so a Jacobian with
+/// zero columns (states a measurement does not touch) is not reported singular.
+/// NaN for a non-finite or zero matrix.
+[[nodiscard]] inline double log10_cond_range(const sdk::msckf::DynMat<double>& a) {
+    if (a.rows == 0)
+        return std::numeric_limits<double>::quiet_NaN();
+    for (const double x : a.d)
+        if (!std::isfinite(x))
+            return std::numeric_limits<double>::quiet_NaN();
+    const auto ev = inv::la::symmetric_eigenvalues(a);
+    double hi = 0.0;
+    for (const double e : ev)
+        hi = std::max(hi, std::abs(e));
+    if (!(hi > 0.0))
+        return std::numeric_limits<double>::quiet_NaN();
+    const double tol = static_cast<double>(a.rows) * std::numeric_limits<double>::epsilon() * hi;
+    double lo = hi;
+    for (const double e : ev)
+        if (std::abs(e) > tol)
+            lo = std::min(lo, std::abs(e));
+    return std::log10(hi / lo);
+}
+
+/// A dense n × n SPD matrix of condition number exactly 10^log10_cond (up to
+/// rounding): (1 − r)·G/λ_max(G) + r·I with r = 10^−log10_cond and G = B·Bᵀ for
+/// a fixed, rank-deficient B, so λ_max = 1 and λ_min = r. log10_cond = 0 is the
+/// identity. The conditioning ladders build P with it.
+[[nodiscard]] inline sdk::msckf::DynMat<double> spd_of_condition(std::size_t n, double log10_cond) {
+    const std::size_t k = n / 2 + 1;  // rank k < n: G has a null space for every n ≥ 3
+    sdk::msckf::DynMat<double> G(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j <= i; ++j) {
+            double s = 0.0;
+            for (std::size_t c = 0; c < k; ++c)
+                s += std::sin(0.7 * double(i + 1) + 1.3 * double(c + 1)) *
+                     std::sin(0.7 * double(j + 1) + 1.3 * double(c + 1));
+            G(i, j) = G(j, i) = s;
+        }
+    double hi = 0.0;
+    for (const double e : inv::la::symmetric_eigenvalues(G))
+        hi = std::max(hi, std::abs(e));
+    const double r = std::pow(10.0, -log10_cond);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j)
+            G(i, j) = (1.0 - r) * G(i, j) / hi + (i == j ? r : 0.0);
+    return G;
+}
+
 /// A point on a bench's conditioning ladder: an input with no expected output
 /// (the precision mode compares types against double, not against an answer).
 [[nodiscard]] inline NamedFixture

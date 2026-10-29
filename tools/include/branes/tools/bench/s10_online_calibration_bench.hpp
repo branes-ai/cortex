@@ -395,6 +395,11 @@ struct S10OnlineCalibrationBench {
             return d;
         };
         const auto& q = out.R_ic.quaternion();
+        // The calibration block S10's prior added to the fresh state: its own
+        // arithmetic, where P_after on a no-track fixture is only the input's.
+        std::vector<double> block;
+        for (const T& x : out.s10_block)
+            block.push_back(static_cast<double>(x));
         return {
             {"applied", {static_cast<double>(out.applied)}},
             {"R_ic",
@@ -406,6 +411,7 @@ struct S10OnlineCalibrationBench {
              {static_cast<double>(out.p_ic[0]), static_cast<double>(out.p_ic[1]), static_cast<double>(out.p_ic[2])}},
             {"calib_cov", mat(out.calib_cov)},
             {"P_after", mat(out.p_after)},
+            {"s10_block", block},
             {"nis", {out.nis_sum}, 1.0}};
     }
     [[nodiscard]] static std::vector<std::string> conditioning_columns() {

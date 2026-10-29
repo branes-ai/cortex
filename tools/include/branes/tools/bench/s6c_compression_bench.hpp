@@ -201,13 +201,14 @@ struct S6cCompressionBench {
     [[nodiscard]] static std::vector<std::string> conditioning_columns() {
         return {"rows_in", "log10_cond_H"};
     }
-    /// κ of the stacked H over its rank (the smaller Gram matrix): QR
+    /// κ of the stacked H over its rank (the nonzero spectrum of the smaller
+    /// Gram matrix: H has zero columns for the states no track touches). QR
     /// compression is backward stable, so its error should not track it.
     [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
         const auto& H = in.stacked.H;
         const auto Ht = sdk::msckf::transpose(H);
         const auto G = H.rows <= H.cols ? sdk::msckf::mul(H, Ht) : sdk::msckf::mul(Ht, H);
-        return {static_cast<double>(H.rows), 0.5 * log10_cond_sym(G)};
+        return {static_cast<double>(H.rows), 0.5 * log10_cond_range(G)};
     }
     /// 1, 4 and 16 stacked tracks of the six-clone scene.
     [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {

@@ -20,6 +20,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -73,6 +74,32 @@ TEST_CASE("precision: log10 condition number of a symmetric matrix", "[tools][be
     CHECK(bn::log10_cond_sym(a) == Catch::Approx(-std::log10(std::numeric_limits<double>::epsilon())));
     a(0, 0) = kNaN;
     CHECK(std::isnan(bn::log10_cond_sym(a)));
+}
+
+TEST_CASE("precision: condition number over the nonzero spectrum", "[tools][bench][precision]") {
+    // A Gram matrix with a null direction: the range's condition, not the floor.
+    branes::sdk::msckf::DynMat<double> a(3, 3);
+    a(0, 0) = 1.0;
+    a(1, 1) = 1e-3;
+    CHECK(bn::log10_cond_range(a) == Catch::Approx(3.0).margin(1e-9));
+    CHECK(bn::log10_cond_sym(a) == Catch::Approx(-std::log10(std::numeric_limits<double>::epsilon())));
+    a(1, 1) = 0.0;
+    CHECK(bn::log10_cond_range(a) == Catch::Approx(0.0).margin(1e-12));
+    a(0, 0) = 0.0;
+    CHECK(std::isnan(bn::log10_cond_range(a)));
+}
+
+TEST_CASE("precision: the ladder covariance has the condition it is asked for", "[tools][bench][precision]") {
+    for (const double lc : {0.0, 4.0, 8.0, 12.0}) {
+        INFO("log10_cond " << lc);
+        const auto P = bn::spd_of_condition(63, lc);
+        CHECK(bn::log10_cond_sym(P) == Catch::Approx(lc).margin(1e-3));
+    }
+    // 10^0 is the identity.
+    const auto I = bn::spd_of_condition(5, 0.0);
+    for (std::size_t i = 0; i < 5; ++i)
+        for (std::size_t j = 0; j < 5; ++j)
+            CHECK(I(i, j) == (i == j ? 1.0 : 0.0));
 }
 
 TEST_CASE("precision: a quaternion rounded in float decodes in double only as rounded input",
@@ -138,13 +165,18 @@ TEST_CASE("precision: the CSV has one row per fixture, type and output group", "
     const auto rows = bn::precision_rows<Bench>(nf, "shipped", bn::bench_types<Bench>(), {"double", "float"});
     const auto path = std::filesystem::temp_directory_path() / "branes_precision_test" / "S9_precision.csv";
     bn::write_precision_csv(rows, Bench::conditioning_columns(), path);
-    std::ifstream in(path);
-    std::string header, line;
-    std::getline(in, header);
-    CHECK(header.rfind("fixture,kind,variant,type,dim,log10_cond_P,group,eps,abs_err,rel_err,", 0) == 0);
+    std::string header;
     std::size_t n = 0;
-    while (std::getline(in, line))
-        ++n;
+    {
+        // Closed before the cleanup: Windows will not remove an open file.
+        std::ifstream in(path);
+        std::string line;
+        std::getline(in, header);
+        while (std::getline(in, line))
+            ++n;
+    }
+    CHECK(header.rfind("fixture,kind,variant,type,dim,log10_cond_P,group,eps,abs_err,rel_err,", 0) == 0);
     CHECK(n == 2 * 4);
-    std::filesystem::remove_all(path.parent_path());
+    std::error_code ec;
+    std::filesystem::remove_all(path.parent_path(), ec);
 }
