@@ -248,6 +248,46 @@ struct S6dGatingBench {
                        encode_output(run<double>(in, kShipped)));
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return {{"accepted", {static_cast<double>(out.accepted), static_cast<double>(out.valid)}},
+                {"nis", {static_cast<double>(out.nis)}, 1.0}};
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"dof", "log10_cond_S"};
+    }
+    /// κ of the innovation covariance S = H P Hᵀ + σ² I the NIS solves with.
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        const double var = in.options.normalized_sigma * in.options.normalized_sigma;
+        return {static_cast<double>(in.projected.H.rows),
+                log10_cond_sym(s6::innovation(in.state.cov.P, in.projected.H, var))};
+    }
+    /// The sweep's random H at 3, 15 and 60 rows, one consistent residual draw.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const std::size_t k : {3u, 15u, 60u}) {
+            Input<double> in;
+            in.state = s6::State<double>(0.1);
+            const std::size_t n = in.state.dim();
+            in.projected.H = s6::Mat<double>(k, n);
+            for (std::size_t i = 0; i < k; ++i)
+                for (std::size_t j = 0; j < n; ++j)
+                    in.projected.H(i, j) = 0.5 * s6::pseudo_normal(static_cast<std::uint32_t>(1000 + i * n + j));
+            const auto S = s6::innovation(in.state.cov.P, in.projected.H, 1e-4);
+            s6::Mat<double> L;
+            if (!sdk::msckf::cholesky(S, L))
+                throw std::logic_error("s6d bench ladder: S is not SPD");
+            in.projected.r.assign(k, 0.0);
+            for (std::size_t i = 0; i < k; ++i)
+                for (std::size_t c = 0; c <= i; ++c)
+                    in.projected.r[i] += L(i, c) * s6::pseudo_normal(static_cast<std::uint32_t>(c));
+            out.push_back(ladder_fixture(
+                kStage, "ladder_dof_" + std::to_string(k), encode_input(in), "random H, consistent residual"));
+        }
+        return out;
+    }
+
     // ── Characterization sweep ──────────────────────────────────────────────
     [[nodiscard]] static Sweep default_sweep() {
         Sweep sw;

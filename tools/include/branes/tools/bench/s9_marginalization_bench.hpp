@@ -338,6 +338,34 @@ struct S9MarginalizationBench {
         return {static_cast<double>(s.dim()), inv_sub.back().value, static_cast<double>(ev.front()), us};
     }
 
+    // ── Precision characterization (#450) ───────────────────────────────────
+    template <class T>
+    [[nodiscard]] static std::vector<OutputGroup> precision_groups(const Output<T>& out) {
+        return state_groups(out.state);
+    }
+    [[nodiscard]] static std::vector<std::string> conditioning_columns() {
+        return {"dim", "log10_cond_P"};
+    }
+    [[nodiscard]] static std::vector<double> conditioning(const Input<double>& in) {
+        return {static_cast<double>(in.state.dim()), log10_cond_sym(in.state.cov.P)};
+    }
+    /// Remove the oldest of 8 clones from a P of κ = 10^0 … 10^12. S9 is a
+    /// gather, so it adds no rounding: the stage error must be 0 in every type.
+    [[nodiscard]] static std::vector<NamedFixture> precision_fixtures() {
+        std::vector<NamedFixture> out;
+        for (const double lc : {0.0, 4.0, 8.0, 12.0}) {
+            State<double> s(0.1);
+            for (std::size_t c = 0; c < 8; ++c)
+                s.clones.push_back({{}, {{0.3 * double(c), 0.0, 0.0}}, double(c)});
+            s.cov.P = spd_of_condition(s.dim(), lc);
+            out.push_back(ladder_fixture(kStage,
+                                         "ladder_log10_cond_" + std::to_string(static_cast<int>(lc)),
+                                         encode_input(Input<double>{s, 0}),
+                                         "8 clones, P of condition 10^" + std::to_string(static_cast<int>(lc))));
+        }
+        return out;
+    }
+
 private:
     template <class T>
     [[nodiscard]] static std::vector<std::size_t> keep_of(const State<T>& s, std::size_t idx) {
@@ -349,8 +377,10 @@ private:
         return keep;
     }
 
-    /// A dense SPD matrix B·Bᵀ + 10^(−log10_cond)·I with B (n × n/2) fixed and
-    /// rank-deficient, so the condition number is ~10^log10_cond.
+    /// A dense SPD matrix B·Bᵀ + 0.01·10^(−log10_cond)·I with B (n × n/2) fixed
+    /// and rank-deficient. λ_max(B·Bᵀ) is not 1, so the condition number is
+    /// above 10^log10_cond (about 10^(log10_cond + 2.7) at 8 clones); the
+    /// precision ladder uses spd_of_condition, which is exact.
     [[nodiscard]] static sdk::msckf::DynMat<double> correlated_spd(std::size_t n, double log10_cond) {
         const std::size_t k = n / 2 + 1;
         sdk::msckf::DynMat<double> B(n, k);
