@@ -554,9 +554,14 @@ without calibration (`tests/sdk/vio_estimator.cpp`).
 | S9 marginalization | 1.9e-9 m |
 | S10 calibration | 3.1e-10 m |
 
-The order matches the bench characterization above. The update is the most sensitive stage and
-propagation the next. The data-movement stages cost about one rounding of the state, and S10 runs
-once.
+The update is the most sensitive stage here, as in the bench characterization above. The other
+stages do not rank as they do in the bench, because the bench measures one call and this run
+measures their effect on the trajectory:
+- **Propagation** comes next because S2 runs once per IMU sample, so its rounding accumulates.
+- **S10** loses about 10 bits per call in the bench, but it runs once, when the state is seeded, so
+  it barely moves the trajectory.
+- **S3 and S0** add no error of their own in the bench, so what they cost here is the rounding of
+  the state into float and back: S3 on every clone, S0 on every observation.
 
 Two more runs complete the picture. With every stage in long double and the state stored in
 double, the run deviates by 1.6e-14 m, double's own rounding. With the state stored in float and
