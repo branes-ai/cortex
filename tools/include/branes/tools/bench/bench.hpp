@@ -58,6 +58,7 @@
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -485,15 +486,20 @@ struct PrecisionRow {
 };
 
 /// ‖y − ref‖∞, the normwise difference. A value non-finite in y but not in
-/// ref, or a shape change, is ∞; one non-finite in both is not a difference.
+/// ref, infinities of opposite sign, or a shape change, is ∞; NaN in both, or
+/// the same infinity in both, is not a difference (the type reproduced the
+/// reference's own failure).
 [[nodiscard]] inline double normwise_abs_err(const std::vector<double>& y, const std::vector<double>& ref) {
     if (y.size() != ref.size())
         return inv::detail::kInf;
     double num = 0.0;
     for (std::size_t i = 0; i < y.size(); ++i) {
         const bool fy = std::isfinite(y[i]), fr = std::isfinite(ref[i]);
-        if (!fy && !fr)
-            continue;
+        if (!fy && !fr) {
+            if (std::isnan(y[i]) == std::isnan(ref[i]) && (std::isnan(y[i]) || y[i] == ref[i]))
+                continue;
+            return inv::detail::kInf;
+        }
         if (fy != fr)
             return inv::detail::kInf;
         num = std::max(num, std::abs(y[i] - ref[i]));
@@ -510,8 +516,11 @@ normwise_rel_err(const std::vector<double>& y, const std::vector<double>& ref, d
     double num = 0.0, den = floor;
     for (std::size_t i = 0; i < y.size(); ++i) {
         const bool fy = std::isfinite(y[i]), fr = std::isfinite(ref[i]);
-        if (!fy && !fr)
-            continue;
+        if (!fy && !fr) {
+            if (std::isnan(y[i]) == std::isnan(ref[i]) && (std::isnan(y[i]) || y[i] == ref[i]))
+                continue;
+            return inv::detail::kInf;
+        }
         if (fy != fr)
             return inv::detail::kInf;
         num = std::max(num, std::abs(y[i] - ref[i]));
@@ -768,6 +777,8 @@ inline void write_precision_csv(const std::vector<PrecisionRow>& rows,
     if (path.has_parent_path())
         std::filesystem::create_directories(path.parent_path());
     std::ofstream out(path);
+    if (!out)
+        throw std::runtime_error("cannot open " + path.string());
     out << "fixture,kind,variant,type";
     for (const auto& c : cond_cols)
         out << ',' << csv_field(c);
@@ -787,6 +798,9 @@ inline void write_precision_csv(const std::vector<PrecisionRow>& rows,
                 << PrecisionRow::bits_lost(se, r.eps) << ',' << r.invariants << ',' << r.failed << ',' << r.worst_margin
                 << ',' << csv_field(r.first_failed) << ',' << csv_field(r.status) << '\n';
         }
+    out.flush();
+    if (!out)
+        throw std::runtime_error("cannot write " + path.string());
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -903,7 +917,9 @@ void run_sweep(const BenchArgs& a, TypeList<Ts...> types) {
 /// built-ins, the bench's conditioning ladder, in every selected type. Writes
 /// `<stage>_precision.csv`. A characterization, so a non-double type breaking
 /// the contract is reported, not failed; returns non-zero only if the double
-/// run itself breaks it, or nothing ran.
+/// run itself breaks it, nothing ran, or the CSV could not be written. double
+/// always runs, whatever `--types` selects: it is the reference the exit
+/// status checks.
 template <class B>
 int precision_main(const BenchArgs& a, std::vector<NamedFixture> fixtures) {
     if constexpr (requires { B::precision_fixtures(); })
@@ -913,13 +929,15 @@ int precision_main(const BenchArgs& a, std::vector<NamedFixture> fixtures) {
     const auto cond_cols = conditioning_columns_of<B>();
     std::vector<PrecisionRow> rows;
     bool ok = true;
-    for (const auto& v : select_variants(B::variants(), a.variant))
+    for (const auto& v : select_variants(B::variants(), a.variant)) {
+        auto types = a.types.empty() ? precision_types_for<B>(v.name) : a.types;
+        if (std::find(types.begin(), types.end(), "double") == types.end())
+            types.insert(types.begin(), "double");
         for (const auto& nf : fixtures) {
             if (nf.fixture.stage != B::kStage)
                 continue;
             try {
-                for (auto& r : precision_rows<B>(
-                         nf, v.name, bench_types<B>(), a.types.empty() ? precision_types_for<B>(v.name) : a.types)) {
+                for (auto& r : precision_rows<B>(nf, v.name, bench_types<B>(), types)) {
                     if (r.type == "double" && (r.status != "ok" || r.failed))
                         ok = false;
                     rows.push_back(std::move(r));
@@ -929,7 +947,13 @@ int precision_main(const BenchArgs& a, std::vector<NamedFixture> fixtures) {
                 ok = false;
             }
         }
-    if (rows.empty()) {
+    }
+    // The double rows are added, not asked for: a --types list none of whose
+    // names ran is still "nothing ran".
+    const bool asked_ran = a.types.empty() || std::any_of(rows.begin(), rows.end(), [&](const PrecisionRow& r) {
+                               return std::find(a.types.begin(), a.types.end(), r.type) != a.types.end();
+                           });
+    if (rows.empty() || !asked_ran) {
         std::cerr << "  " << B::kStage << ": no precision run — check --fixture / --types\n";
         return 1;
     }
@@ -937,7 +961,12 @@ int precision_main(const BenchArgs& a, std::vector<NamedFixture> fixtures) {
     const std::filesystem::path dir =
         a.csv.empty() ? std::filesystem::path("build/stage_benches") / B::kStage : std::filesystem::path(a.csv);
     const auto file = dir / (std::string(B::kStage) + "_precision.csv");
-    write_precision_csv(rows, cond_cols, file);
+    try {
+        write_precision_csv(rows, cond_cols, file);
+    } catch (const std::exception& e) {
+        std::cerr << "  " << B::kStage << ": " << e.what() << '\n';
+        return 1;
+    }
     std::cout << "\n  precision: " << rows.size() << " runs → " << file.string() << '\n';
     std::cout << "\n  " << B::kStage << ": " << (ok ? "double reference PASS" : "DOUBLE REFERENCE FAILURES") << '\n';
     return ok ? 0 : 1;

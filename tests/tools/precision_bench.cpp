@@ -45,6 +45,11 @@ TEST_CASE("precision: normwise relative error and its non-finite cases", "[tools
     CHECK(bn::normwise_rel_err({1.0, 2.0}, {kInf, 2.0}) == kInf);
     // Non-finite in both: not a difference.
     CHECK(bn::normwise_rel_err({kNaN, 2.0}, {kNaN, 2.0}) == 0.0);
+    CHECK(bn::normwise_rel_err({kInf, 2.0}, {kInf, 2.0}) == 0.0);
+    // ... but not opposite infinities, or NaN against an infinity.
+    CHECK(bn::normwise_rel_err({kInf}, {-kInf}) == kInf);
+    CHECK(bn::normwise_abs_err({kInf}, {-kInf}) == kInf);
+    CHECK(bn::normwise_rel_err({kNaN}, {kInf}) == kInf);
     // A noise floor: a ~0 reference is measured against the floor, not itself.
     CHECK(bn::normwise_rel_err({1e-9}, {1e-15}, 1e-3) == Catch::Approx(1e-6));
     CHECK(bn::normwise_rel_err({3.0}, {2.0}, 1e-3) == Catch::Approx(0.5));  // the floor only floors
