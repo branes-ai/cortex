@@ -209,13 +209,16 @@ template <math::Scalar T>
 template <math::Scalar T>
 [[nodiscard]] bool is_positive_semidefinite(const DynMat<T>& a, T ridge = T(1e-9)) {
     using std::abs;
+    using std::isfinite;
     T scale{0};
     for (std::size_t i = 0; i < a.rows; ++i) {
         // A non-finite diagonal is a diverged covariance, not PSD. It must be
         // rejected here: an infinite entry would make the shared ridge infinite
         // and lift every other diagonal, a negative one included, to +inf.
-        // (x − x is 0 only for finite x, in every T: NaN or NaR for ±inf/NaN.)
-        if (!(a(i, i) - a(i, i) == T{0}))
+        // Classified, not computed (x − x would raise FE_INVALID on ±inf, and
+        // throw on a posit NaR when Universal's arithmetic exceptions are on);
+        // unqualified, so a Universal type's own isfinite is found by ADL.
+        if (!isfinite(a(i, i)))
             return false;
         if (abs(a(i, i)) > scale)
             scale = abs(a(i, i));

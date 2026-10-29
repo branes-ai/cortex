@@ -163,8 +163,10 @@ plane of landmarks 3 m away, projected through the estimator's pinhole camera, s
 sees parallax and every S6 update passes the gate. The front end stays IEEE inside (see the table
 above) and hands T-valued observations to a backend that runs entirely in T.
 - `tests/sdk/vio_estimator.cpp` runs it in float, `posit<32,2>` and long double. It requires accepted
-  updates, and positions within 1000 ulps of the double run. Measured over 16 cm: float 1.4e-5 m,
-  posit32 5.4e-7 m, long double 9.0e-15 m.
+  updates, and positions within an absolute 1000·max(ε_T, ε_double) m of the double run (1000 ulps
+  at a 1 m scale; double's ε bounds long double, whose deviation is double's own rounding). Measured
+  over 16 cm: float 1.4e-5 m (bound 1.2e-4), posit32 5.4e-7 m (bound 7.5e-6), long double
+  9.0e-15 m (bound 2.2e-13).
 - `tests/tools/strict_double.cpp` runs it in `strict_double` and requires every pose to match
   double's bits.
 

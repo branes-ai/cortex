@@ -246,12 +246,17 @@ TEMPLATE_TEST_CASE(
         const double err = std::hypot(static_cast<double>(pose[0]) - r[0],
                                       static_cast<double>(pose[1]) - r[1],
                                       static_cast<double>(pose[2]) - r[2]);
+        REQUIRE(std::isfinite(err));  // a NaN would slip past std::max
         worst = std::max(worst, err);
     });
     // Each type tracks the double run to within its own rounding, amplified by
-    // the filter: 1000 ulps of the type (or of double, for the wider long
-    // double), against a 16 cm trajectory. Measured: float 1.4e-5 m, posit32
-    // 5.4e-7 m, long double 9.0e-15 m.
+    // the filter. The bound is absolute: 1000·max(ε_T, ε_double) metres, i.e.
+    // 1000 ulps at the scene's 1 m unit, not ulps of each position. Positions
+    // start at 0, and the error does not scale with them: it comes from rounding
+    // in the covariance and gain, carried through the updates. max(·, ε_double)
+    // is for long double, whose deviation is double's own rounding. Measured
+    // over the 16 cm trajectory: float 1.4e-5 m (bound 1.2e-4), posit32 5.4e-7 m
+    // (bound 7.5e-6), long double 9.0e-15 m (bound 2.2e-13).
     const double eps =
         std::max(static_cast<double>(std::numeric_limits<S>::epsilon()), std::numeric_limits<double>::epsilon());
     INFO("worst |p - p_double| " << worst << " m");
