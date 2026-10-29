@@ -67,6 +67,22 @@ jobs:
           echo "Checking $(echo "$files" | wc -l) files."
           echo "$files" | xargs clang-format --dry-run --Werror
 
+  # The plans and ADRs (docs/plan/, docs/adr/) are published on the
+  # architecture site (branes-ai/architecture). Its check runs here, strict, so
+  # a plan without a status, an ADR without a status block, or a broken link
+  # fails this PR rather than the site's hourly build.
+  records:
+    name: Architecture records
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: branes-ai/architecture/actions/check-records@94fe5cd6bd41ae11fca90fe5008c365cbf60d776  # main after architecture#2
+        with:
+          strict: 'true'
+
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
     runs-on: ubuntu-22.04

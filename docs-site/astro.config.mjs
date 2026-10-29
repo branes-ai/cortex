@@ -85,9 +85,10 @@ export default defineConfig({
             { label: 'Layering Invariants', slug: 'architecture/layering' },
             { label: 'The KPU Spacetime Constraint', slug: 'architecture/kpu-spacetime' },
             { label: 'Resource Manager (Rust)', slug: 'architecture/resource-manager' },
+            // The plans and ADRs are published on the architecture site.
             {
-              label: 'Decision Records (ADRs)',
-              link: 'https://github.com/branes-ai/cortex/tree/main/docs/adr',
+              label: 'Plans and decisions',
+              link: 'https://branes-ai.github.io/architecture/cortex/',
               attrs: { target: '_blank' },
             },
           ],

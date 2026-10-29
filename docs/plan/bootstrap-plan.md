@@ -1,6 +1,9 @@
+---
+status: complete
+---
 # `branes-ai/cortex` Bootstrap Plan
 
-**Status:** DRAFT — awaiting review. Edit this file directly. When done, tell Claude "plan is updated" and it will diff against this version before generating GitHub epics + sub-issues.
+**Approved:** 2026-05-21, in [cortex#107](https://github.com/branes-ai/cortex/pull/107); filed as the 12 epics and 94 sub-issues #1–#106
 
 **Source for design decisions referenced below:** [`docs/arch/cortex-repo.md`](../arch/cortex-repo.md).
 
