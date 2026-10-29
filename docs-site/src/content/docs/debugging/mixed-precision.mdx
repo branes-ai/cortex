@@ -17,7 +17,8 @@ import { Aside } from '@astrojs/starlight/components';
   characterization) and [#451](https://github.com/branes-ai/cortex/issues/451) (the MTL5 gap
   register). The benches and the type-scaled invariants they rely on are in place, and every stage
   bench measures the bits it loses in each type (`--precision`, see
-  [below](#per-stage-precision-characterization-450)).
+  [below](#per-stage-precision-characterization-450)). The MSCKF backend can run each stage in
+  its own type ([per-stage types](#per-stage-types-on-the-estimator-450)).
 </Aside>
 
 The same effort that makes every stage observable also puts the pipeline's linear algebra on
@@ -492,6 +493,81 @@ What the table shows:
 
 These measurements choose the per-stage types for the end-to-end EuRoC check, the next step of
 #450.
+
+## Per-stage types on the estimator (#450)
+
+The MSCKF backend stores its state in one type, `T`, and runs each stage in the type a
+**stage-type policy** names for it. The policy is a struct of type aliases, one per stage
+(`sdk/msckf/stage_types.hpp`). `UniformStageTypes<T>` puts every stage in `T`; it is the default,
+and compiles to the single-type backend. A mixed policy derives from it and overrides the stages
+it changes by name:
+
+```cpp
+#include <branes/sdk/vio_estimator.hpp>
+
+namespace ms = branes::sdk::msckf;
+
+// Store the state in float, run the update (S5 → S6e) in double.
+struct UpdateInDouble : ms::UniformStageTypes<float> {
+    using update = double;
+};
+
+using Backend = branes::sdk::MsckfMixedBackend<float, UpdateInDouble>;
+branes::sdk::VioEstimator<float, Backend> estimator(Backend(cameras));
+```
+
+| Alias | Stage | What runs in that type |
+|---|---|---|
+| `sensor_model` | S0 | pixel → normalized image point |
+| `propagation` | S2 | the mean and the covariance, per IMU sample |
+| `augmentation` | S3 | the clone and P' = G P Gᵀ |
+| `update` | S5 → S6e | triangulation, Jacobians, null space, compression, gate, EKF update |
+| `marginalization` | S9 | removal of the oldest clone |
+| `calibration` | S10 | the calibration states added to the fresh state |
+
+S1 (initialization) runs once, in the storage type, and S4 (the front end) hands the backend
+storage-type observations, so neither is in the policy.
+
+A stage in a type other than `T` runs on the state rebound into that type. The result is then
+rounded back to `T` (`sdk/msckf/rebind.hpp`). Each value is rounded to the nearest value of the
+target type. Rotations are renormalized in it, because a unit quaternion in one type is unit only
+to that type's precision. A square-root covariance rebinds its factor, not P. The operators a stage
+consumes (the propagator, the camera updater, the camera model) are rebound once, when the backend
+is configured. Taps and the update observer still see the state in `T`.
+
+Rebinding costs two copies of the state per stage call, O(n²) for P. S2 runs once per IMU sample,
+so a mixed propagation type costs about that much per sample. This is a diagnostic
+configuration, not a fast one.
+
+**Measured on the synthetic drive.** `tests/sdk/stage_types.cpp` runs the estimator on an
+8-frame synthetic drive with online calibration on. In each run one stage is in float and the
+storage and the rest are in double; the table gives the worst position deviation from the
+all-double run. For comparison, the whole estimator in float deviates by 1.4e-5 m on the same scene
+without calibration (`tests/sdk/vio_estimator.cpp`).
+
+| Stage in float | Worst \|p − p_double\| |
+|---|---|
+| S5 → S6e update | 2.4e-5 m |
+| S2 propagation | 9.6e-6 m |
+| S3 augmentation | 2.8e-7 m |
+| S0 sensor model | 9.2e-8 m |
+| S9 marginalization | 1.9e-9 m |
+| S10 calibration | 3.1e-10 m |
+
+The order matches the bench characterization above. The update is the most sensitive stage and
+propagation the next. The data-movement stages cost about one rounding of the state, and S10 runs
+once.
+
+Two more runs complete the picture. With every stage in long double and the state stored in
+double, the run deviates by 1.6e-14 m, double's own rounding. With the state stored in float and
+the update in double, it deviates by 9.1e-6 m.
+
+<Aside type="caution" title="A state is only as PSD as its narrowest stage">
+  Clone augmentation makes P exactly singular. A stage in float leaves those null directions at
+  about −ε_float·‖P‖, even when the state is stored in double. Checking such a state against
+  double's PSD slack (16·ε·max diag) fails, although the filter is fine. Check it at the ε of the
+  narrowest type it passed through, as the test does.
+</Aside>
 
 ## The MTL5 gap register (#451)
 
