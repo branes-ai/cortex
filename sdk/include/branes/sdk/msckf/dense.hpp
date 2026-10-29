@@ -210,9 +210,16 @@ template <math::Scalar T>
 [[nodiscard]] bool is_positive_semidefinite(const DynMat<T>& a, T ridge = T(1e-9)) {
     using std::abs;
     T scale{0};
-    for (std::size_t i = 0; i < a.rows; ++i)
+    for (std::size_t i = 0; i < a.rows; ++i) {
+        // A non-finite diagonal is a diverged covariance, not PSD. It must be
+        // rejected here: an infinite entry would make the shared ridge infinite
+        // and lift every other diagonal, a negative one included, to +inf.
+        // (x − x is 0 only for finite x, in every T: NaN or NaR for ±inf/NaN.)
+        if (!(a(i, i) - a(i, i) == T{0}))
+            return false;
         if (abs(a(i, i)) > scale)
             scale = abs(a(i, i));
+    }
     const T r = math::at_least_roundoff(ridge, scale);
     DynMat<T> b = a;
     for (std::size_t i = 0; i < b.rows; ++i)

@@ -247,3 +247,16 @@ TEST_CASE("the PSD check measures rounding against the norm of P", "[sdk][msckf]
     b(0, 1) = b(1, 0) = 1e-2f * 1.05f;
     REQUIRE_FALSE(ms::is_positive_semidefinite(b));
 }
+
+TEST_CASE("the PSD check rejects a non-finite diagonal", "[sdk][msckf][dense][generic]") {
+    // An infinite variance must not lift a negative one through the shared,
+    // norm-scaled ridge: diag(+inf, -1) is a diverged covariance, not PSD.
+    for (const double bad : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+        ms::DynMat<double> a(2, 2);
+        a(0, 0) = bad;
+        a(1, 1) = -1.0;
+        REQUIRE_FALSE(ms::is_positive_semidefinite(a));
+        a(1, 1) = 1.0;
+        REQUIRE_FALSE(ms::is_positive_semidefinite(a));
+    }
+}

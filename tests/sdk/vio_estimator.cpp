@@ -8,16 +8,19 @@
 // Trajectory accuracy on real EuRoC is the harness's job (#46).
 
 #include <branes/sdk/vio_estimator.hpp>
+#include <branes/test/synthetic_frames.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <universal/number/posit/posit.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -28,44 +31,19 @@ using Backend = bs::MsckfBackend<T>;
 using Estimator = bs::VioEstimator<T>;
 using DVec3 = Backend::DVec3;
 
-constexpr std::size_t kW = 240;
-constexpr std::size_t kH = 180;
-
 // Render bright 8×8 squares on a black background, on a 40px grid, shifted
-// by (ox, oy). The square corners are strong FAST features that KLT can
-// follow across small frame-to-frame translations.
+// by (ox, oy) (tests/include/branes/test/synthetic_frames.hpp).
 branes::cv::OwnedImage<std::uint8_t> render(double ox, double oy) {
-    branes::cv::OwnedImage<std::uint8_t> img(kW, kH, 0);
-    for (std::size_t gy = 40; gy + 12 < kH; gy += 40)
-        for (std::size_t gx = 40; gx + 12 < kW; gx += 40) {
-            const auto x0 = static_cast<long>(gx + ox);
-            const auto y0 = static_cast<long>(gy + oy);
-            for (long dy = 0; dy < 8; ++dy)
-                for (long dx = 0; dx < 8; ++dx) {
-                    const long px = x0 + dx, py = y0 + dy;
-                    if (px >= 0 && py >= 0 && px < static_cast<long>(kW) && py < static_cast<long>(kH))
-                        img(static_cast<std::size_t>(py), static_cast<std::size_t>(px)) = 255;
-                }
-        }
-    return img;
+    return branes::test::render_squares(ox, oy);
 }
 
-template <class S = T>
-bs::ImuMeasurement<S> level_sample(double t) {
-    bs::ImuMeasurement<S> m;
-    m.timestamp_s = t;
-    m.angular_velocity = bs::Vec3<S>{{S{0}, S{0}, S{0}}};
-    m.linear_acceleration = bs::Vec3<S>{{S{0}, S{0}, S{9.81}}};  // at rest, level
-    return m;
+bs::ImuMeasurement<T> level_sample(double t) {
+    return branes::test::level_sample<T>(t);
 }
 
 // A calibrated backend (so pixel→bearing unprojection is sane).
-template <class S = T>
-bs::VioEstimator<S> make_estimator() {
-    using B = bs::MsckfBackend<S>;
-    typename B::CameraCalibration cal;
-    cal.intrinsics = typename B::Camera(S{200}, S{200}, S{120}, S{90}, S{0}, S{0}, S{0}, S{0});
-    return bs::VioEstimator<S>(B(std::vector<typename B::CameraCalibration>{cal}));
+Estimator make_estimator() {
+    return branes::test::make_estimator<T>();
 }
 
 template <class S>
@@ -214,33 +192,49 @@ TEST_CASE("S4 forward-backward gate drops tracks that fail the round trip", "[sd
 // arithmetic type the stage benches use. The KLT front end stays IEEE inside by
 // design and hands T-valued observations to a backend that runs entirely in T.
 // Fewer frames than the double run above: posit32 is emulated in software.
+// strict_double, bit for bit against double, is in tests/tools/strict_double.cpp
+// (it lives in branes::tools, which the SDK tests do not link).
 using posit32 = sw::universal::posit<32, 2>;
+
+// The double run of the same scene, per frame: position (x, y, z).
+const std::vector<std::array<double, 3>>& double_positions() {
+    static const std::vector<std::array<double, 3>> ref = [] {
+        auto est = branes::test::make_estimator<double>();
+        bs::VioConfig cfg;
+        cfg.max_clones = 5;
+        est.configure(cfg);
+        est.activate();
+        std::vector<std::array<double, 3>> out;
+        branes::test::drive_estimator(est, 8, [&](int, double) {
+            const auto p = est.current_pose().translation();
+            out.push_back({p[0], p[1], p[2]});
+        });
+        return out;
+    }();
+    return ref;
+}
+
 TEMPLATE_TEST_CASE(
     "the estimator runs end to end in every arithmetic type", "[sdk][vio][types]", float, posit32, long double) {
     using S = TestType;
-    auto est = make_estimator<S>();
+    auto est = branes::test::make_estimator<S>();
     bs::VioConfig cfg;
     cfg.max_clones = 5;
     est.configure(cfg);
     est.activate();
 
-    double t = 0.0;
-    std::vector<bs::ImuMeasurement<S>> batch;
-    for (int k = 0; k < 80; ++k, t += 0.005)
-        batch.push_back(level_sample<S>(t));
-    est.feed_imu(std::span<const bs::ImuMeasurement<S>>{batch});
-    REQUIRE(est.backend().initialized());
+    // Observations must reach the filter: count the S6 updates the backend runs.
+    std::size_t updates = 0, accepted = 0;
+    est.backend().set_update_observer([&](const auto&, const auto&, const auto&, bool ok, const auto&) {
+        ++updates;
+        accepted += ok ? 1 : 0;
+    });
 
     std::size_t max_clones_seen = 0;
-    for (int f = 0; f < 8; ++f) {
-        std::vector<bs::ImuMeasurement<S>> imus;
-        for (int k = 0; k < 10; ++k, t += 0.005)
-            imus.push_back(level_sample<S>(t));
-        est.feed_imu(std::span<const bs::ImuMeasurement<S>>{imus});
-
-        const auto img = render(1.0 * f, 0.5 * f);
-        est.feed_image(t, img.view());
-
+    double worst = 0.0;
+    const auto& ref = double_positions();
+    branes::test::drive_estimator(est, 8, [&](int f, double t) {
+        REQUIRE(est.backend().initialized());
         REQUIRE(est.num_tracked_features() > 0);
         REQUIRE(est.current_state().timestamp_s == t);  // the clock stays double
         REQUIRE(branes::sdk::msckf::is_positive_semidefinite(est.backend().state().covariance()));
@@ -248,7 +242,22 @@ TEMPLATE_TEST_CASE(
         const auto pose = est.current_pose().translation();
         for (std::size_t i = 0; i < 3; ++i)
             REQUIRE(finite(pose[i]));
-    }
+        const auto& r = ref[static_cast<std::size_t>(f)];
+        const double err = std::hypot(static_cast<double>(pose[0]) - r[0],
+                                      static_cast<double>(pose[1]) - r[1],
+                                      static_cast<double>(pose[2]) - r[2]);
+        worst = std::max(worst, err);
+    });
+    // Each type tracks the double run to within its own rounding, amplified by
+    // the filter: 1000 ulps of the type (or of double, for the wider long
+    // double), against a 16 cm trajectory. Measured: float 1.4e-5 m, posit32
+    // 5.4e-7 m, long double 9.0e-15 m.
+    const double eps =
+        std::max(static_cast<double>(std::numeric_limits<S>::epsilon()), std::numeric_limits<double>::epsilon());
+    INFO("worst |p - p_double| " << worst << " m");
+    REQUIRE(worst <= 1e3 * eps);
     REQUIRE(max_clones_seen > 1);
     REQUIRE(max_clones_seen <= static_cast<std::size_t>(cfg.max_clones));
+    INFO("updates " << updates << ", accepted " << accepted);
+    REQUIRE(accepted > 0);
 }
