@@ -560,8 +560,9 @@ measures their effect on the trajectory:
 - **Propagation** comes next because S2 runs once per IMU sample, so its rounding accumulates.
 - **S10** loses about 10 bits per call in the bench, but it runs once, when the state is seeded, so
   it barely moves the trajectory.
-- **S3 and S0** add no error of their own in the bench, so what they cost here is the rounding of
-  the state into float and back: S3 on every clone, S0 on every observation.
+- **S3** adds no error of its own in the bench, and **S0** about 1.4 bits. What they cost here is
+  mostly the rounding of their inputs into float: the whole state, for S3, on every clone; each
+  observation, for S0.
 
 Two more runs complete the picture. With every stage in long double and the state stored in
 double, the run deviates by 1.6e-14 m, double's own rounding. With the state stored in float and
