@@ -55,7 +55,12 @@ C++ code lives in the `branes::` namespace (`branes::math`, `branes::cv`,
 
 All architectural decisions are in [`docs/adr/`](docs/adr/README.md). Read the
 relevant ADR before changing anything structural. If your change contradicts
-one, amend or supersede the ADR in the same PR.
+one, amend or supersede the ADR in the same PR. The decisions and the plans
+(`docs/plan/`) are published on the
+[architecture site](https://branes-ai.github.io/architecture/cortex/), alongside
+every other repo's plans and decisions and their status; a plan states its
+status in front matter (`status: draft | ready | in-progress | complete`), and
+CI checks both.
 
 ## Clean-room code and the no-GPL policy
 
