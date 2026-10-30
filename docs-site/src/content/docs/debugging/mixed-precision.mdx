@@ -689,6 +689,61 @@ which is PSD by construction, is the remedy that would keep the whole update in 
 measured yet: the square-root backend gives NaN on V1_01 even in double, at frame 108 in the same
 takeoff window ([#533](https://github.com/branes-ai/cortex/issues/533)).
 
+### Three sequences, with NEES
+
+`vio_trajectory_report` takes the same `--stage-types` presets and adds the consistency
+metrics: RPE over 1 s, the 15-dof NEES (position and yaw anchored at the first post-init
+frame), and NIS. The runs below are on EuRoC V1_01 (easy, static start), MH_05 (difficult,
+static start) and V2_03 (difficult, moving start); NEES and NIS are per degree of freedom,
+and "diverged" means P went indefinite (NEES then skips those frames).
+
+```bash
+vio_trajectory_report --dataset .../MH_05_difficult/mav0 --label MH_05 --stage-types float-ekf-double --out DIR
+```
+
+| Preset | V1_01 ATE · NEES · NIS | MH_05 ATE · NEES · NIS | V2_03 ATE · NEES · NIS |
+|---|---|---|---|
+| `double` | 0.289 m · 436 · 1.51 | 0.755 m · 42.8 · 2.16 | 0.269 m · 140 · 14.7 |
+| `long-double` | 0.289 m · 436 · 1.51 | 0.755 m · 42.8 · 2.16 | 0.269 m · 134 · 14.7 |
+| `sensor-model-float` | — | 0.755 m · 42.7 · 2.16 | 0.275 m · 111 · 14.7 |
+| `propagation-float` | — | diverged | 0.269 m · 111 · 14.7 |
+| `augmentation-float` | — | diverged | 0.277 m · 110 · 14.9 |
+| `marginalization-float` | — | diverged | 0.267 m · 187 · 14.9 |
+| `update-float-ekf-double` | 0.263 m · 436 · 1.53 | 1.156 m · 72.5 · 2.02 | 0.303 m · 113 · 14.9 |
+| `ekf-update-float` | 0.345 m · 446 · 1.51 | diverged | 0.281 m · 109 · 14.7 |
+| `update-float` | diverged | diverged | 0.274 m · 111 · 14.9 |
+| `float-ekf-double` | 0.298 m · 437 · 1.52 | diverged | 0.282 m · 109 · 14.9 |
+| `float-update-double` | 0.287 m · 437 · 1.52 | diverged | 0.282 m · 131 · 14.9 |
+| `float` | diverged | diverged | 0.369 m · 114 · 15.0 |
+
+(V1_01's single-stage rows other than the update are in the table above.)
+
+**The rule the three sequences show: a stage that writes P must not run in float.** S2, S3, S9
+and S6e write the covariance; S0 and S5 → S6d only read it. A stage in float runs on the state
+rounded into float, P included, and writes it back, which leaves an absolute error of about
+ε_float·‖P‖. That is harmless until the true small variances fall to that level, which happens
+when a burst of updates collapses P:
+
+- **MH_05** collapses P early: between frames 23 and 80 its largest diagonal drops 0.53 → 0.018
+  and its smallest (a gyro-bias variance) 4·10⁻⁴ → 9·10⁻⁷. With only propagation in float, the
+  first negative variance appears at frame 78. Every stage that writes P fails here, each on
+  its own, at the same point of the run.
+- **V1_01** collapses P less, at takeoff (frame 105), so each P-writing stage survives on its
+  own; S6e fails only together with float triangulation, which lets P grow before takeoff.
+- **V2_03** starts moving, so there is no starved static phase and no collapse: every preset
+  runs, the whole filter in float included (0.369 m).
+
+The stages that only read P run in float on every sequence. With S5 → S6d in float
+(`update-float-ekf-double`) MH_05 costs 0.40 m of ATE (1.156 against 0.755 m) and its NEES
+rises from 42.8 to 72.5, so even the read-only part of the update is not free on the hardest
+sequence.
+
+The NEES column also restates the known over-confidence
+([#212](https://github.com/branes-ai/cortex/issues/212)): 436, 43 and 140 per dof in double,
+where a consistent filter is near 1. Precision does not cause it: long double gives the same
+numbers on V1_01 and MH_05, and 134 against 140 on V2_03. How to keep a float fault from reaching the vehicle — the guards deployed autopilots
+run on P — is in `docs/assessments/covariance-feasibility-safeguards.md`.
+
 ## The MTL5 gap register (#451)
 
 Every operator the pipeline needs that MTL5 doesn't provide is recorded with its pipeline sites, the
