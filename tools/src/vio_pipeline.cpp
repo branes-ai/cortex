@@ -36,13 +36,13 @@
 #include <branes/sdk/eval/synthetic_world.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
 #include <branes/sdk/msckf/invariant_vio_backend.hpp>
-#include <branes/sdk/msckf/stage_types.hpp>
 #include <branes/sdk/msckf_backend.hpp>
 #include <branes/sdk/vio_estimator.hpp>
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/stage_recorder.hpp>
 #include <branes/tools/euroc_cam0.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
+#include <branes/tools/stage_type_presets.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -75,93 +75,15 @@ using branes::sdk::FrontendObservation;
 using branes::sdk::ImuMeasurement;
 using branes::sdk::MsckfMixedBackend;
 using branes::sdk::VioConfig;
+using branes::tools::is_stage_type_preset;
+using branes::tools::kStageTypePresets;
+using branes::tools::with_stage_types;
+namespace stage_types = branes::tools::stage_types;
 
 // EuRoC cam0 calibration: shared with every EuRoC tool (branes/tools/euroc_cam0.hpp)
 // so the MSCKF and R-IEKF runs are driven from byte-identical calibration.
 inline branes::tools::EurocCam0<T> euroc_cam0() {
     return branes::tools::euroc_cam0<T>();
-}
-
-// ── Per-stage arithmetic types (#450) ───────────────────────────────────────
-// --stage-types picks one of these presets for the MSCKF backend. The state is
-// stored in double in every preset, so the front end, the I/O and the metrics
-// are unchanged; a preset names the type each stage computes in. Native types
-// only: an emulated type end to end is ~10^4× slower.
-namespace stage_types {
-using Double = msckf::UniformStageTypes<double>;
-using Float = msckf::UniformStageTypes<float>;
-using LongDouble = msckf::UniformStageTypes<long double>;
-struct SensorModelFloat : Double {
-    using sensor_model = float;
-};
-struct PropagationFloat : Double {
-    using propagation = float;
-};
-struct AugmentationFloat : Double {
-    using augmentation = float;
-};
-struct UpdateFloat : Double {
-    using update = float;
-};
-struct MarginalizationFloat : Double {
-    using marginalization = float;
-};
-struct CalibrationFloat : Double {
-    using calibration = float;
-};
-struct FloatUpdateDouble : Float {
-    using update = double;
-};
-}  // namespace stage_types
-
-struct StageTypePreset {
-    std::string_view name;
-    std::string_view summary;
-};
-// The order matches with_stage_types below.
-constexpr StageTypePreset kStageTypePresets[] = {
-    {"double", "every stage in double (the default)"},
-    {"float", "every stage in float"},
-    {"long-double", "every stage in long double"},
-    {"sensor-model-float", "S0 in float"},
-    {"propagation-float", "S2 in float"},
-    {"augmentation-float", "S3 in float"},
-    {"update-float", "S5 -> S6e in float"},
-    {"marginalization-float", "S9 in float"},
-    {"calibration-float", "S10 in float (runs only with online calibration, off here)"},
-    {"float-update-double", "every stage in float except S5 -> S6e"},
-};
-
-bool is_stage_type_preset(std::string_view name) {
-    for (const auto& p : kStageTypePresets)
-        if (p.name == name)
-            return true;
-    return false;
-}
-
-/// f(std::type_identity<Policy>{}) for the preset `name` (validated by parse).
-template <class F>
-decltype(auto) with_stage_types(std::string_view name, F&& f) {
-    namespace st = stage_types;
-    if (name == "float")
-        return f(std::type_identity<st::Float>{});
-    if (name == "long-double")
-        return f(std::type_identity<st::LongDouble>{});
-    if (name == "sensor-model-float")
-        return f(std::type_identity<st::SensorModelFloat>{});
-    if (name == "propagation-float")
-        return f(std::type_identity<st::PropagationFloat>{});
-    if (name == "augmentation-float")
-        return f(std::type_identity<st::AugmentationFloat>{});
-    if (name == "update-float")
-        return f(std::type_identity<st::UpdateFloat>{});
-    if (name == "marginalization-float")
-        return f(std::type_identity<st::MarginalizationFloat>{});
-    if (name == "calibration-float")
-        return f(std::type_identity<st::CalibrationFloat>{});
-    if (name == "float-update-double")
-        return f(std::type_identity<st::FloatUpdateDouble>{});
-    return f(std::type_identity<st::Double>{});
 }
 
 struct Args {

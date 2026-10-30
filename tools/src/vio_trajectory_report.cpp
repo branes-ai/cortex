@@ -27,6 +27,7 @@
 // JSON writes as null.
 //
 //   ./vio_trajectory_report --dataset .../V1_01_easy/mav0 --label V1_01 --out DIR [--window 10]
+//   ./vio_trajectory_report --dataset ... --stage-types update-float   # stages in other types (#450)
 
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/consistency.hpp>
@@ -36,6 +37,7 @@
 #include <branes/sdk/vio_estimator.hpp>
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/euroc_cam0.hpp>
+#include <branes/tools/stage_type_presets.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -50,6 +52,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -58,14 +61,13 @@ namespace bs = branes::sdk;
 namespace ev = branes::sdk::eval;
 namespace msckf = branes::sdk::msckf;
 using T = double;
-using Backend = bs::MsckfBackend<T>;
-using Estimator = bs::VioEstimator<T, Backend>;
 using SE3 = branes::math::lie::SE3<T>;
 using json = nlohmann::json;
 
 struct Args {
     std::string dataset, label = "sequence", out;
     double window_s = 10.0;
+    std::string stage_types = "double";  ///< a branes::tools::kStageTypePresets name (#450)
     bool help = false;
 };
 
@@ -90,6 +92,10 @@ Args parse(int argc, char** argv) {
             a.window_s = std::stod(next());
             if (!(a.window_s > 0.0))
                 throw std::invalid_argument("--window must be > 0 s");
+        } else if (v == "--stage-types") {
+            a.stage_types = next();
+            if (!branes::tools::is_stage_type_preset(a.stage_types))
+                throw std::invalid_argument("--stage-types: unknown preset '" + a.stage_types + "'");
         } else
             throw std::invalid_argument("unknown flag " + std::string(v));
     }
@@ -159,27 +165,17 @@ json band(const ev::ConsistencyAccumulator& a) {
                 {"verdict", r.consistent() ? "consistent" : (r.overconfident ? "over-confident" : "under-confident")}};
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-    Args args;
-    try {
-        args = parse(argc, argv);
-    } catch (const std::exception& e) {
-        std::cerr << "vio_trajectory_report: " << e.what() << "\n";
-        return 2;
-    }
-    if (args.help || args.dataset.empty()) {
-        std::cout << "usage: vio_trajectory_report --dataset <EuRoC mav0> [--label NAME] [--out DIR] [--window S]\n";
-        return args.help ? 0 : 2;
-    }
-
+/// The report for one run, the MSCKF backend's stages in the types `Stages` names.
+template <msckf::StageTypePolicy Stages>
+int report_run(const Args& args) {
+    using Backend = bs::MsckfMixedBackend<T, Stages>;
+    using Estimator = bs::VioEstimator<T, Backend>;
     const auto cam0 = branes::tools::euroc_cam0<T>();
-    Backend::CameraCalibration cal;
+    typename Backend::CameraCalibration cal;
     cal.intrinsics = cam0.intrinsics;
     cal.extrinsics.R_imu_cam = cam0.R_imu_cam;
     cal.extrinsics.p_imu_cam = cam0.p_imu_cam;
-    Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
+    Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
     UpdateTap tap;
     est.backend().set_stage_tap(&tap);
 
@@ -323,6 +319,7 @@ int main(int argc, char** argv) {
     const double growth = std::isfinite(sigma_first) && sigma_first > 0.0 ? sigma_last / sigma_first : std::nan("");
     json report{{"sequence", args.label},
                 {"dataset", args.dataset},
+                {"stage_types", args.stage_types},
                 {"init_method", std::string(to_string(init.method))},
                 {"frames_tracked", traj.size()},
                 {"frames_with_truth", frames},
@@ -347,7 +344,7 @@ int main(int argc, char** argv) {
     report["nees_per_block"] = blocks;
 
     std::cout << std::setprecision(4) << "  " << args.label << " (init " << report["init_method"].get<std::string>()
-              << ", " << traj.size() << " frames)\n"
+              << ", " << traj.size() << " frames, stage types " << args.stage_types << ")\n"
               << "    ATE " << ate << " m   RPE(1 s) " << rpe << " m\n"
               << "    NEES/dof " << normalized(nees_all) << "  [" << report["nees"].value("verdict", "-")
               << "]   per block:";
@@ -401,4 +398,27 @@ int main(int argc, char** argv) {
         std::cout << "    wrote " << args.out << "/" << args.label << "_{report.json,windows.csv,trajectory.csv}\n";
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    Args args;
+    try {
+        args = parse(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "vio_trajectory_report: " << e.what() << "\n";
+        return 2;
+    }
+    if (args.help || args.dataset.empty()) {
+        std::cout << "usage: vio_trajectory_report --dataset <EuRoC mav0> [--label NAME] [--out DIR] [--window S]\n"
+                     "                             [--stage-types NAME]\n"
+                     "  --stage-types NAME   the type each MSCKF stage computes in (state stored in double):\n";
+        for (const auto& p : branes::tools::kStageTypePresets)
+            std::cout << "                         " << std::left << std::setw(24) << p.name << ' ' << p.summary
+                      << "\n";
+        return args.help ? 0 : 2;
+    }
+    return branes::tools::with_stage_types(args.stage_types,
+                                           [&]<class S>(std::type_identity<S>) { return report_run<S>(args); });
 }
