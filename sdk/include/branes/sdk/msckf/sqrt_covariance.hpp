@@ -123,19 +123,22 @@ struct SqrtCovariance {
     ///   [  0    S  ]  ──QR──▶   [ Kbar  S' ]
     /// gives Re·Reᵀ = H P Hᵀ + R (innovation factor), S'·S'ᵀ = P⁺ (updated
     /// factor), and gain K = Kbar·Re⁻¹. The correction is δx = Kbar·(Re⁻¹ r).
+    /// S may be rectangular (d×c, c < d right after clone augmentation), so the
+    /// pre-array is (k+d)×(k+c) and S' keeps the factor's column count.
     [[nodiscard]] std::vector<T> update(const DynMat<T>& H, std::span<const T> r, std::span<const T> R_diag) {
         const std::size_t d = S.rows;
+        const std::size_t c = S.cols;
         const std::size_t k = H.rows;
-        const DynMat<T> HS = mul(H, S);  // k×d
+        const DynMat<T> HS = mul(H, S);  // k×c
 
-        DynMat<T> pre(k + d, k + d);
+        DynMat<T> pre(k + d, k + c);
         for (std::size_t i = 0; i < k; ++i) {
             pre(i, i) = math::lie::detail::sqrt_(R_diag[i]);  // √R (diagonal)
-            for (std::size_t j = 0; j < d; ++j)
+            for (std::size_t j = 0; j < c; ++j)
                 pre(i, k + j) = HS(i, j);  // H S
         }
         for (std::size_t i = 0; i < d; ++i)
-            for (std::size_t j = 0; j < d; ++j)
+            for (std::size_t j = 0; j < c; ++j)
                 pre(k + i, k + j) = S(i, j);  // S
 
         // LQ(pre) = (QR(preᵀ))ᵀ → block-lower-triangular post.
@@ -155,11 +158,13 @@ struct SqrtCovariance {
         if (sqrt_detail::forward_solve(post, k, y) < k)
             return std::vector<T>(d, T{0});  // singular innovation ⇒ no-op
 
-        // Commit the updated factor S' = post[k:, k:] and form the correction
-        // δx = Kbar y (Kbar = post[k:, 0:k]) now that the solve has succeeded.
-        DynMat<T> Sn(d, d);
+        // Commit the updated factor S' = post[k:, k:] (d × min(c, d)) and form
+        // the correction δx = Kbar y (Kbar = post[k:, 0:k]) now that the solve
+        // has succeeded.
+        const std::size_t cn = post.cols - k;
+        DynMat<T> Sn(d, cn);
         for (std::size_t i = 0; i < d; ++i)
-            for (std::size_t j = 0; j < d; ++j)
+            for (std::size_t j = 0; j < cn; ++j)
                 Sn(i, j) = post(k + i, k + j);
         // Each δx(i) is 0 + Kbar(i,0)·y(0) + Kbar(i,1)·y(1) + … in ascending j,
         // MTL5's generic product, which is the order of the loop it replaced.
