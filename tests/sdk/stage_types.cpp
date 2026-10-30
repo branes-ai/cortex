@@ -19,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -322,14 +323,80 @@ TEMPLATE_TEST_CASE("stage types: the EKF update in its own type",
     CHECK(worst <= 1e3 * kEpsF);  // no worse than the whole update in float
 }
 
+namespace {
+
+// Replays every applied update from its `before` state, S5 -> S6d in `Prep` and
+// S6e in `Ekf`, the way the split backend composes them, and compares with the
+// backend's `after` bit for bit.
+template <class Prep, class Ekf>
+struct SplitReplay final : ms::StageTap<double, ms::FullCovariance<double>> {
+    std::size_t applied = 0, identical = 0;
+    [[nodiscard]] bool wants(ms::TapStage s) const override {
+        return s == ms::TapStage::S6_msckf_update;
+    }
+    void on_s6(const St& before,
+               const ms::CameraUpdater<double>& upd,
+               std::uint64_t,
+               const ms::FeatureTrack<double>& track,
+               const ms::stages::s6_msckf_update::Diagnostics<double>& d,
+               const St& after) override {
+        if (!d.accepted())
+            return;
+        ++applied;
+        namespace s6 = ms::stages;
+        const auto prep = [&] {
+            if constexpr (std::is_same_v<Prep, double>)
+                return s6::s6_msckf_update::prepare(before, upd, track);
+            else
+                return s6::s6_msckf_update::prepare(
+                    ms::rebind<Prep>(before), ms::rebind<Prep>(upd), ms::rebind<Prep>(track));
+        }();
+        if (!prep.ready)
+            return;
+        const auto m = ms::rebind<Ekf>(prep.measurement);
+        St out = before;
+        if constexpr (std::is_same_v<Ekf, double>) {
+            (void)s6::s6e_ekf_update::apply(out, upd, m);
+        } else {
+            auto su = ms::rebind<Ekf>(before);
+            (void)s6::s6e_ekf_update::apply(su, ms::rebind<Ekf>(upd), m);
+            out = ms::rebind<double>(su);
+        }
+        identical += out.covariance().d == after.covariance().d && out.p[0] == after.p[0] && out.p[1] == after.p[1] &&
+                     out.p[2] == after.p[2];
+    }
+};
+
+// Drive the split backend with a replay tap that composes the stages in <Prep, Ekf>.
+template <class Policy, class Prep, class Ekf>
+SplitReplay<Prep, Ekf> replay_split() {
+    auto est = branes::test::make_estimator<double, bs::MsckfMixedBackend<double, Policy>>();
+    est.configure(drive_config());
+    est.activate();
+    SplitReplay<Prep, Ekf> tap;
+    est.backend().set_stage_tap(&tap);
+    branes::test::drive_estimator(est, 8, [](int, double) {});
+    return tap;
+}
+
+}  // namespace
+
 TEST_CASE("stage types: ekf_update puts S6e in its own type", "[sdk][msckf][stage_types]") {
-    // Where S6e runs dominates the update's deviation (measured: the whole update
-    // in float 2.4e-5 m, S6e alone in float 4.3e-5, S5 -> S6d in float with S6e in
-    // double 1.2e-7), so the split is visible an order of magnitude apart.
-    const double whole = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6Float>>());
-    const double s6e_float = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6eFloat>>());
-    const double s6e_double = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6FloatS6eDouble>>());
-    INFO("update in float " << whole << " m, S6e in float " << s6e_float << " m, S6e in double " << s6e_double << " m");
-    CHECK(s6e_double < 0.1 * whole);       // S6e did not run in float
-    CHECK(s6e_float > 10.0 * s6e_double);  // and with ekf_update = float it did
+    // Each applied update of the split backend is exactly S5 -> S6d in `update`
+    // then S6e in `ekf_update` — and not the same composition with S6e in the
+    // other type, so the test tells the two placements apart.
+    SECTION("update = float, ekf_update = double") {
+        const auto same = replay_split<S6FloatS6eDouble, float, double>();
+        REQUIRE(same.applied > 0);
+        CHECK(same.identical == same.applied);
+        const auto other = replay_split<S6FloatS6eDouble, float, float>();
+        CHECK(other.identical < other.applied);
+    }
+    SECTION("update = double, ekf_update = float") {
+        const auto same = replay_split<S6eFloat, double, float>();
+        REQUIRE(same.applied > 0);
+        CHECK(same.identical == same.applied);
+        const auto other = replay_split<S6eFloat, double, double>();
+        CHECK(other.identical < other.applied);
+    }
 }
