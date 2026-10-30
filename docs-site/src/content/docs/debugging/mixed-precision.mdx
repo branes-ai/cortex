@@ -572,8 +572,8 @@ the update in double, it deviates by 9.1e-6 m.
   Clone augmentation makes P exactly singular. A stage in float leaves those null directions at
   about −ε_float·‖P‖, even when the state is stored in double. Checking such a state against
   double's PSD slack (16·ε·max diag) fails, although on the short synthetic drive the filter is
-  fine. Check it at the ε of the narrowest type it passed through, as the test does. On a long
-  real run the negative directions are not harmless: see the EuRoC run below.
+  fine. Check it at the ε of the narrowest type it passed through, as the test does. On a real run
+  a float covariance update can do worse than this: see the EuRoC run below.
 </Aside>
 
 ### In the pipeline: `--stage-types`
@@ -619,14 +619,52 @@ see the state in double, so `--capture` and `--live-assert` work with any preset
 | `float` | 128143 m (diverged) | 0.037 |
 
 Every stage but the update runs in float without harm: with all of them in float and the update
-in double, the trajectory moves by less than a centimetre of ATE. The update in float diverges.
-Its position variance P(0,0) is negative by frame 250, and the estimate runs away after that. The
-−ε_float·‖P‖ directions the caution above describes accumulate over thousands of updates instead
-of staying at rounding level. Don't read the shifts of up to 2 cm in the other rows as a gain
-in accuracy: one run on one sequence can't separate them from the run's sensitivity to any
-perturbation. The diagnosis of the float update, and the
-runs on MH_05 and V2_03 with NEES, are the next steps of
-[#450](https://github.com/branes-ai/cortex/issues/450).
+in double, the trajectory moves by less than a centimetre of ATE. Don't read the shifts of up to
+2 cm in the other rows as a gain in accuracy: one run on one sequence can't separate them from the
+run's sensitivity to any perturbation. The update in float diverges.
+
+**Why the float update diverges on V1_01.** A probe tapped every S6 call of the run, replayed it in
+double from the same input state, and swapped one sub-stage at a time into float. Three steps
+lead to the divergence:
+
+1. **Triangulation drops the near-static tracks.** V1_01 starts with the vehicle almost still, and
+   its first ~100 frames carry tracks with 0.03° of parallax. S5's linear system
+   A = Σ(I − d̂d̂ᵀ) then has a smallest eigenvalue of about the parallax angle squared, below
+   float's rounding, and its Cholesky factorization fails (135 of the 226 float failures; the rest
+   fail in the Gauss-Newton refinement that starts from that solve). Over frames 0–110 the float
+   run applies 577 updates where double applies 1196, and P grows to 1.67 where double's is 0.19.
+2. **Takeoff collapses P in a few updates.** At frame 105 one update cuts P's largest diagonal from
+   1.49 to 0.135. The Joseph form (I − KH)P(I − KH)ᵀ + KRKᵀ forms the small posterior entries by
+   cancellation of prior-sized terms, so its error is about ε·‖P_prior‖. In float that is larger
+   than the posterior's small eigenvalues: P comes out indefinite, its most negative eigenvalue
+   −4·10⁻⁵ of its largest. Double, on the same updates, stays at its usual 10⁻¹¹.
+3. **An indefinite P runs away.** At frame 111 a velocity variance goes negative (−1.8·10⁻⁶), and the
+   next update multiplies it by 700. By frame 115 the negative eigenvalues are larger than the
+   positive ones, and the estimate leaves the room.
+
+Each step was checked by counterfactual:
+
+| Update run | ATE |
+|---|---|
+| all in float (`update-float`) | 128911 m |
+| S5 in double, the rest of the update in float | 0.348 m |
+| S6e (the EKF update) in double, the rest in float | 0.256 m |
+| all in float, parallax gate 0.1° (double with the gate: 0.394 m) | 21674 m |
+
+From a healthy state a single float update is accurate. Replayed from the double run's states, the
+float S6e update moves P by 6·10⁻⁷ relative (median; at most 10⁻⁴), and the float gate decides as
+double does on every track. The innovation covariance is well conditioned (κ ≈ 1.01: the
+measurement noise dominates it), so the gain is not the problem. What breaks is the covariance
+update on a large information gain. That is why the parallax gate does not help: it removes the
+float-only rejections, but it starves both runs, P drifts to 540 before takeoff, and the first
+collapse breaks the float update at once.
+
+Two remedies follow. Keeping the update in double is measured to work: `float-update-double`
+does, and so does S6e alone in double (the counterfactual above), which the policy would need a
+separate alias for. A square-root covariance, which is PSD by construction,
+is the remedy that would keep the whole update in float. It is not measured yet: the square-root
+backend gives NaN on V1_01 even in double, which needs fixing first. The runs on MH_05 and V2_03,
+with NEES, are the next steps of [#450](https://github.com/branes-ai/cortex/issues/450).
 
 ## The MTL5 gap register (#451)
 
