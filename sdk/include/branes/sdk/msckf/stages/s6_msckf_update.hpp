@@ -17,7 +17,8 @@
 //   s6e_ekf_update::apply(state, updater, H_c, r_c)   → (state', δx)
 //
 // and s6_msckf_update::apply(state, updater, track), the sequence S5 → S6e for
-// one feature track. Every sub-step reads the state; only S6e mutates it.
+// one feature track. Every sub-step reads the state; only S6e mutates it, so
+// s6_msckf_update::prepare (S5 → S6d) and S6e can run in different types.
 //
 // Header-only, C++20, type-generic.
 
@@ -247,33 +248,56 @@ struct Diagnostics {
     }
 };
 
+/// S5 → S6d for one track, without the update: what S6e needs to apply it.
+/// `ready` means the track passed the gate; the outcome then stays at its
+/// default until S6e runs.
+template <math::Scalar T>
+struct Prepared {
+    Diagnostics<T> diag;
+    ProjectedMeasurement<T> measurement;  ///< the compressed system S6e consumes
+    bool ready = false;
+};
+
+/// S5 → S6d: triangulate, linearize, project, compress and gate one track.
+/// Reads the state only, so it can run in one type and S6e in another.
 template <math::Scalar T, class Cov>
-Diagnostics<T> apply(State<T, Cov>& s, const CameraUpdater<T>& updater, const FeatureTrack<T>& track) {
-    Diagnostics<T> d;
+Prepared<T> prepare(const State<T, Cov>& s, const CameraUpdater<T>& updater, const FeatureTrack<T>& track) {
+    Prepared<T> out;
+    auto& d = out.diag;
     const auto tri = s5_triangulation::apply(s, updater, track);
     if (!tri.ok)
-        return d;
+        return out;
     const auto jac = s6a_jacobians::apply(s, updater, track, tri.p_f);
     if (!jac.ok) {
         d.outcome = Outcome::BehindCamera;
-        return d;
+        return out;
     }
     auto proj = s6b_nullspace_projection::apply(jac.system);
     if (!proj.ok) {
         d.outcome = Outcome::NoNullspace;
-        return d;
+        return out;
     }
-    const auto comp = s6c_compression::apply(std::move(proj.projected));
+    auto comp = s6c_compression::apply(std::move(proj.projected));
     d.rows = comp.rows_out;
     const auto gate = s6d_gating::apply(s, updater, comp.compressed);
     d.nis = gate.nis;
     if (!gate.accepted) {
         d.outcome = Outcome::Gated;
-        return d;
+        return out;
     }
-    (void)s6e_ekf_update::apply(s, updater, comp.compressed);
-    d.outcome = Outcome::Applied;
-    return d;
+    out.measurement = std::move(comp.compressed);
+    out.ready = true;
+    return out;
+}
+
+template <math::Scalar T, class Cov>
+Diagnostics<T> apply(State<T, Cov>& s, const CameraUpdater<T>& updater, const FeatureTrack<T>& track) {
+    auto prep = prepare(s, updater, track);
+    if (!prep.ready)
+        return prep.diag;
+    (void)s6e_ekf_update::apply(s, updater, prep.measurement);
+    prep.diag.outcome = Outcome::Applied;
+    return prep.diag;
 }
 
 }  // namespace s6_msckf_update

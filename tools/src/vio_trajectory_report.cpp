@@ -27,6 +27,7 @@
 // JSON writes as null.
 //
 //   ./vio_trajectory_report --dataset .../V1_01_easy/mav0 --label V1_01 --out DIR [--window 10]
+//   ./vio_trajectory_report --dataset ... --stage-types update-float   # stages in other types (#450)
 
 #include <branes/sdk/euroc/asl_replay.hpp>
 #include <branes/sdk/eval/consistency.hpp>
@@ -36,6 +37,7 @@
 #include <branes/sdk/vio_estimator.hpp>
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/euroc_cam0.hpp>
+#include <branes/tools/stage_type_presets.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -50,6 +52,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -58,14 +61,13 @@ namespace bs = branes::sdk;
 namespace ev = branes::sdk::eval;
 namespace msckf = branes::sdk::msckf;
 using T = double;
-using Backend = bs::MsckfBackend<T>;
-using Estimator = bs::VioEstimator<T, Backend>;
 using SE3 = branes::math::lie::SE3<T>;
 using json = nlohmann::json;
 
 struct Args {
     std::string dataset, label = "sequence", out;
     double window_s = 10.0;
+    std::string stage_types = "double";  ///< a branes::tools::kStageTypePresets name (#450)
     bool help = false;
 };
 
@@ -90,21 +92,28 @@ Args parse(int argc, char** argv) {
             a.window_s = std::stod(next());
             if (!(a.window_s > 0.0))
                 throw std::invalid_argument("--window must be > 0 s");
+        } else if (v == "--stage-types") {
+            a.stage_types = next();
+            if (!branes::tools::is_stage_type_preset(a.stage_types))
+                throw std::invalid_argument("--stage-types: unknown preset '" + a.stage_types + "'");
         } else
             throw std::invalid_argument("unknown flag " + std::string(v));
     }
     return a;
 }
 
-/// Per S6 update: NIS, and the share of its information along the unobservable directions.
+/// Per S6 update: NIS, and the share of its information along the unobservable
+/// directions, measured on H₀ as the backend formed it: in `Stages::update`.
+template <msckf::StageTypePolicy Stages>
 class UpdateTap final : public msckf::StageTap<T, msckf::FullCovariance<T>> {
 public:
+    using St = msckf::State<T, msckf::FullCovariance<T>>;
     struct Sample {
         double t = 0.0;
         double nis = 0.0;
         std::size_t dof = 0;
         bool applied = false;
-        double leak = 0.0;  ///< ‖H₀N̂‖² / ‖H₀‖² (applied updates)
+        double leak = std::nan("");  ///< ‖H₀N̂‖² / ‖H₀‖² (applied updates; NaN if H₀ could not be rebuilt)
     };
     std::vector<Sample> samples;
 
@@ -125,15 +134,31 @@ public:
         s.dof = d.nis.dof;
         s.applied = d.accepted();
         if (s.applied) {
-            // H₀ at the update's linearization point: the shipped S5 → S6b on the state before.
-            namespace st = msckf::stages;
-            const auto tri = st::s5_triangulation::apply(before, upd, track);
-            const auto jac = st::s6a_jacobians::apply(before, upd, track, tri.p_f);
-            const auto proj = st::s6b_nullspace_projection::apply(jac.system);
-            if (tri.ok && jac.ok && proj.ok)
-                s.leak = branes::tools::bench::CFilterLoopBench::unobservable_leak(before, proj.projected);
+            // H₀ at the update's linearization point: the shipped S5 → S6b on the
+            // state before, in the type the backend ran them in.
+            using U = typename Stages::update;
+            if constexpr (std::is_same_v<U, T>)
+                s.leak = leak_of(before, upd, track);
+            else
+                s.leak = leak_of(msckf::rebind<U>(before), msckf::rebind<U>(upd), msckf::rebind<U>(track));
         }
         samples.push_back(s);
+    }
+
+private:
+    template <class S, class Upd, class Track>
+    static double leak_of(const S& before, const Upd& upd, const Track& track) {
+        namespace st = msckf::stages;
+        const auto tri = st::s5_triangulation::apply(before, upd, track);
+        if (!tri.ok)
+            return std::nan("");
+        const auto jac = st::s6a_jacobians::apply(before, upd, track, tri.p_f);
+        if (!jac.ok)
+            return std::nan("");
+        const auto proj = st::s6b_nullspace_projection::apply(jac.system);
+        if (!proj.ok)
+            return std::nan("");
+        return branes::tools::bench::CFilterLoopBench::unobservable_leak(before, proj.projected);
     }
 };
 
@@ -159,28 +184,18 @@ json band(const ev::ConsistencyAccumulator& a) {
                 {"verdict", r.consistent() ? "consistent" : (r.overconfident ? "over-confident" : "under-confident")}};
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-    Args args;
-    try {
-        args = parse(argc, argv);
-    } catch (const std::exception& e) {
-        std::cerr << "vio_trajectory_report: " << e.what() << "\n";
-        return 2;
-    }
-    if (args.help || args.dataset.empty()) {
-        std::cout << "usage: vio_trajectory_report --dataset <EuRoC mav0> [--label NAME] [--out DIR] [--window S]\n";
-        return args.help ? 0 : 2;
-    }
-
+/// The report for one run, the MSCKF backend's stages in the types `Stages` names.
+template <msckf::StageTypePolicy Stages>
+int report_run(const Args& args) {
+    using Backend = bs::MsckfMixedBackend<T, Stages>;
+    using Estimator = bs::VioEstimator<T, Backend>;
     const auto cam0 = branes::tools::euroc_cam0<T>();
-    Backend::CameraCalibration cal;
+    typename Backend::CameraCalibration cal;
     cal.intrinsics = cam0.intrinsics;
     cal.extrinsics.R_imu_cam = cam0.R_imu_cam;
     cal.extrinsics.p_imu_cam = cam0.p_imu_cam;
-    Estimator est(Backend(std::vector<Backend::CameraCalibration>{cal}));
-    UpdateTap tap;
+    Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
+    UpdateTap<Stages> tap;
     est.backend().set_stage_tap(&tap);
 
     std::vector<bs::euroc::GroundTruthState<T>> gt;
@@ -286,7 +301,7 @@ int main(int argc, char** argv) {
     // Updates: NIS, and the share of their information along the unobservable directions.
     ev::ConsistencyAccumulator nis_all;
     double leak_sum = 0.0, leak_max = 0.0;
-    std::size_t applied = 0, leaking = 0;
+    std::size_t applied = 0, leaking = 0, leak_unbuilt = 0;
     std::vector<double> leaks;
     for (const auto& s : tap.samples) {
         if (s.t < t_first)
@@ -296,6 +311,10 @@ int main(int argc, char** argv) {
         w.nis.add(s.nis, static_cast<int>(s.dof));
         if (s.applied) {
             ++applied;
+            if (std::isnan(s.leak)) {  // H₀ could not be rebuilt: no leak to report
+                ++leak_unbuilt;
+                continue;
+            }
             leak_sum += s.leak;
             leak_max = std::max(leak_max, s.leak);
             leaking += s.leak > 1e-6 ? 1 : 0;
@@ -317,12 +336,13 @@ int main(int argc, char** argv) {
         std::nth_element(leaks.begin(), leaks.begin() + static_cast<std::ptrdiff_t>(leaks.size() / 2), leaks.end());
         leak_median = leaks[leaks.size() / 2];
     }
-    const double leak_mean = applied ? leak_sum / static_cast<double>(applied) : std::nan("");
+    const double leak_mean = leaks.empty() ? std::nan("") : leak_sum / static_cast<double>(leaks.size());
 
     const auto& init = est.backend().init_diagnostics();
     const double growth = std::isfinite(sigma_first) && sigma_first > 0.0 ? sigma_last / sigma_first : std::nan("");
     json report{{"sequence", args.label},
                 {"dataset", args.dataset},
+                {"stage_types", args.stage_types},
                 {"init_method", std::string(to_string(init.method))},
                 {"frames_tracked", traj.size()},
                 {"frames_with_truth", frames},
@@ -337,6 +357,7 @@ int main(int argc, char** argv) {
                 {"unobservable_leak_median", leak_median},
                 {"unobservable_leak_max", leak_max},
                 {"updates_with_leak_above_1e-6", leaking},
+                {"updates_leak_not_rebuilt", leak_unbuilt},
                 {"position_sigma_start_m", sigma_first},
                 {"position_sigma_end_m", sigma_last},
                 {"position_sigma_growth", growth},
@@ -347,7 +368,7 @@ int main(int argc, char** argv) {
     report["nees_per_block"] = blocks;
 
     std::cout << std::setprecision(4) << "  " << args.label << " (init " << report["init_method"].get<std::string>()
-              << ", " << traj.size() << " frames)\n"
+              << ", " << traj.size() << " frames, stage types " << args.stage_types << ")\n"
               << "    ATE " << ate << " m   RPE(1 s) " << rpe << " m\n"
               << "    NEES/dof " << normalized(nees_all) << "  [" << report["nees"].value("verdict", "-")
               << "]   per block:";
@@ -356,7 +377,8 @@ int main(int argc, char** argv) {
     std::cout << "\n    NIS/dof " << normalized(nis_all) << "  [" << report["nis"].value("verdict", "-")
               << "]   updates " << applied << "\n    unobservable leak |H0 N|^2/|H0|^2: mean " << leak_mean
               << ", median " << leak_median << ", max " << leak_max << "; above 1e-6 in " << leaking << " of "
-              << applied << " updates\n"
+              << leaks.size() << " updates"
+              << (leak_unbuilt ? " (" + std::to_string(leak_unbuilt) + " not rebuilt)" : std::string()) << "\n"
               << "    position sigma " << sigma_first << " m -> " << sigma_last << " m (x" << growth
               << "); error beyond 3 sigma in " << 100.0 * report["position_error_beyond_3sigma_fraction"].get<double>()
               << " % of frames\n";
@@ -401,4 +423,27 @@ int main(int argc, char** argv) {
         std::cout << "    wrote " << args.out << "/" << args.label << "_{report.json,windows.csv,trajectory.csv}\n";
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    Args args;
+    try {
+        args = parse(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "vio_trajectory_report: " << e.what() << "\n";
+        return 2;
+    }
+    if (args.help || args.dataset.empty()) {
+        std::cout << "usage: vio_trajectory_report --dataset <EuRoC mav0> [--label NAME] [--out DIR] [--window S]\n"
+                     "                             [--stage-types NAME]\n"
+                     "  --stage-types NAME   the type each MSCKF stage computes in (state stored in double):\n";
+        for (const auto& p : branes::tools::kStageTypePresets)
+            std::cout << "                         " << std::left << std::setw(24) << p.name << ' ' << p.summary
+                      << "\n";
+        return args.help ? 0 : 2;
+    }
+    return branes::tools::with_stage_types(args.stage_types,
+                                           [&]<class S>(std::type_identity<S>) { return report_run<S>(args); });
 }

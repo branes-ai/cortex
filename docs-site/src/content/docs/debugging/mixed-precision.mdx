@@ -522,11 +522,28 @@ branes::sdk::VioEstimator<float, Backend> estimator(Backend(cameras));
 | `propagation` | S2 | the mean and the covariance, per IMU sample |
 | `augmentation` | S3 | the clone and P' = G P Gᵀ |
 | `update` | S5 → S6e | triangulation, Jacobians, null space, compression, gate, EKF update |
+| `ekf_update` (optional) | S6e | the EKF update alone; defaults to `update` |
 | `marginalization` | S9 | removal of the oldest clone |
 | `calibration` | S10 | the calibration states added to the fresh state |
 
 S1 (initialization) runs once, in the storage type, and S4 (the front end) hands the backend
 storage-type observations, so neither is in the policy.
+
+`ekf_update` splits S6e — the Kalman gain, the mean correction and the covariance update — off
+the rest of the update. A policy that does not name
+it runs S6e in `update`, so `using update = float;` still puts the whole update in float. With it,
+S5 → S6d run in `update` and S6e in `ekf_update`, on the compressed measurement rounded into that
+type (`s6_msckf_update::prepare` is S5 → S6d without the update). If the innovation covariance
+that passed the gate in `update` does not factor in `ekf_update`, the track is rejected as an
+ill-conditioned innovation. S6e is the step a float update fails at on real data ([below](#in-the-pipeline---stage-types)), which is why it has its own alias:
+
+```cpp
+// The update in float, except S6e (gain, mean and covariance).
+struct UpdateFloatEkfDouble : ms::UniformStageTypes<double> {
+    using update = float;
+    using ekf_update = double;
+};
+```
 
 A stage in a type other than `T` runs on the state rebound into that type. The result is then
 rounded back to `T` (`sdk/msckf/rebind.hpp`). Each value is rounded to the nearest value of the
@@ -571,9 +588,163 @@ the update in double, it deviates by 9.1e-6 m.
 <Aside type="caution" title="A state is only as PSD as its narrowest stage">
   Clone augmentation makes P exactly singular. A stage in float leaves those null directions at
   about −ε_float·‖P‖, even when the state is stored in double. Checking such a state against
-  double's PSD slack (16·ε·max diag) fails, although the filter is fine. Check it at the ε of the
-  narrowest type it passed through, as the test does.
+  double's PSD slack (16·ε·max diag) fails, although on the short synthetic drive the filter is
+  fine. Check it at the ε of the narrowest type it passed through, as the test does. On a real run
+  a float covariance update can do worse than this: see the EuRoC run below.
 </Aside>
+
+### In the pipeline: `--stage-types`
+
+`vio_pipeline` selects a policy by name with `--stage-types NAME`. The state is stored in double
+in every preset, so the front end, the output streams and the metrics are the same code in every
+run; only the stage arithmetic changes. The presets use native types only, because an emulated
+type end to end is about 10⁴× slower.
+
+| Preset | Stages in a type other than double |
+|---|---|
+| `double` | none (the default; identical to a run without the option) |
+| `float` | every stage |
+| `long-double` | every stage, in long double |
+| `sensor-model-float` | S0 |
+| `propagation-float` | S2 |
+| `augmentation-float` | S3 |
+| `update-float` | S5 → S6e |
+| `marginalization-float` | S9 |
+| `calibration-float` | S10, which runs only with online calibration (off in `vio_pipeline`) |
+| `float-update-double` | every stage except S5 → S6e |
+| `ekf-update-float` | S6e only |
+| `update-float-ekf-double` | S5 → S6d |
+| `float-ekf-double` | every stage except S6e |
+
+```bash
+vio_pipeline --source euroc --dataset .../V1_01_easy/mav0 --stage-types update-float --out DIR
+```
+
+`--stage-types` applies to the MSCKF backend; with `--invariant` it is an error. So is a preset
+other than `double` with `--capture` or `--live-assert`: the stage recorder replays each boundary
+in double, so for a stage in another type it would record, or check, a run that did not happen.
+
+**First run, EuRoC V1_01.** Every preset on the 2907 tracked frames of V1_01:
+
+| Preset | ATE | NIS / dof |
+|---|---|---|
+| `double` | 0.2888 m | 1.508 |
+| `long-double` | 0.2888 m | 1.508 |
+| `sensor-model-float` | 0.2887 m | 1.508 |
+| `propagation-float` | 0.2844 m | 1.508 |
+| `augmentation-float` | 0.2671 m | 1.507 |
+| `marginalization-float` | 0.2882 m | 1.508 |
+| `float-update-double` | 0.2866 m | 1.509 |
+| `update-float-ekf-double` | 0.2626 m | 1.528 |
+| `float-ekf-double` | 0.2984 m | 1.519 |
+| `ekf-update-float` | 0.3452 m | 1.500 |
+| `update-float` | 128911 m (diverged) | 0.476 |
+| `float` | 128143 m (diverged) | 0.037 |
+
+Every stage but the update runs in float without harm: with all of them in float and the update
+in double, the trajectory moves by less than a centimetre of ATE. Don't read the shifts of up to
+2 cm in the other rows as a gain in accuracy: one run on one sequence can't separate them from the
+run's sensitivity to any perturbation. The update in float diverges.
+
+**Why the float update diverges on V1_01.** A probe tapped every S6 call of the run, replayed it in
+double from the same input state, and swapped one sub-stage at a time into float. Three steps
+lead to the divergence:
+
+1. **Triangulation drops the near-static tracks.** V1_01 starts with the vehicle almost still, and
+   its first ~100 frames carry tracks with 0.03° of parallax. S5's linear system
+   A = Σ(I − d̂d̂ᵀ) then has a smallest eigenvalue of about the parallax angle squared, below
+   float's rounding, and its Cholesky factorization fails (135 of the 226 float failures; the rest
+   fail in the Gauss-Newton refinement that starts from that solve). Over frames 0–110 the float
+   run applies 577 updates where double applies 1196, and P grows to 1.67 where double's is 0.19.
+2. **Takeoff collapses P in a few updates.** At frame 105 one update cuts P's largest diagonal from
+   1.49 to 0.135. The Joseph form (I − KH)P(I − KH)ᵀ + KRKᵀ forms the small posterior entries by
+   cancellation of prior-sized terms, so its error is about ε·‖P_prior‖. In float that is larger
+   than the posterior's small eigenvalues: P comes out indefinite, its most negative eigenvalue
+   −4·10⁻⁵ of its largest. Double, on the same updates, stays at its usual 10⁻¹¹.
+3. **An indefinite P runs away.** At frame 111 a velocity variance goes negative (−1.8·10⁻⁶), and the
+   next update multiplies it by 700. By frame 115 the negative eigenvalues are larger than the
+   positive ones, and the estimate leaves the room.
+
+Each step was checked by counterfactual:
+
+| Update run | ATE |
+|---|---|
+| all in float (`update-float`) | 128911 m |
+| S5 in double, the rest of the update in float | 0.348 m |
+| S6e (the EKF update) in double, the rest in float | 0.256 m |
+| all in float, parallax gate 0.1° (double with the gate: 0.394 m) | 21674 m |
+
+From a healthy state a single float update is accurate. Replayed from the double run's states, the
+float S6e update moves P by 6·10⁻⁷ relative (median; at most 10⁻⁴), and the float gate decides as
+double does on every track. The innovation covariance is well conditioned (κ ≈ 1.01: the
+measurement noise dominates it), so the gain is not the problem. What breaks is the covariance
+update on a large information gain. That is why the parallax gate does not help: it removes the
+float-only rejections, but it starves both runs, P drifts to 540 before takeoff, and the first
+collapse breaks the float update at once.
+
+Two remedies follow. Keeping S6e, and with it the covariance update, in double is measured to
+work, and it is enough on its own: `float-ekf-double` runs every stage in float except S6e and stays at
+0.298 m, and `update-float-ekf-double` (the counterfactual above, now a preset) at 0.263 m.
+S6e alone in float (`ekf-update-float`) does not diverge either, because double triangulation
+keeps P from growing before takeoff; it takes both halves to diverge. A square-root covariance,
+which is PSD by construction, is the remedy that would keep the whole update in float. It is not
+measured yet: the square-root backend gives NaN on V1_01 even in double, at frame 108 in the same
+takeoff window ([#533](https://github.com/branes-ai/cortex/issues/533)).
+
+### Three sequences, with NEES
+
+`vio_trajectory_report` takes the same `--stage-types` presets and adds the consistency
+metrics: RPE over 1 s, the 15-dof NEES (position and yaw anchored at the first post-init
+frame), and NIS. The runs below are on EuRoC V1_01 (easy, static start), MH_05 (difficult,
+static start) and V2_03 (difficult, moving start); NEES and NIS are per degree of freedom,
+and "diverged" means P went indefinite (NEES then skips those frames).
+
+```bash
+vio_trajectory_report --dataset .../MH_05_difficult/mav0 --label MH_05 --stage-types float-ekf-double --out DIR
+```
+
+| Preset | V1_01 ATE · NEES · NIS | MH_05 ATE · NEES · NIS | V2_03 ATE · NEES · NIS |
+|---|---|---|---|
+| `double` | 0.289 m · 436 · 1.51 | 0.755 m · 42.8 · 2.16 | 0.269 m · 140 · 14.7 |
+| `long-double` | 0.289 m · 436 · 1.51 | 0.755 m · 42.8 · 2.16 | 0.269 m · 134 · 14.7 |
+| `sensor-model-float` | — | 0.755 m · 42.7 · 2.16 | 0.275 m · 111 · 14.7 |
+| `propagation-float` | — | diverged | 0.269 m · 111 · 14.7 |
+| `augmentation-float` | — | diverged | 0.277 m · 110 · 14.9 |
+| `marginalization-float` | — | diverged | 0.267 m · 187 · 14.9 |
+| `update-float-ekf-double` | 0.263 m · 436 · 1.53 | 1.156 m · 72.5 · 2.02 | 0.303 m · 113 · 14.9 |
+| `ekf-update-float` | 0.345 m · 446 · 1.51 | diverged | 0.281 m · 109 · 14.7 |
+| `update-float` | diverged | diverged | 0.274 m · 111 · 14.9 |
+| `float-ekf-double` | 0.298 m · 437 · 1.52 | diverged | 0.282 m · 109 · 14.9 |
+| `float-update-double` | 0.287 m · 437 · 1.52 | diverged | 0.282 m · 131 · 14.9 |
+| `float` | diverged | diverged | 0.369 m · 114 · 15.0 |
+
+(V1_01's single-stage rows other than the update are in the table above.)
+
+**The rule the three sequences show: a stage that writes P must not run in float.** S2, S3, S9
+and S6e write the covariance; S0 and S5 → S6d only read it. A stage in float runs on the state
+rounded into float, P included, and writes it back, which leaves an absolute error of about
+ε_float·‖P‖. That is harmless until the true small variances fall to that level, which happens
+when a burst of updates collapses P:
+
+- **MH_05** collapses P early: between frames 23 and 80 its largest diagonal drops 0.53 → 0.018
+  and its smallest (a gyro-bias variance) 4·10⁻⁴ → 9·10⁻⁷. With only propagation in float, the
+  first negative variance appears at frame 78. Every stage that writes P fails here, each on
+  its own, at the same point of the run.
+- **V1_01** collapses P less, at takeoff (frame 105), so each P-writing stage survives on its
+  own; S6e fails only together with float triangulation, which lets P grow before takeoff.
+- **V2_03** starts moving, so there is no starved static phase and no collapse: every preset
+  runs, the whole filter in float included (0.369 m).
+
+The stages that only read P run in float on every sequence. With S5 → S6d in float
+(`update-float-ekf-double`) MH_05 costs 0.40 m of ATE (1.156 against 0.755 m) and its NEES
+rises from 42.8 to 72.5, so even the read-only part of the update is not free on the hardest
+sequence.
+
+The NEES column also restates the known over-confidence
+([#212](https://github.com/branes-ai/cortex/issues/212)): 436, 43 and 140 per dof in double,
+where a consistent filter is near 1. Precision does not cause it: long double gives the same
+numbers on V1_01 and MH_05, and 134 against 140 on V2_03. How to keep a float fault from reaching the vehicle — the guards deployed autopilots
+run on P — is in `docs/assessments/covariance-feasibility-safeguards.md`.
 
 ## The MTL5 gap register (#451)
 

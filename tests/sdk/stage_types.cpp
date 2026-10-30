@@ -19,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <type_traits>
 #include <vector>
@@ -176,6 +177,19 @@ struct AllLongDouble {
 struct FloatUpdateDouble : ms::UniformStageTypes<float> {
     using update = double;
 };
+// The EKF update (S6e) split off the rest of the update.
+struct S6eFloat : ms::UniformStageTypes<double> {
+    using ekf_update = float;
+};
+struct S6FloatS6eDouble : ms::UniformStageTypes<double> {
+    using update = float;
+    using ekf_update = double;
+};
+// A policy that does not name ekf_update runs S6e in `update`.
+static_assert(std::is_same_v<ms::ekf_update_t<S6Float>, float>);
+static_assert(std::is_same_v<ms::ekf_update_t<ms::UniformStageTypes<double>>, double>);
+static_assert(std::is_same_v<ms::ekf_update_t<S6eFloat>, float>);
+static_assert(std::is_same_v<ms::ekf_update_t<S6FloatS6eDouble>, double>);
 
 bs::VioConfig drive_config() {
     bs::VioConfig cfg;
@@ -193,6 +207,7 @@ double narrowest_eps() {
                      e(typename P::propagation{}),
                      e(typename P::augmentation{}),
                      e(typename P::update{}),
+                     e(ms::ekf_update_t<P>{}),
                      e(typename P::marginalization{}),
                      e(typename P::calibration{})});
 }
@@ -293,4 +308,95 @@ TEST_CASE("stage types: stored in float, the update in double", "[sdk][msckf][st
     CHECK(r.psd);
     CHECK(r.accepted > 0);
     CHECK(worst <= 1e3 * kEpsF);  // measured 9.1e-6 m
+}
+
+TEMPLATE_TEST_CASE("stage types: the EKF update in its own type",
+                   "[sdk][msckf][stage_types]",
+                   S6eFloat,
+                   S6FloatS6eDouble) {
+    const Run r = drive<double, bs::MsckfMixedBackend<double, TestType>>();
+    const double worst = worst_vs_double(r);
+    INFO("worst |p - p_double| " << worst << " m");
+    CHECK(r.psd);
+    CHECK(r.accepted > 0);
+    CHECK(worst > 0.0);           // the split stage ran in float
+    CHECK(worst <= 1e3 * kEpsF);  // no worse than the whole update in float
+}
+
+namespace {
+
+// Replays every applied update from its `before` state, S5 -> S6d in `Prep` and
+// S6e in `Ekf`, the way the split backend composes them, and compares with the
+// backend's `after` bit for bit.
+template <class Prep, class Ekf>
+struct SplitReplay final : ms::StageTap<double, ms::FullCovariance<double>> {
+    std::size_t applied = 0, identical = 0;
+    [[nodiscard]] bool wants(ms::TapStage s) const override {
+        return s == ms::TapStage::S6_msckf_update;
+    }
+    void on_s6(const St& before,
+               const ms::CameraUpdater<double>& upd,
+               std::uint64_t,
+               const ms::FeatureTrack<double>& track,
+               const ms::stages::s6_msckf_update::Diagnostics<double>& d,
+               const St& after) override {
+        if (!d.accepted())
+            return;
+        ++applied;
+        namespace s6 = ms::stages;
+        const auto prep = [&] {
+            if constexpr (std::is_same_v<Prep, double>)
+                return s6::s6_msckf_update::prepare(before, upd, track);
+            else
+                return s6::s6_msckf_update::prepare(
+                    ms::rebind<Prep>(before), ms::rebind<Prep>(upd), ms::rebind<Prep>(track));
+        }();
+        if (!prep.ready)
+            return;
+        const auto m = ms::rebind<Ekf>(prep.measurement);
+        St out = before;
+        if constexpr (std::is_same_v<Ekf, double>) {
+            (void)s6::s6e_ekf_update::apply(out, upd, m);
+        } else {
+            auto su = ms::rebind<Ekf>(before);
+            (void)s6::s6e_ekf_update::apply(su, ms::rebind<Ekf>(upd), m);
+            out = ms::rebind<double>(su);
+        }
+        identical += out.covariance().d == after.covariance().d && out.p[0] == after.p[0] && out.p[1] == after.p[1] &&
+                     out.p[2] == after.p[2];
+    }
+};
+
+// Drive the split backend with a replay tap that composes the stages in <Prep, Ekf>.
+template <class Policy, class Prep, class Ekf>
+SplitReplay<Prep, Ekf> replay_split() {
+    auto est = branes::test::make_estimator<double, bs::MsckfMixedBackend<double, Policy>>();
+    est.configure(drive_config());
+    est.activate();
+    SplitReplay<Prep, Ekf> tap;
+    est.backend().set_stage_tap(&tap);
+    branes::test::drive_estimator(est, 8, [](int, double) {});
+    return tap;
+}
+
+}  // namespace
+
+TEST_CASE("stage types: ekf_update puts S6e in its own type", "[sdk][msckf][stage_types]") {
+    // Each applied update of the split backend is exactly S5 -> S6d in `update`
+    // then S6e in `ekf_update` — and not the same composition with S6e in the
+    // other type, so the test tells the two placements apart.
+    SECTION("update = float, ekf_update = double") {
+        const auto same = replay_split<S6FloatS6eDouble, float, double>();
+        REQUIRE(same.applied > 0);
+        CHECK(same.identical == same.applied);
+        const auto other = replay_split<S6FloatS6eDouble, float, float>();
+        CHECK(other.identical < other.applied);
+    }
+    SECTION("update = double, ekf_update = float") {
+        const auto same = replay_split<S6eFloat, double, float>();
+        REQUIRE(same.applied > 0);
+        CHECK(same.identical == same.applied);
+        const auto other = replay_split<S6eFloat, double, double>();
+        CHECK(other.identical < other.applied);
+    }
 }
