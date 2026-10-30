@@ -58,6 +58,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -319,6 +320,7 @@ private:
     using T2 = typename Stages::propagation;
     using T3 = typename Stages::augmentation;
     using T6 = typename Stages::update;
+    using T6e = msckf::ekf_update_t<Stages>;
     using T9 = typename Stages::marginalization;
     using T10 = typename Stages::calibration;
     template <class U>
@@ -352,6 +354,8 @@ private:
             prop2_ = msckf::rebind<T2>(prop_);
         if constexpr (!kStorage<T6>)
             updater6_.emplace(msckf::rebind<T6>(updater_));
+        if constexpr (!kStorage<T6e> && !std::is_same_v<T6e, T6>)
+            updater6e_.emplace(msckf::rebind<T6e>(updater_));
     }
     [[nodiscard]] const auto& propagator2() const {
         if constexpr (kStorage<T2>)
@@ -365,6 +369,14 @@ private:
         else
             return *updater6_;
     }
+    [[nodiscard]] const auto& updater6e() const {
+        if constexpr (std::is_same_v<T6e, T6>)
+            return updater6();
+        else if constexpr (kStorage<T6e>)
+            return updater_;
+        else
+            return *updater6e_;
+    }
 
     // S3 in its stage type.
     msckf::stages::s3_augmentation::Diagnostics augment(double t) {
@@ -376,9 +388,50 @@ private:
         return in_type<T9>(state_, [idx](auto& s) { return msckf::stages::s9_marginalization::apply(s, idx); });
     }
 
-    // S5 → S6e in its stage type; the diagnostics come back in T.
+    // S5 → S6e in its stage type; the diagnostics come back in T. With a separate
+    // `ekf_update` type, S5 → S6d run in T6 (they only read the state) and S6e
+    // in T6e, on the measurement rebound into it.
     msckf::stages::s6_msckf_update::Diagnostics<T> update(const msckf::FeatureTrack<T>& track) {
-        if constexpr (kStorage<T6>) {
+        namespace s6 = msckf::stages;
+        if constexpr (!std::is_same_v<T6e, T6>) {
+            const auto prep = [&] {
+                if constexpr (kStorage<T6>)
+                    return s6::s6_msckf_update::prepare(state_, updater_, track);
+                else
+                    return s6::s6_msckf_update::prepare(
+                        msckf::rebind<T6>(state_), updater6(), msckf::rebind<T6>(track));
+            }();
+            s6::s6_msckf_update::Diagnostics<T> d{prep.diag.outcome, msckf::rebind<T>(prep.diag.nis), prep.diag.rows};
+            if (!prep.ready)
+                return d;
+            // The gate ran in T6. S6e solves with the innovation covariance in T6e,
+            // so it must factor there too, or the solve has no gain to apply: reject
+            // the track as an ill-conditioned innovation and leave the state as it was.
+            const auto m = msckf::rebind<T6e>(prep.measurement);
+            const auto& ue = updater6e();
+            const auto factors = [&](const auto& s) {
+                using U = T6e;
+                U gamma{0};
+                return s.cov.mahalanobis(m.H, std::span<const U>{m.r}, ue.measurement_variance(), gamma);
+            };
+            if constexpr (kStorage<T6e>) {
+                if (!factors(state_)) {
+                    d.outcome = s6::s6_msckf_update::Outcome::Gated;
+                    return d;
+                }
+                (void)s6::s6e_ekf_update::apply(state_, ue, m);
+            } else {
+                auto su = msckf::rebind<T6e>(state_);
+                if (!factors(su)) {
+                    d.outcome = s6::s6_msckf_update::Outcome::Gated;
+                    return d;
+                }
+                (void)s6::s6e_ekf_update::apply(su, ue, m);
+                state_ = msckf::rebind<T>(su);
+            }
+            d.outcome = s6::s6_msckf_update::Outcome::Applied;
+            return d;
+        } else if constexpr (kStorage<T6>) {
             return msckf::stages::s6_msckf_update::apply(state_, updater_, track);
         } else {
             const auto tu = msckf::rebind<T6>(track);
@@ -721,6 +774,7 @@ private:
     std::vector<math::cameras::PinholeRadtanCamera<T0>> cameras0_;
     msckf::Propagator<T2> prop2_{};
     std::optional<msckf::CameraUpdater<T6>> updater6_;
+    std::optional<msckf::CameraUpdater<T6e>> updater6e_;
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};
     VioConfig config_{};

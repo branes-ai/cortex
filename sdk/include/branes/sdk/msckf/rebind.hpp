@@ -175,6 +175,16 @@ template <math::Scalar U, math::Scalar T>
 }
 
 template <math::Scalar U, math::Scalar T>
+[[nodiscard]] ProjectedMeasurement<U> rebind(const ProjectedMeasurement<T>& m) {
+    ProjectedMeasurement<U> out;
+    out.H = rebind<U>(m.H);
+    out.r.reserve(m.r.size());
+    for (const auto& x : m.r)
+        out.r.push_back(scalar_cast<U>(x));
+    return out;
+}
+
+template <math::Scalar U, math::Scalar T>
 [[nodiscard]] NisSample<U> rebind(const NisSample<T>& n) {
     return {scalar_cast<U>(n.value), n.dof, n.valid, scalar_cast<U>(n.innov_sum)};
 }
