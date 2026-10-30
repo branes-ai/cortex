@@ -149,7 +149,9 @@ Args parse(int argc, char** argv) {
             a.help = true;
         else if (v == "--invariant")
             a.invariant = true;
-        else if (v == "--stage-types" && next_is_value()) {
+        else if (v == "--stage-types") {
+            if (!next_is_value())
+                throw std::invalid_argument("--stage-types needs a preset name (see --help for the list)");
             a.stage_types = argv[++i];
             if (!is_stage_type_preset(a.stage_types))
                 throw std::invalid_argument("--stage-types: unknown preset '" + a.stage_types +
@@ -870,6 +872,13 @@ int main(int argc, char** argv) {
     }
     if (args.invariant && args.stage_types != "double") {
         std::cerr << "vio_pipeline: --stage-types selects MSCKF stage types; it does not apply to --invariant\n";
+        return 2;
+    }
+    // The stage recorder replays and checks each boundary in double, so for a
+    // stage in another type it would describe a run that did not happen.
+    if ((!args.capture_dir.empty() || args.live_assert) && args.stage_types != "double") {
+        std::cerr << "vio_pipeline: --capture and --live-assert replay stages in double; they need --stage-types "
+                     "double\n";
         return 2;
     }
     if ((!args.capture_dir.empty() || args.live_assert) && (args.invariant || args.sweep))

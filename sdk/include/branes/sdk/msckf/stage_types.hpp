@@ -16,8 +16,9 @@
 //   marginalization  S9   removal of a clone
 //   calibration      S10  calibration states added to the fresh state
 //
-// `ekf_update` splits the covariance update off the rest of the update: with it,
-// S5 → S6d run in `update` and S6e in `ekf_update`. A policy that does not name
+// `ekf_update` splits S6e (the Kalman gain, the mean correction and the
+// covariance update) off the rest of the update: with it, S5 → S6d run in
+// `update` and S6e in `ekf_update`. A policy that does not name
 // it runs S6e in `update`, so `using update = float;` puts the whole update in
 // float. S6e is the step a float update fails at on real data (#450,
 // debugging/mixed-precision.mdx), hence its own alias:

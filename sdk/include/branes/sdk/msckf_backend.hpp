@@ -58,6 +58,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -403,8 +404,31 @@ private:
             s6::s6_msckf_update::Diagnostics<T> d{prep.diag.outcome, msckf::rebind<T>(prep.diag.nis), prep.diag.rows};
             if (!prep.ready)
                 return d;
+            // The gate ran in T6. S6e solves with the innovation covariance in T6e,
+            // so it must factor there too, or the solve has no gain to apply: reject
+            // the track as an ill-conditioned innovation and leave the state as it was.
             const auto m = msckf::rebind<T6e>(prep.measurement);
-            (void)in_type<T6e>(state_, [&](auto& s) { return s6::s6e_ekf_update::apply(s, updater6e(), m); });
+            const auto& ue = updater6e();
+            const auto factors = [&](const auto& s) {
+                using U = T6e;
+                U gamma{0};
+                return s.cov.mahalanobis(m.H, std::span<const U>{m.r}, ue.measurement_variance(), gamma);
+            };
+            if constexpr (kStorage<T6e>) {
+                if (!factors(state_)) {
+                    d.outcome = s6::s6_msckf_update::Outcome::Gated;
+                    return d;
+                }
+                (void)s6::s6e_ekf_update::apply(state_, ue, m);
+            } else {
+                auto su = msckf::rebind<T6e>(state_);
+                if (!factors(su)) {
+                    d.outcome = s6::s6_msckf_update::Outcome::Gated;
+                    return d;
+                }
+                (void)s6::s6e_ekf_update::apply(su, ue, m);
+                state_ = msckf::rebind<T>(su);
+            }
             d.outcome = s6::s6_msckf_update::Outcome::Applied;
             return d;
         } else if constexpr (kStorage<T6>) {

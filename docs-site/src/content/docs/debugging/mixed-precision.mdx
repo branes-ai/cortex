@@ -529,14 +529,16 @@ branes::sdk::VioEstimator<float, Backend> estimator(Backend(cameras));
 S1 (initialization) runs once, in the storage type, and S4 (the front end) hands the backend
 storage-type observations, so neither is in the policy.
 
-`ekf_update` splits the covariance update off the rest of the update. A policy that does not name
+`ekf_update` splits S6e — the Kalman gain, the mean correction and the covariance update — off
+the rest of the update. A policy that does not name
 it runs S6e in `update`, so `using update = float;` still puts the whole update in float. With it,
 S5 → S6d run in `update` and S6e in `ekf_update`, on the compressed measurement rounded into that
-type (`s6_msckf_update::prepare` is S5 → S6d without the update). S6e is the step a float update
-fails at on real data ([below](#in-the-pipeline---stage-types)), which is why it has its own alias:
+type (`s6_msckf_update::prepare` is S5 → S6d without the update). If the innovation covariance
+that passed the gate in `update` does not factor in `ekf_update`, the track is rejected as an
+ill-conditioned innovation. S6e is the step a float update fails at on real data ([below](#in-the-pipeline---stage-types)), which is why it has its own alias:
 
 ```cpp
-// The update in float, except the covariance update.
+// The update in float, except S6e (gain, mean and covariance).
 struct UpdateFloatEkfDouble : ms::UniformStageTypes<double> {
     using update = float;
     using ekf_update = double;
@@ -618,9 +620,9 @@ type end to end is about 10⁴× slower.
 vio_pipeline --source euroc --dataset .../V1_01_easy/mav0 --stage-types update-float --out DIR
 ```
 
-`--stage-types` applies to the MSCKF backend; with `--invariant` it is an error. The stage taps
-see the state in double, so `--capture` and `--live-assert` work with any preset, but
-`--live-assert` checks a boundary against double's bench thresholds.
+`--stage-types` applies to the MSCKF backend; with `--invariant` it is an error. So is a preset
+other than `double` with `--capture` or `--live-assert`: the stage recorder replays each boundary
+in double, so for a stage in another type it would record, or check, a run that did not happen.
 
 **First run, EuRoC V1_01.** Every preset on the 2907 tracked frames of V1_01:
 
@@ -680,8 +682,8 @@ update on a large information gain. That is why the parallax gate does not help:
 float-only rejections, but it starves both runs, P drifts to 540 before takeoff, and the first
 collapse breaks the float update at once.
 
-Two remedies follow. Keeping the covariance update in double is measured to work, and it is
-enough on its own: `float-ekf-double` runs every stage in float except S6e and stays at
+Two remedies follow. Keeping S6e, and with it the covariance update, in double is measured to
+work, and it is enough on its own: `float-ekf-double` runs every stage in float except S6e and stays at
 0.298 m, and `update-float-ekf-double` (the counterfactual above, now a preset) at 0.263 m.
 S6e alone in float (`ekf-update-float`) does not diverge either, because double triangulation
 keeps P from growing before takeoff; it takes both halves to diverge. A square-root covariance,

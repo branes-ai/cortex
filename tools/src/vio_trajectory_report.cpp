@@ -102,15 +102,18 @@ Args parse(int argc, char** argv) {
     return a;
 }
 
-/// Per S6 update: NIS, and the share of its information along the unobservable directions.
+/// Per S6 update: NIS, and the share of its information along the unobservable
+/// directions, measured on H₀ as the backend formed it: in `Stages::update`.
+template <msckf::StageTypePolicy Stages>
 class UpdateTap final : public msckf::StageTap<T, msckf::FullCovariance<T>> {
 public:
+    using St = msckf::State<T, msckf::FullCovariance<T>>;
     struct Sample {
         double t = 0.0;
         double nis = 0.0;
         std::size_t dof = 0;
         bool applied = false;
-        double leak = 0.0;  ///< ‖H₀N̂‖² / ‖H₀‖² (applied updates)
+        double leak = std::nan("");  ///< ‖H₀N̂‖² / ‖H₀‖² (applied updates; NaN if H₀ could not be rebuilt)
     };
     std::vector<Sample> samples;
 
@@ -131,15 +134,31 @@ public:
         s.dof = d.nis.dof;
         s.applied = d.accepted();
         if (s.applied) {
-            // H₀ at the update's linearization point: the shipped S5 → S6b on the state before.
-            namespace st = msckf::stages;
-            const auto tri = st::s5_triangulation::apply(before, upd, track);
-            const auto jac = st::s6a_jacobians::apply(before, upd, track, tri.p_f);
-            const auto proj = st::s6b_nullspace_projection::apply(jac.system);
-            if (tri.ok && jac.ok && proj.ok)
-                s.leak = branes::tools::bench::CFilterLoopBench::unobservable_leak(before, proj.projected);
+            // H₀ at the update's linearization point: the shipped S5 → S6b on the
+            // state before, in the type the backend ran them in.
+            using U = typename Stages::update;
+            if constexpr (std::is_same_v<U, T>)
+                s.leak = leak_of(before, upd, track);
+            else
+                s.leak = leak_of(msckf::rebind<U>(before), msckf::rebind<U>(upd), msckf::rebind<U>(track));
         }
         samples.push_back(s);
+    }
+
+private:
+    template <class S, class Upd, class Track>
+    static double leak_of(const S& before, const Upd& upd, const Track& track) {
+        namespace st = msckf::stages;
+        const auto tri = st::s5_triangulation::apply(before, upd, track);
+        if (!tri.ok)
+            return std::nan("");
+        const auto jac = st::s6a_jacobians::apply(before, upd, track, tri.p_f);
+        if (!jac.ok)
+            return std::nan("");
+        const auto proj = st::s6b_nullspace_projection::apply(jac.system);
+        if (!proj.ok)
+            return std::nan("");
+        return branes::tools::bench::CFilterLoopBench::unobservable_leak(before, proj.projected);
     }
 };
 
@@ -176,7 +195,7 @@ int report_run(const Args& args) {
     cal.extrinsics.R_imu_cam = cam0.R_imu_cam;
     cal.extrinsics.p_imu_cam = cam0.p_imu_cam;
     Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
-    UpdateTap tap;
+    UpdateTap<Stages> tap;
     est.backend().set_stage_tap(&tap);
 
     std::vector<bs::euroc::GroundTruthState<T>> gt;
@@ -282,7 +301,7 @@ int report_run(const Args& args) {
     // Updates: NIS, and the share of their information along the unobservable directions.
     ev::ConsistencyAccumulator nis_all;
     double leak_sum = 0.0, leak_max = 0.0;
-    std::size_t applied = 0, leaking = 0;
+    std::size_t applied = 0, leaking = 0, leak_unbuilt = 0;
     std::vector<double> leaks;
     for (const auto& s : tap.samples) {
         if (s.t < t_first)
@@ -292,6 +311,10 @@ int report_run(const Args& args) {
         w.nis.add(s.nis, static_cast<int>(s.dof));
         if (s.applied) {
             ++applied;
+            if (std::isnan(s.leak)) {  // H₀ could not be rebuilt: no leak to report
+                ++leak_unbuilt;
+                continue;
+            }
             leak_sum += s.leak;
             leak_max = std::max(leak_max, s.leak);
             leaking += s.leak > 1e-6 ? 1 : 0;
@@ -313,7 +336,7 @@ int report_run(const Args& args) {
         std::nth_element(leaks.begin(), leaks.begin() + static_cast<std::ptrdiff_t>(leaks.size() / 2), leaks.end());
         leak_median = leaks[leaks.size() / 2];
     }
-    const double leak_mean = applied ? leak_sum / static_cast<double>(applied) : std::nan("");
+    const double leak_mean = leaks.empty() ? std::nan("") : leak_sum / static_cast<double>(leaks.size());
 
     const auto& init = est.backend().init_diagnostics();
     const double growth = std::isfinite(sigma_first) && sigma_first > 0.0 ? sigma_last / sigma_first : std::nan("");
@@ -334,6 +357,7 @@ int report_run(const Args& args) {
                 {"unobservable_leak_median", leak_median},
                 {"unobservable_leak_max", leak_max},
                 {"updates_with_leak_above_1e-6", leaking},
+                {"updates_leak_not_rebuilt", leak_unbuilt},
                 {"position_sigma_start_m", sigma_first},
                 {"position_sigma_end_m", sigma_last},
                 {"position_sigma_growth", growth},
@@ -353,7 +377,8 @@ int report_run(const Args& args) {
     std::cout << "\n    NIS/dof " << normalized(nis_all) << "  [" << report["nis"].value("verdict", "-")
               << "]   updates " << applied << "\n    unobservable leak |H0 N|^2/|H0|^2: mean " << leak_mean
               << ", median " << leak_median << ", max " << leak_max << "; above 1e-6 in " << leaking << " of "
-              << applied << " updates\n"
+              << leaks.size() << " updates"
+              << (leak_unbuilt ? " (" + std::to_string(leak_unbuilt) + " not rebuilt)" : std::string()) << "\n"
               << "    position sigma " << sigma_first << " m -> " << sigma_last << " m (x" << growth
               << "); error beyond 3 sigma in " << 100.0 * report["position_error_beyond_3sigma_fraction"].get<double>()
               << " % of frames\n";

@@ -321,3 +321,15 @@ TEMPLATE_TEST_CASE("stage types: the EKF update in its own type",
     CHECK(worst > 0.0);           // the split stage ran in float
     CHECK(worst <= 1e3 * kEpsF);  // no worse than the whole update in float
 }
+
+TEST_CASE("stage types: ekf_update puts S6e in its own type", "[sdk][msckf][stage_types]") {
+    // Where S6e runs dominates the update's deviation (measured: the whole update
+    // in float 2.4e-5 m, S6e alone in float 4.3e-5, S5 -> S6d in float with S6e in
+    // double 1.2e-7), so the split is visible an order of magnitude apart.
+    const double whole = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6Float>>());
+    const double s6e_float = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6eFloat>>());
+    const double s6e_double = worst_vs_double(drive<double, bs::MsckfMixedBackend<double, S6FloatS6eDouble>>());
+    INFO("update in float " << whole << " m, S6e in float " << s6e_float << " m, S6e in double " << s6e_double << " m");
+    CHECK(s6e_double < 0.1 * whole);       // S6e did not run in float
+    CHECK(s6e_float > 10.0 * s6e_double);  // and with ekf_update = float it did
+}
