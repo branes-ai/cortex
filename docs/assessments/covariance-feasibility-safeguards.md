@@ -192,8 +192,11 @@ indefinite.
      whose smallest eigenvalue lies in [−λ, 0), so λ is the detection limit, and a large
      ridge would hide exactly the failure the test is for. Set the tolerance from the
      narrowest type P has passed through: τ = 16·ε·max diag(P), the slack
-     `is_positive_semidefinite` and the stage-type tests use. Then test P + τI, or an
-     LDLᵀ with a pivot floor of −τ. On V1_01 with the update in float that separates the
+     `is_positive_semidefinite` and the stage-type tests use. Then test P + τI: a Cholesky of the
+     shifted matrix, or an LDLᵀ of it whose inertia (the signs of D, 2×2 blocks
+     included) is checked. Do not apply −τ as a pivot floor to an LDLᵀ of the unshifted
+     P: congruence preserves the signs of the eigenvalues, not their sizes, so a pivot
+     says nothing about how negative an eigenvalue is. On V1_01 with the update in float that separates the
      cases cleanly: before takeoff P is indefinite only at about −10⁻⁷ of its largest
      eigenvalue, well inside 16·ε_float ≈ 2·10⁻⁶, while at frame 105 it is −4·10⁻⁵ and
      the test fires.
