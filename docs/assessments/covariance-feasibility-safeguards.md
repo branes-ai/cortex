@@ -135,7 +135,9 @@ line by line.
 PX4 and ArduPilot do not use a square-root form. They keep float safe by keeping the
 problem small and well scaled:
 - a ~24-state error state;
-- per-state variance bands that bound κ(P);
+- per-state variance bands that bound the scale of each variance (not κ(P): two strongly
+  correlated states can keep their variances in band while P becomes near-singular, so bands
+  do not replace a feasibility check);
 - scalar updates, each a small gain;
 - symbolically generated prediction, with fewer operations and so less rounding;
 - a numerical guard on every fusion.
@@ -181,9 +183,20 @@ indefinite.
    each operation that writes P:
    - check that every value is finite and every diagonal is ≥ 0;
    - check S ≥ R row by row (diag(HPHᵀ) ≥ 0) before an update;
-   - every N frames, factor P with a small ridge to detect indefiniteness before a
-     diagonal goes negative. Frame 105 versus frame 111 on V1_01 shows why the
-     factorization is worth its cost.
+   - every N frames, test P for a negative eigenvalue beyond a stated tolerance, to
+     detect indefiniteness before a diagonal goes negative. Frame 105 versus frame 111
+     on V1_01 shows why the test is worth its cost.
+
+     The tolerance has to be explicit. Clone augmentation makes P exactly singular, so a
+     plain Cholesky of P fails on a healthy filter. A factorization of P + λI passes any P
+     whose smallest eigenvalue lies in [−λ, 0), so λ is the detection limit, and a large
+     ridge would hide exactly the failure the test is for. Set the tolerance from the
+     narrowest type P has passed through: τ = 16·ε·max diag(P), the slack
+     `is_positive_semidefinite` and the stage-type tests use. Then test P + τI, or an
+     LDLᵀ with a pivot floor of −τ. On V1_01 with the update in float that separates the
+     cases cleanly: before takeoff P is indefinite only at about −10⁻⁷ of its largest
+     eigenvalue, well inside 16·ε_float ≈ 2·10⁻⁶, while at frame 105 it is −4·10⁻⁵ and
+     the test fires.
 
    Record faults as bits in a backend status. This is cheap compared with the update.
 3. **Define a recovery ladder with a reset counter.**
