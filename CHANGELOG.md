@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.82.0](https://github.com/branes-ai/cortex/compare/v0.81.0...v0.82.0) (2026-10-30)
+
+
+### Features
+
+* per-stage type presets, a separate ekf update type, euroc nees runs ([#450](https://github.com/branes-ai/cortex/issues/450)) ([#532](https://github.com/branes-ai/cortex/issues/532)) ([b0541aa](https://github.com/branes-ai/cortex/commit/b0541aa43a4f77df01936b446bad72fb20bb77ab))
+
 ## [0.81.0](https://github.com/branes-ai/cortex/compare/v0.80.0...v0.81.0) (2026-10-30)
 
 
