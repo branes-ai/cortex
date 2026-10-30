@@ -149,8 +149,9 @@ The cortex measurements fit this: the stages that write P need double, or a fact
 ## 5. What cortex does today
 
 - **Prevention:** Joseph form and an explicit `symmetrize` after every predict,
-  augment and update (`msckf/covariance.hpp`). A square-root backend exists (#187),
-  but it is not yet usable on real data: it gives NaN on V1_01 even in double (#533).
+  augment and update (`msckf/covariance.hpp`). A square-root backend exists (#187,
+  `vio_pipeline --covariance sqrt`). Since #533 it runs every EuRoC sequence, with
+  every stage in float (V1_01 0.295 m, MH_05 0.784 m, V2_03 0.282 m).
 - **Detection:** the χ² gate rejects an update whose innovation covariance S doesn't
   factor. `spd_solve` returns a zero gain on a non-SPD S in release, and asserts in
   debug. There is no check of P after an operation, and the stage invariants
@@ -177,8 +178,9 @@ indefinite.
    rule: S2, S3, S9 and S6e write P; S0 and S5 → S6d only read it.
    `update-float-ekf-double` (S5 → S6d in float) holds on all three sequences (V1_01
    0.263 m, MH_05 1.16 m, V2_03 0.303 m). Every preset that writes P in float diverges
-   on MH_05. Then fix #533 and measure the square-root backend with the covariance
-   operations in float, the textbook route to a float covariance.
+   on MH_05. The square-root backend is that factored P: with #533 fixed, the five presets
+   measured run on all three sequences, the whole filter in float included (MH_05
+   0.784 m against 0.755 m in double).
 2. **Add a covariance health check to the backend and report it; never exit.** After
    each operation that writes P:
    - check that every value is finite and every diagonal is ≥ 0;
