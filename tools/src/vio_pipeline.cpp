@@ -21,6 +21,8 @@
 //   ./vio_pipeline --source euroc --dataset ROOT --capture DIR --capture-nis 5
 //   ./vio_pipeline --source euroc --dataset ROOT --prefer-dynamic --capture DIR --capture-stages S1_initialization
 //                                                  # stage boundaries → bench fixtures (#446)
+//   ./vio_pipeline --source euroc --dataset ROOT --stage-types update-float
+//                                                  # the S5→S6e update in float (#450)
 
 // stb_image_write generates its implementation in this TU; the define must
 // immediately precede the include (guard it so include-sorting can't split them).
@@ -34,6 +36,7 @@
 #include <branes/sdk/eval/synthetic_world.hpp>
 #include <branes/sdk/eval/trajectory_metrics.hpp>
 #include <branes/sdk/msckf/invariant_vio_backend.hpp>
+#include <branes/sdk/msckf/stage_types.hpp>
 #include <branes/sdk/msckf_backend.hpp>
 #include <branes/sdk/vio_estimator.hpp>
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
@@ -58,6 +61,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -69,13 +73,95 @@ using T = double;
 using Vec3 = branes::math::lie::detail::Vec<T, 3>;
 using branes::sdk::FrontendObservation;
 using branes::sdk::ImuMeasurement;
-using branes::sdk::MsckfBackend;
+using branes::sdk::MsckfMixedBackend;
 using branes::sdk::VioConfig;
 
 // EuRoC cam0 calibration: shared with every EuRoC tool (branes/tools/euroc_cam0.hpp)
 // so the MSCKF and R-IEKF runs are driven from byte-identical calibration.
 inline branes::tools::EurocCam0<T> euroc_cam0() {
     return branes::tools::euroc_cam0<T>();
+}
+
+// ── Per-stage arithmetic types (#450) ───────────────────────────────────────
+// --stage-types picks one of these presets for the MSCKF backend. The state is
+// stored in double in every preset, so the front end, the I/O and the metrics
+// are unchanged; a preset names the type each stage computes in. Native types
+// only: an emulated type end to end is ~10^4× slower.
+namespace stage_types {
+using Double = msckf::UniformStageTypes<double>;
+using Float = msckf::UniformStageTypes<float>;
+using LongDouble = msckf::UniformStageTypes<long double>;
+struct SensorModelFloat : Double {
+    using sensor_model = float;
+};
+struct PropagationFloat : Double {
+    using propagation = float;
+};
+struct AugmentationFloat : Double {
+    using augmentation = float;
+};
+struct UpdateFloat : Double {
+    using update = float;
+};
+struct MarginalizationFloat : Double {
+    using marginalization = float;
+};
+struct CalibrationFloat : Double {
+    using calibration = float;
+};
+struct FloatUpdateDouble : Float {
+    using update = double;
+};
+}  // namespace stage_types
+
+struct StageTypePreset {
+    std::string_view name;
+    std::string_view summary;
+};
+// The order matches with_stage_types below.
+constexpr StageTypePreset kStageTypePresets[] = {
+    {"double", "every stage in double (the default)"},
+    {"float", "every stage in float"},
+    {"long-double", "every stage in long double"},
+    {"sensor-model-float", "S0 in float"},
+    {"propagation-float", "S2 in float"},
+    {"augmentation-float", "S3 in float"},
+    {"update-float", "S5 -> S6e in float"},
+    {"marginalization-float", "S9 in float"},
+    {"calibration-float", "S10 in float (runs only with online calibration, off here)"},
+    {"float-update-double", "every stage in float except S5 -> S6e"},
+};
+
+bool is_stage_type_preset(std::string_view name) {
+    for (const auto& p : kStageTypePresets)
+        if (p.name == name)
+            return true;
+    return false;
+}
+
+/// f(std::type_identity<Policy>{}) for the preset `name` (validated by parse).
+template <class F>
+decltype(auto) with_stage_types(std::string_view name, F&& f) {
+    namespace st = stage_types;
+    if (name == "float")
+        return f(std::type_identity<st::Float>{});
+    if (name == "long-double")
+        return f(std::type_identity<st::LongDouble>{});
+    if (name == "sensor-model-float")
+        return f(std::type_identity<st::SensorModelFloat>{});
+    if (name == "propagation-float")
+        return f(std::type_identity<st::PropagationFloat>{});
+    if (name == "augmentation-float")
+        return f(std::type_identity<st::AugmentationFloat>{});
+    if (name == "update-float")
+        return f(std::type_identity<st::UpdateFloat>{});
+    if (name == "marginalization-float")
+        return f(std::type_identity<st::MarginalizationFloat>{});
+    if (name == "calibration-float")
+        return f(std::type_identity<st::CalibrationFloat>{});
+    if (name == "float-update-double")
+        return f(std::type_identity<st::FloatUpdateDouble>{});
+    return f(std::type_identity<st::Double>{});
 }
 
 struct Args {
@@ -87,6 +173,7 @@ struct Args {
     bool video = false;
     std::string robot = "default";
     bool invariant = false;
+    std::string stage_types = "double";  ///< a kStageTypePresets name (#450)
     bool help = false;
     // Stage capture (#446): fixtures written to capture_dir/<stage>/<name>.json.
     std::string capture_dir;
@@ -140,7 +227,12 @@ Args parse(int argc, char** argv) {
             a.help = true;
         else if (v == "--invariant")
             a.invariant = true;
-        else if (v == "--sweep")
+        else if (v == "--stage-types" && next_is_value()) {
+            a.stage_types = argv[++i];
+            if (!is_stage_type_preset(a.stage_types))
+                throw std::invalid_argument("--stage-types: unknown preset '" + a.stage_types +
+                                            "' (see --help for the list)");
+        } else if (v == "--sweep")
             a.sweep = true;
         else if (v == "--video")
             a.video = true;
@@ -551,6 +643,7 @@ RunResult run_synthetic_invariant(const ev::SyntheticData<T>& w,
 }
 
 // ── Synthetic source ───────────────────────────────────────────────────────
+template <msckf::StageTypePolicy Stages = stage_types::Double>
 RunResult run_synthetic(const ev::SyntheticData<T>& w,
                         const VioConfig& cfg,
                         double ns,
@@ -560,12 +653,13 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
                         std::ofstream* stream,
                         std::ofstream* frames,
                         msckf::StageTap<T, msckf::FullCovariance<T>>* tap = nullptr) {
-    using Cal = MsckfBackend<T>::CameraCalibration;
+    using Backend = MsckfMixedBackend<T, Stages>;
+    using Cal = typename Backend::CameraCalibration;
     Cal cal;
     cal.intrinsics = w.camera;
     cal.extrinsics.R_imu_cam = w.R_imu_cam;
     cal.extrinsics.p_imu_cam = w.p_imu_cam;
-    MsckfBackend<T> backend(std::vector<Cal>{cal});
+    Backend backend(std::vector<Cal>{cal});
     backend.initialize(cfg);
     backend.set_stage_tap(tap);
 
@@ -634,13 +728,14 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
 
 // ── EuRoC source (real images through the KLT front end) ───────────────────
 // Gated: returns false (with a hint) when the dataset is absent/unreadable.
+template <msckf::StageTypePolicy Stages = stage_types::Double>
 bool run_euroc(const Args& args,
                const VioConfig& cfg,
                RunResult& out,
                std::ofstream* stream,
                std::ofstream* frames,
                msckf::StageTap<T, msckf::FullCovariance<T>>* tap = nullptr) {
-    using Backend = MsckfBackend<T>;
+    using Backend = MsckfMixedBackend<T, Stages>;
     using Estimator = branes::sdk::VioEstimator<T, Backend>;
 
     std::vector<ImuMeasurement<T>> imu;
@@ -823,6 +918,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (args.help) {
+        std::ostringstream presets;
+        for (const auto& p : kStageTypePresets)
+            presets << "                               " << std::left << std::setw(22) << p.name << ' ' << p.summary
+                    << "\n";
         std::cout
             << "vio_pipeline — end-to-end VIO noise->robustness demo\n"
                "  --source synthetic|euroc   stream source (default synthetic)\n"
@@ -832,7 +931,9 @@ int main(int argc, char** argv) {
                "  --sweep                    noise level -> robustness curve (synthetic)\n"
                "  --video                    emit per-frame scene + overlay data (frames.jsonl)\n"
                "  --invariant                use the Right-Invariant EKF (R-IEKF) backend instead of standard MSCKF\n"
-               "  --robot ground|drone       motion aggressiveness (synthetic)\n"
+               "  --stage-types NAME         MSCKF: the type each stage computes in (state stored in double):\n"
+            << presets.str()
+            << "  --robot ground|drone       motion aggressiveness (synthetic)\n"
                "  --capture DIR              capture MSCKF stage boundaries as bench fixtures (DIR/<stage>/)\n"
                "  --capture-stages LIST      comma-separated fixture stages (default: all capturable)\n"
                "  --capture-frames A:B       post-init frame range, inclusive (default: all)\n"
@@ -844,6 +945,10 @@ int main(int argc, char** argv) {
                "  --prefer-dynamic           EuRoC: initialize by dynamic VI alignment only (no static init);\n"
                "                             with --capture-stages S1_initialization, captures every attempt\n";
         return 0;
+    }
+    if (args.invariant && args.stage_types != "double") {
+        std::cerr << "vio_pipeline: --stage-types selects MSCKF stage types; it does not apply to --invariant\n";
+        return 2;
     }
     if ((!args.capture_dir.empty() || args.live_assert) && (args.invariant || args.sweep))
         std::cerr
@@ -877,15 +982,21 @@ int main(int argc, char** argv) {
         const auto& rec = taps->recorder;
         VioConfig cfg;
         cfg.prefer_dynamic_init = args.prefer_dynamic;
-        const bool ok = args.invariant ? run_euroc_invariant(args, cfg, r, &stream)
-                                       : run_euroc(args, cfg, r, &stream, args.video ? &frames : nullptr, taps->tap());
+        const bool ok =
+            args.invariant
+                ? run_euroc_invariant(args, cfg, r, &stream)
+                : with_stage_types(args.stage_types, [&]<class S>(std::type_identity<S>) {
+                      return run_euroc<S>(args, cfg, r, &stream, args.video ? &frames : nullptr, taps->tap());
+                  });
         taps->finish(args.capture_dir);
         if (!ok)
             return 0;
         const char* backend = args.invariant ? "euroc [R-IEKF]" : "euroc [MSCKF]";
-        std::cout << "  source          : " << backend << "  " << args.dataset << "\n  frames tracked  : " << r.frames
-                  << "\n  mean features   : " << r.mean_features << "\n  ATE (Horn)      : " << r.ate_rms_m
-                  << " m\n  mean pos sigma  : " << r.mean_pos_sigma_m
+        std::cout << "  source          : " << backend << "  " << args.dataset;
+        if (!args.invariant)
+            std::cout << "\n  stage types     : " << args.stage_types;
+        std::cout << "\n  frames tracked  : " << r.frames << "\n  mean features   : " << r.mean_features
+                  << "\n  ATE (Horn)      : " << r.ate_rms_m << " m\n  mean pos sigma  : " << r.mean_pos_sigma_m
                   << " m  (over-confidence: ATE/sigma = "
                   // Divide whenever σ is usable; let a non-finite σ propagate (don't mask a poisoned covariance as 0).
                   << (r.mean_pos_sigma_m != 0.0 ? r.ate_rms_m / r.mean_pos_sigma_m : 0.0) << ")";
@@ -901,7 +1012,10 @@ int main(int argc, char** argv) {
     const ev::SyntheticData<T> world = ev::generate_world<T>(robot_preset(args.robot));
     const VioConfig cfg;
     std::cout << "synthetic world: " << world.imu.size() << " IMU, " << world.frames.size()
-              << " frames, robot=" << args.robot << "\n";
+              << " frames, robot=" << args.robot;
+    if (!args.invariant)
+        std::cout << ", stage types=" << args.stage_types;
+    std::cout << "\n";
     if (!args.out.empty())
         write_scene_json(args.out + "/scene.json", world);  // static cloud + camera, for the 3D viewer
 
@@ -912,9 +1026,11 @@ int main(int argc, char** argv) {
         std::cout << "\n  noise   ATE(m)   final(m)   NIS   features\n  "
                      "------------------------------------------------\n";
         for (const double n : {0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0}) {
-            const RunResult r = args.invariant
-                                    ? run_synthetic_invariant(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr)
-                                    : run_synthetic(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr);
+            const RunResult r =
+                args.invariant ? run_synthetic_invariant(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr)
+                               : with_stage_types(args.stage_types, [&]<class S>(std::type_identity<S>) {
+                                     return run_synthetic<S>(world, cfg, n, 0xC0FFEE, args, nullptr, nullptr, nullptr);
+                                 });
             std::cout << "  " << std::left << std::setw(7) << n << std::setw(9) << std::setprecision(3) << r.ate_rms_m
                       << std::setw(11) << r.final_err_m << std::setw(7) << r.nis_normalized << r.mean_features << "\n";
             if (sweep.is_open())
@@ -934,15 +1050,17 @@ int main(int argc, char** argv) {
         const RunResult r =
             args.invariant ? run_synthetic_invariant(
                                  world, cfg, args.noise, 0xC0FFEE, args, &traj, &stream, args.video ? &frames : nullptr)
-                           : run_synthetic(world,
-                                           cfg,
-                                           args.noise,
-                                           0xC0FFEE,
-                                           args,
-                                           &traj,
-                                           &stream,
-                                           args.video ? &frames : nullptr,
-                                           taps->tap());
+                           : with_stage_types(args.stage_types, [&]<class S>(std::type_identity<S>) {
+                                 return run_synthetic<S>(world,
+                                                         cfg,
+                                                         args.noise,
+                                                         0xC0FFEE,
+                                                         args,
+                                                         &traj,
+                                                         &stream,
+                                                         args.video ? &frames : nullptr,
+                                                         taps->tap());
+                             });
         taps->finish(args.capture_dir);
         std::cout << "\n  noise scale     : " << args.noise << "\n  frames tracked  : " << r.frames
                   << "\n  mean features   : " << r.mean_features << "\n  ATE (RMS pos)   : " << r.ate_rms_m

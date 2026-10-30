@@ -571,9 +571,62 @@ the update in double, it deviates by 9.1e-6 m.
 <Aside type="caution" title="A state is only as PSD as its narrowest stage">
   Clone augmentation makes P exactly singular. A stage in float leaves those null directions at
   about −ε_float·‖P‖, even when the state is stored in double. Checking such a state against
-  double's PSD slack (16·ε·max diag) fails, although the filter is fine. Check it at the ε of the
-  narrowest type it passed through, as the test does.
+  double's PSD slack (16·ε·max diag) fails, although on the short synthetic drive the filter is
+  fine. Check it at the ε of the narrowest type it passed through, as the test does. On a long
+  real run the negative directions are not harmless: see the EuRoC run below.
 </Aside>
+
+### In the pipeline: `--stage-types`
+
+`vio_pipeline` selects a policy by name with `--stage-types NAME`. The state is stored in double
+in every preset, so the front end, the output streams and the metrics are the same code in every
+run; only the stage arithmetic changes. The presets use native types only, because an emulated
+type end to end is about 10⁴× slower.
+
+| Preset | Stages in a type other than double |
+|---|---|
+| `double` | none (the default; identical to a run without the option) |
+| `float` | every stage |
+| `long-double` | every stage, in long double |
+| `sensor-model-float` | S0 |
+| `propagation-float` | S2 |
+| `augmentation-float` | S3 |
+| `update-float` | S5 → S6e |
+| `marginalization-float` | S9 |
+| `calibration-float` | S10, which runs only with online calibration (off in `vio_pipeline`) |
+| `float-update-double` | every stage except S5 → S6e |
+
+```bash
+vio_pipeline --source euroc --dataset .../V1_01_easy/mav0 --stage-types update-float --out DIR
+```
+
+`--stage-types` applies to the MSCKF backend; with `--invariant` it is an error. The stage taps
+see the state in double, so `--capture` and `--live-assert` work with any preset, but
+`--live-assert` checks a boundary against double's bench thresholds.
+
+**First run, EuRoC V1_01.** Every preset on the 2907 tracked frames of V1_01:
+
+| Preset | ATE | NIS / dof |
+|---|---|---|
+| `double` | 0.2888 m | 1.508 |
+| `long-double` | 0.2888 m | 1.508 |
+| `sensor-model-float` | 0.2887 m | 1.508 |
+| `propagation-float` | 0.2844 m | 1.508 |
+| `augmentation-float` | 0.2671 m | 1.507 |
+| `marginalization-float` | 0.2882 m | 1.508 |
+| `float-update-double` | 0.2866 m | 1.509 |
+| `update-float` | 128911 m (diverged) | 0.476 |
+| `float` | 128143 m (diverged) | 0.037 |
+
+Every stage but the update runs in float without harm: with all of them in float and the update
+in double, the trajectory moves by less than a centimetre of ATE. The update in float diverges.
+Its position variance P(0,0) is negative by frame 250, and the estimate runs away after that. The
+−ε_float·‖P‖ directions the caution above describes accumulate over thousands of updates instead
+of staying at rounding level. Don't read the shifts of up to 2 cm in the other rows as a gain
+in accuracy: one run on one sequence can't separate them from the run's sensitivity to any
+perturbation. The diagnosis of the float update, and the
+runs on MH_05 and V2_03 with NEES, are the next steps of
+[#450](https://github.com/branes-ai/cortex/issues/450).
 
 ## The MTL5 gap register (#451)
 
