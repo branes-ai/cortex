@@ -12,8 +12,20 @@
 //   propagation      S2   IMU sample → propagated mean and covariance
 //   augmentation     S3   clone of the pose into the window
 //   update           S5 → S6e   triangulation, Jacobians, null space, gate, EKF update
+//   ekf_update       S6e  the EKF update alone (optional: defaults to `update`)
 //   marginalization  S9   removal of a clone
 //   calibration      S10  calibration states added to the fresh state
+//
+// `ekf_update` splits the covariance update off the rest of the update: with it,
+// S5 → S6d run in `update` and S6e in `ekf_update`. A policy that does not name
+// it runs S6e in `update`, so `using update = float;` puts the whole update in
+// float. S6e is the step a float update fails at on real data (#450,
+// debugging/mixed-precision.mdx), hence its own alias:
+//
+//   struct UpdateFloatEkfDouble : msckf::UniformStageTypes<double> {
+//       using update = float;
+//       using ekf_update = double;
+//   };
 //
 // UniformStageTypes<T> is every stage in T, the default, and compiles to the
 // single-type backend. A mixed policy derives from it and overrides the stages
@@ -47,11 +59,29 @@ struct UniformStageTypes {
     using calibration = T;
 };
 
+namespace detail {
+template <class P>
+struct ekf_update_of {
+    using type = typename P::update;
+};
+template <class P>
+    requires requires { typename P::ekf_update; }
+struct ekf_update_of<P> {
+    using type = typename P::ekf_update;
+};
+}  // namespace detail
+
+/// The type S6e computes in: `P::ekf_update` when the policy names it, else
+/// `P::update`.
+template <class P>
+using ekf_update_t = typename detail::ekf_update_of<P>::type;
+
 /// A policy names a Scalar type for every stage.
 template <class P>
-concept StageTypePolicy = math::Scalar<typename P::sensor_model> && math::Scalar<typename P::propagation> &&
-                          math::Scalar<typename P::augmentation> && math::Scalar<typename P::update> &&
-                          math::Scalar<typename P::marginalization> && math::Scalar<typename P::calibration>;
+concept StageTypePolicy =
+    math::Scalar<typename P::sensor_model> && math::Scalar<typename P::propagation> &&
+    math::Scalar<typename P::augmentation> && math::Scalar<typename P::update> && math::Scalar<ekf_update_t<P>> &&
+    math::Scalar<typename P::marginalization> && math::Scalar<typename P::calibration>;
 
 }  // namespace branes::sdk::msckf
 

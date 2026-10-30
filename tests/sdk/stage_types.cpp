@@ -176,6 +176,19 @@ struct AllLongDouble {
 struct FloatUpdateDouble : ms::UniformStageTypes<float> {
     using update = double;
 };
+// The EKF update (S6e) split off the rest of the update.
+struct S6eFloat : ms::UniformStageTypes<double> {
+    using ekf_update = float;
+};
+struct S6FloatS6eDouble : ms::UniformStageTypes<double> {
+    using update = float;
+    using ekf_update = double;
+};
+// A policy that does not name ekf_update runs S6e in `update`.
+static_assert(std::is_same_v<ms::ekf_update_t<S6Float>, float>);
+static_assert(std::is_same_v<ms::ekf_update_t<ms::UniformStageTypes<double>>, double>);
+static_assert(std::is_same_v<ms::ekf_update_t<S6eFloat>, float>);
+static_assert(std::is_same_v<ms::ekf_update_t<S6FloatS6eDouble>, double>);
 
 bs::VioConfig drive_config() {
     bs::VioConfig cfg;
@@ -193,6 +206,7 @@ double narrowest_eps() {
                      e(typename P::propagation{}),
                      e(typename P::augmentation{}),
                      e(typename P::update{}),
+                     e(ms::ekf_update_t<P>{}),
                      e(typename P::marginalization{}),
                      e(typename P::calibration{})});
 }
@@ -293,4 +307,17 @@ TEST_CASE("stage types: stored in float, the update in double", "[sdk][msckf][st
     CHECK(r.psd);
     CHECK(r.accepted > 0);
     CHECK(worst <= 1e3 * kEpsF);  // measured 9.1e-6 m
+}
+
+TEMPLATE_TEST_CASE("stage types: the EKF update in its own type",
+                   "[sdk][msckf][stage_types]",
+                   S6eFloat,
+                   S6FloatS6eDouble) {
+    const Run r = drive<double, bs::MsckfMixedBackend<double, TestType>>();
+    const double worst = worst_vs_double(r);
+    INFO("worst |p - p_double| " << worst << " m");
+    CHECK(r.psd);
+    CHECK(r.accepted > 0);
+    CHECK(worst > 0.0);           // the split stage ran in float
+    CHECK(worst <= 1e3 * kEpsF);  // no worse than the whole update in float
 }
