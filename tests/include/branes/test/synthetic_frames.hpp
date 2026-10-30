@@ -78,13 +78,13 @@ template <class S>
     return m;
 }
 
-/// An estimator with a calibrated pinhole camera (so pixel→bearing unprojection is sane).
-template <class S>
-[[nodiscard]] branes::sdk::VioEstimator<S> make_estimator() {
-    using B = branes::sdk::MsckfBackend<S>;
+/// An estimator with a calibrated pinhole camera (so pixel→bearing unprojection
+/// is sane), on backend B (the default MSCKF backend, or one with per-stage types).
+template <class S, class B = branes::sdk::MsckfBackend<S>>
+[[nodiscard]] branes::sdk::VioEstimator<S, B> make_estimator() {
     typename B::CameraCalibration cal;
     cal.intrinsics = typename B::Camera(S{200}, S{200}, S{120}, S{90}, S{0}, S{0}, S{0}, S{0});
-    return branes::sdk::VioEstimator<S>(B(std::vector<typename B::CameraCalibration>{cal}));
+    return branes::sdk::VioEstimator<S, B>(B(std::vector<typename B::CameraCalibration>{cal}));
 }
 
 inline constexpr double kDriveDt = 0.005;             // 200 Hz IMU
@@ -98,8 +98,8 @@ inline constexpr double kDriveTMove = kDriveDt * 79;  // the last stationary sam
 
 /// Initialize `est` from 80 stationary samples, then accelerate and feed
 /// `frames` frames, calling `per_frame(f, t)` after frame f is fed at time t.
-template <class S, class PerFrame>
-void drive_estimator(branes::sdk::VioEstimator<S>& est, int frames, PerFrame&& per_frame) {
+template <class S, class B, class PerFrame>
+void drive_estimator(branes::sdk::VioEstimator<S, B>& est, int frames, PerFrame&& per_frame) {
     constexpr double dt = kDriveDt;
     std::vector<branes::sdk::ImuMeasurement<S>> batch;
     for (int k = 0; k < 80; ++k)

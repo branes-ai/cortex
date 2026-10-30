@@ -28,6 +28,11 @@
 // state and S10_online_calibration adds the calibration states. What remains here
 // is policy: initialization timing, the window size, and the feature schedule.
 //
+// Each stage computes in the type a stage-type policy names for it
+// (msckf/stage_types.hpp); the default policy is every stage in T. A stage in
+// another type runs on the state rebound into that type (msckf/rebind.hpp) and
+// returns it rounded to T, so the state is always stored in T (#450).
+//
 // Observations are pixel coordinates per the VioBackend contract; each
 // camera's model unprojects them to bearings, keeping the estimator core
 // intrinsics-agnostic. Header-only, C++20.
@@ -41,7 +46,9 @@
 #include <branes/sdk/imu_init.hpp>
 #include <branes/sdk/imu_preintegration.hpp>
 #include <branes/sdk/msckf.hpp>
+#include <branes/sdk/msckf/rebind.hpp>
 #include <branes/sdk/msckf/stage_tap.hpp>
+#include <branes/sdk/msckf/stage_types.hpp>
 #include <branes/sdk/msckf/stages.hpp>
 #include <branes/sdk/sfm/init_window.hpp>
 #include <branes/sdk/vio_backend.hpp>
@@ -52,6 +59,7 @@
 #include <functional>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -63,11 +71,16 @@ namespace branes::sdk {
 /// (`FullCovariance` — Joseph-form, the default; or `SqrtCovariance` — the
 /// QR array update). The mean, IMU init, feature management, and window
 /// policy are identical for either; only the covariance algebra differs.
-/// Use the `MsckfBackend<T>` / `MsckfSqrtBackend<T>` aliases below.
-template <math::Scalar T, msckf::CovarianceModel<T> Cov = msckf::FullCovariance<T>>
+/// `Stages` names the type each stage computes in (msckf/stage_types.hpp); the
+/// state is stored in T. Use the `MsckfBackend<T>` / `MsckfSqrtBackend<T>` /
+/// `MsckfMixedBackend<T, Stages>` aliases below.
+template <math::Scalar T,
+          msckf::CovarianceModel<T> Cov = msckf::FullCovariance<T>,
+          msckf::StageTypePolicy Stages = msckf::UniformStageTypes<T>>
 class MsckfBackendT final : public VioBackend<T> {
 public:
     using Scalar = T;
+    using StageTypes = Stages;
     using Camera = math::cameras::PinholeRadtanCamera<T>;
     using Extrinsics = msckf::CameraExtrinsics<T>;
     using DVec3 = math::lie::detail::Vec<T, 3>;
@@ -95,6 +108,7 @@ public:
         : cameras_(std::move(cameras)), updater_(extrinsics_of(cameras_)) {
         if (cameras_.empty())
             throw std::invalid_argument("MsckfBackend: at least one camera calibration is required");
+        rebind_operators();
     }
 
     void initialize(const VioConfig& config) override {
@@ -117,6 +131,8 @@ public:
         constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
         uopts.calib_rot_sigma = static_cast<T>(config.calib_ext_rot_sigma_deg * kDegToRad);
         updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
+
+        rebind_operators();
 
         ImuInitConfig<T> icfg;
         icfg.gravity_magnitude = static_cast<T>(config.gravity_magnitude);
@@ -208,10 +224,10 @@ public:
         // S3: clone the (now frame-time) pose into the window.
         if (wants(msckf::TapStage::S3_augmentation)) {
             const auto before = state_;
-            const auto d = msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+            const auto d = augment(timestamp_s);
             stage_tap_->on_s3(before, timestamp_s, d, state_);
         } else {
-            msckf::stages::s3_augmentation::apply(state_, timestamp_s);
+            augment(timestamp_s);
         }
 
         // S0 + S4: normalize this frame's observations onto their tracks.
@@ -299,6 +315,79 @@ public:
     }
 
 private:
+    using T0 = typename Stages::sensor_model;
+    using T2 = typename Stages::propagation;
+    using T3 = typename Stages::augmentation;
+    using T6 = typename Stages::update;
+    using T9 = typename Stages::marginalization;
+    using T10 = typename Stages::calibration;
+    template <class U>
+    static constexpr bool kStorage = std::is_same_v<U, T>;
+
+    /// Run `stage` on `s` in U: on `s` itself when U is the storage type, else on
+    /// `s` rebound to U, with the result rounded back into `s`. Returns what the
+    /// stage returns.
+    template <math::Scalar U, class Stage>
+    static auto in_type(msckf::State<T, Cov>& s, Stage&& stage) {
+        if constexpr (kStorage<U>) {
+            return stage(s);
+        } else {
+            auto su = msckf::rebind<U>(s);
+            auto r = stage(su);
+            s = msckf::rebind<T>(su);
+            return r;
+        }
+    }
+
+    /// The operators of the stages that compute in another type, rebound from
+    /// the storage-type ones. Re-run whenever those change (construction and
+    /// `initialize`); nothing to do for a stage in the storage type.
+    void rebind_operators() {
+        if constexpr (!kStorage<T0>) {
+            cameras0_.clear();
+            for (const auto& c : cameras_)
+                cameras0_.push_back(msckf::rebind<T0>(c.intrinsics));
+        }
+        if constexpr (!kStorage<T2>)
+            prop2_ = msckf::rebind<T2>(prop_);
+        if constexpr (!kStorage<T6>)
+            updater6_.emplace(msckf::rebind<T6>(updater_));
+    }
+    [[nodiscard]] const auto& propagator2() const {
+        if constexpr (kStorage<T2>)
+            return prop_;
+        else
+            return prop2_;
+    }
+    [[nodiscard]] const auto& updater6() const {
+        if constexpr (kStorage<T6>)
+            return updater_;
+        else
+            return *updater6_;
+    }
+
+    // S3 in its stage type.
+    msckf::stages::s3_augmentation::Diagnostics augment(double t) {
+        return in_type<T3>(state_, [t](auto& s) { return msckf::stages::s3_augmentation::apply(s, t); });
+    }
+
+    // S9 in its stage type.
+    msckf::stages::s9_marginalization::Diagnostics marginalize(std::size_t idx) {
+        return in_type<T9>(state_, [idx](auto& s) { return msckf::stages::s9_marginalization::apply(s, idx); });
+    }
+
+    // S5 → S6e in its stage type; the diagnostics come back in T.
+    msckf::stages::s6_msckf_update::Diagnostics<T> update(const msckf::FeatureTrack<T>& track) {
+        if constexpr (kStorage<T6>) {
+            return msckf::stages::s6_msckf_update::apply(state_, updater_, track);
+        } else {
+            const auto tu = msckf::rebind<T6>(track);
+            const auto d =
+                in_type<T6>(state_, [&](auto& s) { return msckf::stages::s6_msckf_update::apply(s, updater6(), tu); });
+            return {d.outcome, msckf::rebind<T>(d.nis), d.rows};
+        }
+    }
+
     static constexpr T kInitialSigma() {
         return T{1} / T{10};
     }
@@ -319,7 +408,15 @@ private:
             constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
             const T rot_sigma = static_cast<T>(config_.calib_ext_rot_prior_deg * kDegToRad);
             const T trans_sigma = static_cast<T>(config_.calib_ext_trans_prior_mm / 1000.0);
-            msckf::stages::s10_online_calibration::apply(s, std::move(init), rot_sigma, trans_sigma);
+            in_type<T10>(s, [&](auto& sx) {
+                using Calib10 = typename std::remove_cvref_t<decltype(sx)>::CalibState;
+                std::vector<Calib10> init10;
+                init10.reserve(init.size());
+                for (const auto& c : init)
+                    init10.push_back({msckf::rebind<T10>(c.R_imu_cam), msckf::rebind<T10>(c.p_imu_cam)});
+                return msckf::stages::s10_online_calibration::apply(
+                    sx, std::move(init10), msckf::scalar_cast<T10>(rot_sigma), msckf::scalar_cast<T10>(trans_sigma));
+            });
         }
         return s;
     }
@@ -518,13 +615,24 @@ private:
     bool to_normalized(std::uint32_t cam_id, T u, T v, DVec2& out) const {
         if (cam_id >= cameras_.size())
             return false;  // unknown camera — reject rather than alias to camera 0
-        const auto n = msckf::stages::s0_sensor_model::apply(cameras_[cam_id].intrinsics, u, v);
+        const auto n = sensor_model(cam_id, u, v);
         if (wants(msckf::TapStage::S0_sensor_model))
             stage_tap_->on_s0(cam_id, u, v, n);
         if (!n.valid)
             return false;  // the ray is not in front of the camera
         out = n.xy;
         return true;
+    }
+
+    // S0 in its stage type; the result comes back in T.
+    [[nodiscard]] msckf::stages::s0_sensor_model::Result<T> sensor_model(std::uint32_t cam_id, T u, T v) const {
+        if constexpr (kStorage<T0>) {
+            return msckf::stages::s0_sensor_model::apply(cameras_[cam_id].intrinsics, u, v);
+        } else {
+            const auto n = msckf::stages::s0_sensor_model::apply(
+                cameras0_[cam_id], msckf::scalar_cast<T0>(u), msckf::scalar_cast<T0>(v));
+            return {n.valid, msckf::rebind<T>(n.xy)};
+        }
     }
 
     [[nodiscard]] bool wants(msckf::TapStage stage) const {
@@ -535,11 +643,23 @@ private:
     void propagate(const DVec3& gyro, const DVec3& accel, T dt) {
         if (wants(msckf::TapStage::S2_propagation)) {
             const auto before = state_;
-            msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
+            propagate_step(gyro, accel, dt);
             stage_tap_->on_s2(before, prop_, gyro, accel, dt, state_);
             return;
         }
-        msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
+        propagate_step(gyro, accel, dt);
+    }
+
+    // S2 in its stage type.
+    void propagate_step(const DVec3& gyro, const DVec3& accel, T dt) {
+        if constexpr (kStorage<T2>) {
+            msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
+        } else {
+            const auto g = msckf::rebind<T2>(gyro), a = msckf::rebind<T2>(accel);
+            const T2 h = msckf::scalar_cast<T2>(dt);
+            in_type<T2>(state_,
+                        [&](auto& s) { return msckf::stages::s2_propagation::apply(s, propagator2(), g, a, h); });
+        }
     }
 
     // S4 → S5 → S6e: assemble feature `id`'s track from the observations whose
@@ -558,7 +678,7 @@ private:
             std::optional<msckf::State<T, Cov>> before;  // the tap's copy, only when it asks
             if (wants(msckf::TapStage::S6_msckf_update))
                 before.emplace(state_);
-            const auto upd = msckf::stages::s6_msckf_update::apply(state_, updater_, track);
+            const auto upd = update(track);
             if (before)
                 stage_tap_->on_s6(*before, updater_, id, track, upd, state_);
             if (upd.nis.valid) {  // record the innovation NIS even if it was gated out
@@ -581,10 +701,10 @@ private:
             update_and_erase(id);
         if (wants(msckf::TapStage::S9_marginalization)) {
             const auto before = state_;
-            const auto d = msckf::stages::s9_marginalization::apply(state_, 0);
+            const auto d = marginalize(0);
             stage_tap_->on_s9(before, 0, d, state_);
         } else {
-            msckf::stages::s9_marginalization::apply(state_, 0);
+            marginalize(0);
         }
         msckf::stages::s9_marginalization::purge(tracks_, old_time);
     }
@@ -596,6 +716,11 @@ private:
     UpdateObserver update_observer_{};              // optional per-update inspector hook (#380); unset in production
     StageTap* stage_tap_ = nullptr;                 // optional stage-boundary tap (#446); unset in production
     msckf::Propagator<T> prop_{};
+    // The rebound operators of the stages that compute in another type (unused,
+    // and left empty, for a stage in T).
+    std::vector<math::cameras::PinholeRadtanCamera<T0>> cameras0_;
+    msckf::Propagator<T2> prop2_{};
+    std::optional<msckf::CameraUpdater<T6>> updater6_;
     ImuInitializer<T> initializer_{};
     msckf::State<T, Cov> state_{kInitialSigma()};
     VioConfig config_{};
@@ -632,6 +757,12 @@ using MsckfBackend = MsckfBackendT<T, msckf::FullCovariance<T>>;
 /// so it drops in without changing the front end (issue #187).
 template <math::Scalar T>
 using MsckfSqrtBackend = MsckfBackendT<T, msckf::SqrtCovariance<T>>;
+
+/// Full-covariance MSCKF backend storing its state in T, each stage computing in
+/// the type `Stages` names for it (msckf/stage_types.hpp, #450). With
+/// `UniformStageTypes<T>` it is `MsckfBackend<T>`.
+template <math::Scalar T, msckf::StageTypePolicy Stages>
+using MsckfMixedBackend = MsckfBackendT<T, msckf::FullCovariance<T>, Stages>;
 
 }  // namespace branes::sdk
 
