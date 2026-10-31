@@ -704,8 +704,9 @@ measured is on that stage's page (for example [S0](stages/s0-sensor-models.mdx),
 ### End-to-end noise→robustness demo
 
 Beside the per-stage probes, `tools/src/vio_pipeline.cpp` runs the **whole pipeline as a stream**:
-a synthetic world with exact ground truth or a EuRoC sequence → an additive-noise injector → the
-real MSCKF backend → an estimate stream, measuring how well the filter rejects the noise.
+a synthetic world with exact ground truth → an additive-noise injector → the real MSCKF backend
+→ an estimate stream, measuring how well the filter rejects the noise; or a recorded EuRoC
+sequence, without the injector, → the same backend.
 [Running the Demo](running-the-demo.md) shows how to run it and read its output.
 
 ---

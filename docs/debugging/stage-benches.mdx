@@ -374,7 +374,9 @@ A fixture file is one JSON document, schema `branes.vio.fixture/1`:
 
 The payloads use a small vocabulary: numbers, vectors, row-major matrices `{"rows","cols","data"}`,
 rotations as unit quaternions `[w,x,y,z]`, and the full MSCKF state (navigation, calibration blocks,
-clone window, covariance P). The codec is bit-exact for every type the benches use:
+clone window, covariance P). The codec is bit-exact for every type whose values fit in a `double`, which
+is every type the benches store except `long double` where it is wider than `double` (x86 Linux):
+a fixture written from a `long double` run keeps only its `double` part:
 
 - every number goes through `double`, which holds every float, `posit<32,2>` and double value exactly;
 - nlohmann/json writes doubles in shortest round-trip form;

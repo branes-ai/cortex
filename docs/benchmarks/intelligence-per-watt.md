@@ -45,7 +45,7 @@ tell it is working rather than hung. Runtime is roughly the sequence duration
 divided by the real-time factor it reports: a few minutes for V1_01_easy (~2.9k
 frames).
 
-**No dataset?** The component unit tests run without one: `ctest -R bench` (C++)
+**No dataset?** The component unit tests run without one: `ctest -R '^bench\.'` (C++)
 and `cd bench/energy_model && python -m unittest` (Python).
 
 ### Energy backend (`--energy`)

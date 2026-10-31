@@ -176,6 +176,10 @@ from the second propagation," which points at a component and a term (see the
   updates; on a handful of samples it is meaningless. At the nominal α a perfectly
   consistent filter is still flagged α of the time by chance, so treat a marginal
   verdict as a prompt to look, not a proof.
+- **Samples within one run are correlated.** The band assumes independent χ² terms;
+  consecutive frames of one run are not, so the sum's variance can exceed 2D and the band
+  is too narrow. A single-run verdict is approximate; independent Monte Carlo runs give the
+  exact test.
 - **The covariance and the error must be the same object:** the same tangent space,
   state ordering and units. A NEES against a mismatched `P` is nonsense, which is
   why `nav_error` and `core_covariance` are tied to `msckf::State`'s documented

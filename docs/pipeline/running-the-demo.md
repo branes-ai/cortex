@@ -110,7 +110,10 @@ Flags (`vio_pipeline --help` lists them all):
   [Mixed Precision on MTL5](../debugging/mixed-precision.mdx))
 - `--prefer-dynamic`: EuRoC, initialize by dynamic visual-inertial alignment only
 - `--capture …` and `--live-assert`: capture stage boundaries as bench fixtures, or check
-  each against its bench (see [Capture & Composition](../debugging/capture-and-composition.mdx))
+  each against its bench (see [Capture & Composition](../debugging/capture-and-composition.mdx)).
+  They tap the full-covariance backend in `double`: with `--covariance sqrt` or another
+  `--stage-types`, the run stops with status 2; with `--invariant` or `--sweep`, it warns and
+  runs without them.
 
 
 ### Reading the scene-video overlay

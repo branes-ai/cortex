@@ -67,7 +67,7 @@ For each document in `arch/`, `assessments/` and the single-document folders, on
 2. Every route on today's site still exists, or redirects to the page that absorbed it.
 3. Every document in `docs/` is either a page or in a folder listed as unpublished or as records.
 4. Figures, 3D scenes and benchmark data render on the deployed site.
-5. A broken relative link in `docs/` fails the PR.
+5. A broken relative link in a published document of `docs/` fails the PR. (The records are checked by the architecture site's check; the unpublished working records are not checked, since they keep the links they had when written.)
 
 The first PR met 1, 4 and 5, and 2 and 3 with today's routes and the unpublished folders above; the second completes 2 and 3. All five were met on 2026-10-31.
 
