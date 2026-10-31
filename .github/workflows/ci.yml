@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
       # Installs the pinned docs-kit (docs-site/package.json), builds the site as
       # the deploy does, and checks every link and anchor in it.
-      - uses: branes-ai/docs-kit/actions/check@baa140407d9403606b61148c8a8c7b9f95e736eb  # v0.3.0
+      - uses: branes-ai/docs-kit/actions/check@5e04e94fb3640d936ef6492549d3fce9c6ec1945  # v0.4.1
 
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
