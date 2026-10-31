@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.3](https://github.com/branes-ai/cortex/compare/v0.83.2...v0.83.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **sdk:** refine r-iekf triangulation with gauss-newton; slow onset was over-confident ([#550](https://github.com/branes-ai/cortex/issues/550)) ([ac39f0e](https://github.com/branes-ai/cortex/commit/ac39f0e3c2bd169e8f72cc08bcd69cbdf07e312d))
+
+
+### Build System
+
+* docs-kit v0.4.1 for the docs site ([#553](https://github.com/branes-ai/cortex/issues/553)) ([a29bb1c](https://github.com/branes-ai/cortex/commit/a29bb1c1f36a91ba00a83c1c7014640f03894f70))
+
 ## [0.83.2](https://github.com/branes-ai/cortex/compare/v0.83.1...v0.83.2) (2026-10-31)
 
 
