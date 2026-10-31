@@ -144,11 +144,7 @@ jobs:
       - name: Build
         run: cmake --build --preset sitl-clang-debug
       - name: Run C++ Unit Tests (Clang)
-        # KNOWN FAILURE, excluded until fixed: the invariant VIO backend
-        # end-to-end test diverges under Clang (58 m RMS vs 3.4 m on GCC) —
-        # tracked in #437. Remove this -E once #437 lands; every other test
-        # gates the job.
-        run: ctest --preset sitl-clang-debug -E "continuous-update divergence"
+        run: ctest --preset sitl-clang-debug
       - name: sccache stats
         if: always()
         run: sccache --show-stats
