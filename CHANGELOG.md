@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.82.2](https://github.com/branes-ai/cortex/compare/v0.82.1...v0.82.2) (2026-10-31)
+
+
+### Tests
+
+* sequence the invariant test's imu noise draws; run it under clang ([#437](https://github.com/branes-ai/cortex/issues/437)) ([#538](https://github.com/branes-ai/cortex/issues/538)) ([b15498b](https://github.com/branes-ai/cortex/commit/b15498bb0c3ecd2bb8b885b1bd906a579e3e1fca))
+
 ## [0.82.1](https://github.com/branes-ai/cortex/compare/v0.82.0...v0.82.1) (2026-10-31)
 
 
