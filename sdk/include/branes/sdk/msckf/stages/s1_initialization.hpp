@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s1_initialization.hpp — stage S1_initialization as an
-// explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md §S1).
+// explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md §S1).
 //
 //   seed_from_imu(state, init result, t, accel window)            → (state', diagnostics)
 //   seed_from_alignment(state, VI alignment, SfM window, t, ...)  → (state', diagnostics)

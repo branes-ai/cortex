@@ -2,7 +2,7 @@
 //
 // branes/sdk/msckf/stages/s10_online_calibration.hpp — stage
 // S10_online_calibration as an explicit transformation (issue #452,
-// docs/arch/vio-pipeline-canonical.md §S10).
+// docs/pipeline/canonical-pipeline.md §S10).
 //
 //   apply(state, extrinsics, (σ_rot, σ_trans)) → (state' with calibration states, diagnostics)
 //

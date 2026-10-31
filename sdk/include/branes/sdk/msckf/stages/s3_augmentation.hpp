@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s3_augmentation.hpp — stage S3_augmentation as an
-// explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md §S3).
+// explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md §S3).
 //
 //   apply(state, t) → (state' with a clone of the pose at t, diagnostics)
 //

@@ -2,7 +2,7 @@
 //
 // branes/sdk/msckf/stages/s4_frontend.hpp — stage S4_frontend as an explicit
 // transformation on the backend side (issue #452,
-// docs/arch/vio-pipeline-canonical.md §S4).
+// docs/pipeline/canonical-pipeline.md §S4).
 //
 //   track(frontend state, image, params)               → (state', observations, diagnostics)
 //   apply(tracks, t, frame observations, S0 normalize) → (tracks', diagnostics: ended tracks)

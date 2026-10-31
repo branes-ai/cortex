@@ -187,7 +187,7 @@ tests/sdk/allan_variance.cpp:112: warning:
 All tests passed (5 assertions in 1 test case)
 ```
 
-Issue #278 merged (176aa94) — per-block NEES is on main. Re-run to get the decisive read:
+Issue #278 merged (45dd41a) — per-block NEES is on main. Re-run to get the decisive read:
 
 ```bash
   cd <repo>

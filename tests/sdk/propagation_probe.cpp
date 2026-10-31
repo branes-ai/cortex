@@ -1,4 +1,4 @@
-// S2 IMU-propagation probe (docs/arch/vio-pipeline-canonical.md).
+// S2 IMU-propagation probe (docs/pipeline/canonical-pipeline.md).
 //
 // Locks the S2 contract findings against independent oracles: the Φ
 // reconstruction is validated against the shipped Propagator's own covariance;

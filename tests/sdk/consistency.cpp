@@ -5,7 +5,7 @@
 // implementation: hand-computed quadratic forms, the known probit values, and
 // the chi-square distribution of Gaussian quadratic forms itself (sampled with
 // a seeded RNG). That independence is the point — the methodology post-mortem
-// (docs/assessments/vio-diagnostic-methodology.md) traced the gravity-sign bug
+// (docs/pipeline/diagnostic-methodology.mdx) traced the gravity-sign bug
 // to synthetic tests that re-encoded the code's own assumptions, so a
 // consistency instrument must be checked against probability theory, not
 // against itself.

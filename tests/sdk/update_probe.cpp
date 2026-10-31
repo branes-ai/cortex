@@ -1,4 +1,4 @@
-// S6 MSCKF measurement-update probe (docs/arch/vio-pipeline-canonical.md).
+// S6 MSCKF measurement-update probe (docs/pipeline/canonical-pipeline.md).
 //
 // S6 is the consistency-critical stage — where NEES≈dim / NIS≈dof / white
 // innovations are won or lost. This locks the measured S6 verdict against the

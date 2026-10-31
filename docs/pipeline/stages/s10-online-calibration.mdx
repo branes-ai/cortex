@@ -30,7 +30,7 @@ block — or it treats imperfect calibration as perfect and becomes over-confide
 
 ## Why it matters
 
-This is the crux of [#212](../engineering-status.mdx). The cortex MSCKF has
+This is the crux of [#212](../engineering-status.mdx). By default the cortex MSCKF has
 **no calibration states and no calibration term in the noise budget** — the EuRoC
 `T_CI` is taken as truth. Any real mounting error then has nowhere to go: the
 filter can't estimate it away and doesn't widen its covariance for it, so the
@@ -44,7 +44,7 @@ covariance stays tight. That is the textbook recipe for over-confidence.
 | **Signature** | calibration as state: `T_CI` (6/cam), intrinsics+distortion (8/cam), `t_d` (1/cam) |
 | **What it does** | estimates calibration online (its Jacobians enter `H_x`); or, if fixed, accounts for its uncertainty in `R` |
 | **Post / invariants** | *if estimated:* calibration states observable only under sufficient excitation (like accel bias) · *if fixed:* the assumed-perfect calibration's true uncertainty must appear **somewhere** in the noise budget |
-| **cortex** | **none of the above** — no calibration states, no calibration noise term; `T_CI`/`t_d`/intrinsics treated as perfectly known |
+| **cortex** | **extrinsics only, off by default** — `VioConfig::estimate_extrinsics` (default `false`, #332) adds one 6-DoF `CalibState` block (`R_imu_cam`, `p_imu_cam`) per camera with a prior; `calib_ext_rot_sigma_deg` (default 0) is the alternative `R` term. No intrinsics or `t_d` states. With both off (the default), `T_CI`/`t_d`/intrinsics are treated as perfectly known |
 
 ## Metrics
 
@@ -89,6 +89,46 @@ toward dof = 6 confirms `R` is the lever:
 The synthetic backend lands at **NEES ≈ 43 at R×1** — almost exactly the EuRoC
 MH_05 value (~43) — so this clean, ground-truthed setup is reproducing the real
 over-confidence, not a synthetic artifact.
+
+## Run the probe
+
+Both measurements come from **`s10_online_calibration`**
+(`tools/src/s10_online_calibration.cpp`), which drives
+`sdk/include/branes/sdk/eval/calibration_probe.hpp`:
+
+```bash
+cmake --build build -j$(nproc) --target s10_online_calibration
+./build/tools/s10_online_calibration --help    # print the S10 contract and exit
+./build/tools/s10_online_calibration --no-out  # compute and print only, no files
+./build/tools/s10_online_calibration --out DIR # write the CSVs to DIR
+```
+
+```text
+R-inflation @ 1deg ext, slow          4.1  x   induced 8.1px vs assumed 4.6px
+pose NEES with perfect calibration    ~43      backend over-confident even with exact T_CI
+```
+
+| Tool | Location | Purpose |
+|---|---|---|
+| Calibration probe | `tools/src/s10_online_calibration.cpp` + `eval/calibration_probe.hpp` | `noise_budget(...)` (pixels → `R` inflation) and `r_inflation_sweep()` (the NEES sweep) |
+| Jacobian test | `tests/sdk/calib_jacobians.cpp` | finite-difference check of the online-calibration Jacobians |
+| Recovery test | `tests/sdk/calib_recovery.cpp` | online calibration drives a deliberately wrong extrinsic back to truth |
+
+The online estimator is `VioConfig::estimate_extrinsics`
+(`sdk/include/branes/sdk/vio_backend.hpp`), with the priors
+`calib_ext_rot_prior_deg` (1.0) and `calib_ext_trans_prior_mm` (10.0); the state
+block is `CalibState` and `enable_calibration(init, rot_sigma, trans_sigma)` in
+`sdk/include/branes/sdk/msckf/state.hpp`. Its measurement Jacobians,
+$\mathbf{H}_{\theta,ic} = [\mathbf{p}_c]_\times$ and
+$\mathbf{H}_{p,ic} = -\mathbf{R}_{ic}^\top$, are in `camera_updater.hpp::project()`.
+
+There is no YAML or daemon config yet: calibration values are hardcoded in the
+tools and tests, or set by environment variables in the EuRoC test
+(`tests/sdk/vio_euroc.cpp`): `CORTEX_ESTIMATE_EXTRINSICS`,
+`CORTEX_CALIB_ROT_PRIOR_DEG`, `CORTEX_CALIB_ROT_SIGMA_DEG`. The unified config path
+is a separate epic ([#69](https://github.com/branes-ai/cortex/issues/69)). The
+[stage bench](../../debugging/stage-benches.mdx#calibration-as-known-as-noise-or-as-state-s10)
+`s10_online_calibration_bench` compares the three treatments over one window.
 
 ## Real-data inspector (`s10_inspect`)
 

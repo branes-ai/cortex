@@ -4,7 +4,7 @@
 // characterization.
 //
 // The first stage of CHARACTERIZE in the diagnostic methodology
-// (docs/assessments/vio-diagnostic-methodology.md): measure what the sensor
+// (docs/pipeline/diagnostic-methodology.mdx): measure what the sensor
 // stream actually contains before blaming the estimator. The Allan deviation
 // σ_A(τ) of a stationary IMU axis, plotted against the averaging time τ on
 // log-log axes, separates the noise processes by their slope:

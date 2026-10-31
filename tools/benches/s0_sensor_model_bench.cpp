@@ -3,7 +3,7 @@
 // s0_sensor_model_bench — the S0_sensor_model stage bench (issue #454). Runs
 // stages::s0_sensor_model::apply through the EuRoC pinhole-radtan camera on its
 // fixtures, in several arithmetic types, and prints the invariant report. See
-// docs/arch/stage-benches.md for the flags.
+// docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s0_sensor_model_bench.hpp>
 

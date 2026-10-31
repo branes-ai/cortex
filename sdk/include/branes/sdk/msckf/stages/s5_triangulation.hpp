@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s5_triangulation.hpp — stage S5_triangulation as an
-// explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md §S5).
+// explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md §S5).
 //
 //   apply(state, updater, track) → (p_f ∈ ℝ³ | rejected)
 //

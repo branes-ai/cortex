@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/update_probe.hpp — the S6 (MSCKF measurement update) probe of
-// the VIO contract program (docs/arch/vio-pipeline-canonical.md). S6 is the
+// the VIO contract program (docs/pipeline/canonical-pipeline.md). S6 is the
 // consistency-critical stage: it is where the filter's three master invariants
 // (NEES≈dim, NIS≈dof, white innovations) are won or lost. The global #212 symptom
 // is NEES ≫ dim; this probe measures its *local* mirror — **NIS per update** — and

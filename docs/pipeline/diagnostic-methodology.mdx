@@ -74,6 +74,13 @@ is over-confident), and **ground-truth injection** — the highest-leverage tool
 inject GT at stage *k*, and the first stage whose injection makes the failure
 vanish is the culprit.
 
+Even the end-to-end trajectory says more when it is split. Offline, with evo or
+rpg_trajectory_evaluation, compare the ATE after a **Sim3** alignment with the ATE
+after an **SE3** one: a small Sim3 ATE with a huge SE3 ATE is a *scale* problem, not
+a wrong trajectory shape. Likewise a huge ATE with a small short-window RPE points to
+global drift or a frame offset first, though a small local error that persists can
+accumulate into the same pattern; a longer RPE window tells them apart.
+
 ## The workflow
 
 **CHARACTERIZE → ASSESS → HYPOTHESIZE → MODEL → TEST**, where each stage produces a

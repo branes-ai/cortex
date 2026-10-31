@@ -47,7 +47,10 @@ compile_all(FOLDER "Tests/sdk" LIBS branes::sdk branes::cv
 
 # ── Bench layer (issue #200) ───────────────────────────────────────────────
 file(GLOB BENCH_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp)
-compile_all(FOLDER "Tests/bench" LIBS branes::bench branes::sdk SOURCES ${BENCH_SRC})
+# The "bench." prefix makes `ctest -R '^bench\.'` select exactly these cases.
+compile_all(FOLDER "Tests/bench" LIBS branes::bench branes::sdk
+    TEST_PREFIX "bench."
+    SOURCES ${BENCH_SRC})
 
 # ── Tools layer (issue #372 — VIO trace bus) ───────────────────────────────
 # branes::tools is host-only (skipped on the KPU cross-build), so gate the group

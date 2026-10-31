@@ -46,6 +46,37 @@ Swapping MSCKF for a different backend requires no front-end change — see the
   the filter time, so a later valid sample can't integrate across already-processed
   time.
 
+## Square-root covariance form
+
+The backend is generic over its covariance representation:
+`MsckfBackendT<T, Cov>` (`msckf_backend.hpp`), with `Cov` either
+`msckf::FullCovariance<T>` (Joseph form, the default; alias `MsckfBackend<T>`) or
+`msckf::SqrtCovariance<T>` (`sdk/include/branes/sdk/msckf/sqrt_covariance.hpp`, #187;
+alias `MsckfSqrtBackend<T>`). The square-root form
+carries the Cholesky factor S, with P = S·Sᵀ, instead of P, and replaces the Joseph
+update with a QR array update. It is clean-room from the textbook array algorithms
+(Kailath, Sayed & Hassibi, *Linear Estimation*; Mourikis's MSCKF).
+
+Every covariance operation reduces to one primitive, a Householder QR that returns the
+upper-triangular R (`msckf/qr.hpp`):
+
+- **Predict** P ← F·P·Fᵀ + Q: retriangularize [F·S | √Q].
+- **Augment** a clone: retriangularize G·S, with G the clone selector. This handles the
+  singular clone block naturally.
+- **Marginalize**: drop the clone's rows from S and retriangularize.
+- **Update**: the array algorithm on [[√R, H·S], [0, S]] yields the innovation factor
+  Rₑ, the gain block and the updated S′ in one QR; δx = K̄·(Rₑ⁻¹r) by triangular solves.
+- **Gate**: γ = ‖Rₑ⁻¹r‖², where Rₑ factors H·P·Hᵀ + R. No explicit inverse is formed.
+
+Only these five operations differ between the two forms. The covariance-independent
+code is shared, and it is the bulk: the IMU mean strapdown, triangulation, projection
+and Jacobians, the null-space projection, and the whole backend feature-management
+policy (~700 lines).
+
+Select it with `vio_pipeline --covariance sqrt` (the default is `full`). Its behaviour
+in `float` (#533) is measured under
+[Mixed precision](../debugging/mixed-precision.mdx#the-square-root-form-in-float-533).
+
 ## A second backend: the sliding-window skeleton
 
 `SlidingWindowBackend<T>` (#36) is a deliberate placeholder implementing the same

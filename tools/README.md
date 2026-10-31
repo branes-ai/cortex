@@ -7,13 +7,13 @@ run one, perturb an input, and watch a problem-native metric move, to build
 intuition for where a stage's contract bends.
 
 They are the executable companion to the contract program in
-[`docs/arch/vio-pipeline-canonical.md`](../docs/arch/vio-pipeline-canonical.md):
+[`docs/pipeline/canonical-pipeline.md`](../docs/pipeline/canonical-pipeline.md):
 the canonical OpenVINS/MINS pipeline deconstructed into stages **S0–S10**, each
 written as a contract. One executable per stage.
 
 ## End-to-end noise→robustness demo (`vio_pipeline`)
 
-> **New to this tool?** See the guide: [docs/assessments/vio-pipeline-howto.md](../docs/assessments/vio-pipeline-howto.md) — what/why/how, the experiment, results, and how accurate VIO needs to be for different robot form factors.
+> **New to this tool?** See the guide: [docs/pipeline/running-the-demo.md](../docs/pipeline/running-the-demo.md) — what/why/how, the experiment, results, and how accurate VIO needs to be for different robot form factors.
 
 Where the stage probes study one stage in isolation, `vio_pipeline` runs the
 **whole pipeline as a stream**: a synthetic world with *exact* ground truth →

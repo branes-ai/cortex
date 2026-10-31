@@ -1,6 +1,6 @@
 // Render the S0 sensor-model probe artifacts (CSV) to SVG figures for
 // qualitative inspection — the visual half of the S0 contract program
-// (docs/arch/vio-pipeline-canonical.md, docs/assessments/s0-sensor-model-probe.md).
+// (docs/pipeline/canonical-pipeline.md, docs/assessments/s0-sensor-model-probe.md).
 //
 // Pipeline:  tests/sdk/sensor_model_probe.cpp  --(CORTEX_PROBE_OUT)-->  *.csv
 //            this script                        --------------------->  *.svg

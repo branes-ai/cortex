@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # vio_scene_video.sh — one-shot: run the VIO pipeline experiment, generate the
 # per-frame scene + overlay data, and assemble it into an mp4 (and, with --sweep,
-# the noise→robustness figures). See docs/assessments/vio-pipeline-howto.md.
+# the noise→robustness figures). See docs/pipeline/running-the-demo.md.
 #
 #   scripts/vio_scene_video.sh [options]
 #

@@ -2,7 +2,7 @@
 //
 // branes/sdk/msckf/stages/s6_msckf_update.hpp — stage S6 (the MSCKF update) as
 // explicit transformations, one per sub-step (issue #452,
-// docs/arch/vio-pipeline-canonical.md §S6), so the update can be benched piece
+// docs/pipeline/canonical-pipeline.md §S6), so the update can be benched piece
 // by piece:
 //
 //   s6a_jacobians::apply(state, updater, track, p_f)  → (H_f, H_x, r)

@@ -2,7 +2,7 @@
 //
 // branes/sdk/eval/clone_window_probe.hpp — the S3 (state augmentation / stochastic
 // cloning) and S9 (marginalization / clone management) probes of the VIO contract
-// program (docs/arch/vio-pipeline-canonical.md).
+// program (docs/pipeline/canonical-pipeline.md).
 //
 // Both stages are pure covariance bookkeeping on the sliding window, and both have
 // a textbook clean-room failure mode the probe checks against the SHIPPED code

@@ -1,5 +1,5 @@
 // S3 (state augmentation / stochastic cloning) and S9 (marginalization / clone
-// management) probes (docs/arch/vio-pipeline-canonical.md).
+// management) probes (docs/pipeline/canonical-pipeline.md).
 //
 // Locks the measured contract of the shipped StateHelper bookkeeping against the
 // textbook clean-room failure modes:

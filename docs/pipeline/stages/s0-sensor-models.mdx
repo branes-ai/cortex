@@ -178,6 +178,36 @@ The contract defines the required behavior of the sensor and calibration mathema
 
 ---
 
+## Run the probe
+
+**`s0_sensor_model`** (`tools/src/s0_sensor_model.cpp`) runs the S0 probes on the EuRoC cam0 model, a fisheye and the real IMU propagator, and prints native-unit results against the contract above:
+
+```bash
+cmake --build build -j$(nproc) --target s0_sensor_model
+./build/tools/s0_sensor_model --help     # print the S0 contract and exit
+./build/tools/s0_sensor_model --no-out   # run all probes, print numbers, write no CSVs
+./build/tools/s0_sensor_model --out DIR  # write the CSVs to DIR
+```
+
+```text
+radtan round-trip residual (max)      1.28e-13 px   PASS   <- unproject o project ~ identity
+radtan Jacobian rel-error (max)       1.18e-09  -    PASS   <- analytic project_jacobian correct
+time-offset sensitivity [slow]        0.1185 px/ms         <- how t_d error shows up in pixels
+extrinsic rotation sensitivity        ...    px/deg        <- how a wrong R_imu_cam shows up
+extrinsic translation sensitivity     ...    px/mm @2m, @10m
+```
+
+Without `--no-out` it writes the CSVs (`roundtrip_radtan.csv`, `jacobian_radtan.csv`, `extrinsic.csv`, …) that the docs-site figure generator renders.
+
+| Tool | Location | Purpose |
+| :--- | :--- | :--- |
+| Sensor-model probe | `tools/src/s0_sensor_model.cpp` + `sdk/include/branes/sdk/eval/sensor_model_probe.hpp` | Round trip, Jacobian consistency, time-offset and extrinsic sensitivity, IMU drift |
+| Pinhole-Radtan | `math/include/branes/math/cameras/pinhole_radtan.hpp` | The projection math: `project`, `unproject`, `distort`/`undistort`, `project_jacobian` |
+
+The camera it interrogates is hardcoded: `euroc_cam0()` in `tools/src/s0_sensor_model.cpp` (the same values are in `tests/sdk/vio_euroc.cpp`). To probe a different camera, edit it there. There is no YAML or daemon config yet; calibration values are hardcoded in the tools and tests, or set by environment variables in the EuRoC test (e.g. `CORTEX_ESTIMATE_EXTRINSICS`). The unified config path is a separate epic ([#69](https://github.com/branes-ai/cortex/issues/69)). The [stage bench](../../debugging/stage-benches.mdx) `s0_sensor_model_bench` runs the same stage on fixtures and in several arithmetic types.
+
+---
+
 ## Real-Data Validation via `s0_inspect`
 
 Cortex provides a generalized static release tool, **`s0_inspect`**, which can be invoked directly on actual EuRoC sensor streams to verify physical calibration.

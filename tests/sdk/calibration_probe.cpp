@@ -1,4 +1,4 @@
-// S10 calibration probe (docs/arch/vio-pipeline-canonical.md) — the leading
+// S10 calibration probe (docs/pipeline/canonical-pipeline.md) — the leading
 // #212 candidate: the filter treats camera↔IMU calibration as perfectly known.
 //
 // Locks two findings: (1) the analytic noise budget — a realistic ~1° extrinsic

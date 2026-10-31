@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s2_propagation.hpp — stage S2_propagation as an
-// explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md §S2).
+// explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md §S2).
 //
 //   apply(state, propagator, (ω̃, ã), Δt) → (state', diagnostics)
 //

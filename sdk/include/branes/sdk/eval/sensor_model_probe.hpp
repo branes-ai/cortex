@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/sensor_model_probe.hpp — the S0 (sensor & calibration
-// model) probe of the VIO contract program (docs/arch/vio-pipeline-canonical.md).
+// model) probe of the VIO contract program (docs/pipeline/canonical-pipeline.md).
 //
 // S0 is the substrate every later stage trusts: the camera projection model,
 // the IMU measurement/integration model, and the camera↔IMU calibration

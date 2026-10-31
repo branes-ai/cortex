@@ -57,7 +57,7 @@ namespace branes::sdk::eval::inv {
 /// TRANSFORMATION the stage performs, not just its position, so a stage, its
 /// bench and its invariants read in isolation from the rest of the pipeline.
 /// The names match the stage tools (tools/src/s<N>_<transformation>.cpp) and
-/// docs/arch/vio-pipeline-canonical.md; S6 is split into S6a–S6e (#444/#452).
+/// docs/pipeline/canonical-pipeline.md; S6 is split into S6a–S6e (#444/#452).
 /// `Inputs` and `EndToEnd` are not transformations: they bracket the pipeline.
 enum class Stage {
     Inputs,                    ///< sensor streams and calibration as delivered

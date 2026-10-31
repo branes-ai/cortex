@@ -2,7 +2,7 @@
 //
 // s6b_nullspace_projection_bench — the S6b_nullspace_projection stage bench (issue #457). Runs
 // stages::s6b_nullspace_projection::apply on its fixtures, in several arithmetic types,
-// and prints the invariant report. See docs/arch/stage-benches.md for the flags.
+// and prints the invariant report. See docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s6b_nullspace_projection_bench.hpp>
 
