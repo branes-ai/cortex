@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.0](https://github.com/branes-ai/cortex/compare/v0.82.2...v0.83.0) (2026-10-31)
+
+
+### Features
+
+* **docs-site:** generate the site from docs/, with docs-kit ([#541](https://github.com/branes-ai/cortex/issues/541)) ([912fc48](https://github.com/branes-ai/cortex/commit/912fc481c40d8e25c8be4bc0984a94d881e31a14))
+
+
+### Continuous Integration
+
+* give each run on main a concurrency group of its own ([#539](https://github.com/branes-ai/cortex/issues/539)) ([1951d5e](https://github.com/branes-ai/cortex/commit/1951d5e57a0dc643564ebb386d8290805999e2ed))
+
 ## [0.82.2](https://github.com/branes-ai/cortex/compare/v0.82.1...v0.82.2) (2026-10-31)
 
 
