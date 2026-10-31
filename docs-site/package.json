@@ -5,25 +5,20 @@
   "private": true,
   "scripts": {
     "gen:benchmarks": "node scripts/gen-benchmarks.mjs",
+    "sync": "docs-kit sync",
     "predev": "npm run gen:benchmarks",
-    "dev": "astro dev",
-    "start": "astro dev",
-    "api": "doxygen Doxyfile",
+    "dev": "docs-kit dev",
+    "start": "docs-kit dev",
+    "api": "docs-kit api",
     "prebuild": "npm run gen:benchmarks",
-    "build": "astro build",
-    "build:full": "npm run api && npm run build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "build": "docs-kit build",
+    "check": "docs-kit check",
+    "build:full": "docs-kit api && npm run build",
+    "preview": "docs-kit preview"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.37.3",
+    "@branes-ai/docs-kit": "github:branes-ai/docs-kit#v0.2.1",
     "@types/three": "^0.184.1",
-    "astro": "^5.6.1",
-    "katex": "^0.17.0",
-    "rehype-katex": "^7.0.1",
-    "rehype-rewrite": "^4.0.4",
-    "remark-math": "^6.0.0",
-    "sharp": "^0.34.2",
     "three": "^0.184.0"
   },
   "devDependencies": {

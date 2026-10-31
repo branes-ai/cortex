@@ -1,0 +1,146 @@
+---
+title: S5 — Feature Triangulation
+description: Recovering the 3-D point a feature track corresponds to — and the measured finding that the shipped triangulator has no soft parallax gate, admitting low-parallax features at full weight.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Before a feature track can correct the filter ([S6](s6-msckf-update.mdx)),
+its 3-D position has to be recovered from the bearings the cameras observed. S5
+does that triangulation. The catch: depth is only well-determined when the
+observing cameras saw the point from **sufficiently different angles** — enough
+**parallax**. Triangulate a point seen from nearly the same direction and the depth
+is almost unconstrained, but the filter will use it as if it were precise. This
+page measures exactly that — and reports the end-to-end result that **gating those
+features is *not* the fix** for the aggressive-motion over-confidence tracked on
+[Engineering Status](../engineering-status.mdx).
+
+## What it does
+
+Linear (ray-perpendicular / DLT) triangulation across the observing clones —
+solve `Σ(I − d̂d̂ᵀ)·p_f = Σ(I − d̂d̂ᵀ)·C` for the world point `p_f` — followed by a
+few Gauss-Newton reprojection refinements. OpenVINS triangulates at the *current*
+clone poses (best geometry).
+
+## Why it matters
+
+Depth uncertainty is governed by parallax. Two rays that are nearly parallel
+intersect at a shallow angle, so a tiny bearing error (a fraction of a pixel) moves
+the intersection a long way along the depth direction. A correct pipeline must
+**gate** on parallax (or the triangulation condition number): below a threshold the
+feature should be deferred or **down-weighted**, never admitted at full weight. The
+question for cortex is whether such a gate exists — and the probe answers it.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `triangulate(observations, clone_poses, T_CI) → (p_f ∈ ℝ³, status)` |
+| **Pre** | ≥ 2 observations from **distinct, sufficiently-parallax** clones; cheirality holds; pure-rotation (zero-parallax) tracks flagged, not fed in |
+| **Post / invariants** | reprojection residual below threshold · depth positive and finite · **condition number of the normal matrix bounded** — low parallax ⇒ defer/down-weight, not "use as if precise" |
+| **cortex** | `msckf/camera_updater.hpp` — linear triangulation + Gauss-Newton refine; **exposed for this probe** |
+
+## Metrics
+
+The [S5 probe](../consistency-analysis.mdx) drives the **shipped**
+`triangulate()` across an exact two-view parallax sweep (feature at 5 m), measuring
+the true depth uncertainty by **Monte Carlo** (the std of recovered depth under
+1 px observation noise) — not an analytic approximation.
+
+### Depth uncertainty vs parallax — and the (default-off) soft gate
+
+| parallax | `triangulate()` | condition number | depth σ (1 px) | σ as % of depth |
+|---:|:---:|---:|---:|---:|
+| 0.5° | **ok** | 5.3e4 | 4581 mm | 92% |
+| 1° | **ok** | 1.3e4 | 965 mm | 19% |
+| 2° | **ok** | 3283 | 434 mm | 8.7% |
+| 5° | ok | 526 | 184 mm | 3.7% |
+| 10° | ok | 132 | 87 mm | 1.7% |
+
+![Triangulated-depth σ vs parallax](../../assessments/figures/s5/triang_depth_sigma.svg)
+![Triangulation condition number vs parallax](../../assessments/figures/s5/triang_condition.svg)
+
+The decisive observation: **`triangulate()` returns success at every level above the
+numerical breakdown** — including 0.5°, where the depth is uncertain to ~90% of its
+value. The always-on guard is the **hard** one: the Cholesky factorization fails for
+near-parallel rays. The soft parallax gate is **off by default**, so out of the box a
+feature triangulated at 0.5–2° parallax is still handed to the update at full weight.
+Clean-observation depth error is ~0 throughout (the geometry is correct) — the danger
+is entirely in the *uncertainty* the filter fails to account for.
+
+A reasonable soft gate (depth σ ≤ 5% of depth) sits at ~**5°** of parallax. Such a
+gate is **now implemented** — `CameraUpdaterOptions::min_parallax_deg` rejects a
+triangulation below the threshold (the [S5-gate unit test](../diagnostic-methodology.mdx)
+confirms it rejects 0.7° and admits 20°), plumbed through `VioConfig::min_parallax_deg`
+and the `CORTEX_MIN_PARALLAX_DEG` replay knob. It ships **default-off** (`0`).
+
+### End-to-end on real data — the gate is *refuted* as the V2_03 fix
+
+The decisive experiment: enable the gate on EuRoC **V2_03** (the aggressive-motion
+sequence) and measure. It does **not** help — it monotonically *regresses* both
+accuracy and consistency, because gating starves the fast-motion filter of the
+short-baseline features it depends on:
+
+| V2_03 | gate off | gate 2° | gate 5° |
+|---|---:|---:|---:|
+| ATE (m) | **0.27** | 0.89 | 1.99 |
+| NIS (ideal ≈ dof) | **14.7** | 17.5 | 26.7 |
+| NEES (ideal ≈ dim state) | **140** | 170 | 322 |
+| updates applied | **21 585** | 16 772 | 10 180 |
+
+The harder the gate, the fewer features survive (a 5° gate drops more than half),
+and the filter ends up *less* accurate and *more* over-confident. So the S5
+low-parallax admission — though a genuine contract gap — is **not** what drives the
+V2_03 over-confidence; rejecting those features costs more than it saves. The
+over-confidence is dominated by the other input-side source, the
+[S10 unmodeled calibration](s10-online-calibration.mdx). This is the
+measure-don't-assume discipline working: a plausible lead, refuted by one experiment.
+
+## Real-data inspector (`s5_inspect`)
+
+The sweep above is the *synthetic* probe — exact two-view geometry, known parallax,
+run in CI. Its real-data companion, **`s5_inspect`**, **establishes the 3-D
+renderer tier** (epic #371): it runs the same shipped triangulator
+(`CameraUpdater::triangulate`) on **real EuRoC tracks** (the shipped FAST + KLT
+frontend) with **ground-truth clone poses**, and renders the 3-D landmark cloud the
+camera reconstructs.
+
+```bash
+s5_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s5 --min-obs 3
+#   --px-noise PX   --fast-threshold F   --target-features N
+node docs-site/scripts/gen-overlay.mjs build/s5     # → reprojection residuals (per frame)
+# 3-D landmark cloud + covariance ellipsoids: load scene.json + run.jsonl in the Scene3D viewer
+```
+
+Triangulation is decoupled behind the `trace::S5Input` / `trace::S5Output` I/O
+struct (the clone-pose window + feature tracks in, the landmark cloud out). The
+inspector exposes what the update path hides: for each landmark the **position
+covariance** — computed analytically from the operator's *own* reprojection
+Jacobian, `σ² · (Σ Hfᵀ Hf)⁻¹` — plus the inter-view **parallax**, the system
+**condition number**, and the per-observation **reprojection residual**. It emits:
+
+- `scene.json` — the landmark cloud + a per-landmark covariance ellipsoid, drawn in
+  the [3-D viewer](../../vio/scene3d.mdx). A low-parallax feature shows the intuition
+  directly: its ellipsoid stretches far along the line of sight (depth is the
+  unobservable direction), while a wide-baseline feature is a tight sphere.
+- `frames.jsonl` — per-frame reprojection residuals over the image (observed pixel
+  vs the landmark's reprojection), drawn by the overlay renderer; a large,
+  structured residual flags a triangulation the backend should not trust.
+
+## Interactive
+
+Parallax is the apparent motion difference between near and far features as the
+camera moves — exactly what the depth-coloured landmark cloud in the
+[3-D viewer](../../vio/scene3d.mdx) shows: near dots sweep faster than far ones. Low
+parallax is when that sweep is small, and depth becomes unobservable.
+
+<Aside type="caution" title="Status — gate implemented, validated, and kept default-off (refuted as the fix)">
+  Beyond the **hard** degeneracy guard (Cholesky breakdown), a **soft parallax
+  gate** (`min_parallax_deg`) is implemented, unit-tested, and now **validated
+  end-to-end on EuRoC V2_03** — where it *regresses* ATE (0.27 → 1.99 m at 5°) and
+  NEES (140 → 322), because aggressive motion needs the very short-baseline features
+  the gate rejects. So it stays **default-off**: the low-parallax admission is a real
+  contract gap but **not** the V2_03 over-confidence driver. The remaining input-side
+  lead is the [S10 unmodeled calibration](s10-online-calibration.mdx).
+  Full decomposition on [Engineering Status](../engineering-status.mdx).
+</Aside>

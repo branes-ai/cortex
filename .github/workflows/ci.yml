@@ -83,6 +83,21 @@ jobs:
         with:
           strict: 'true'
 
+  # The docs site is generated from docs/ (docs/plan/docs-site); building it on
+  # every PR fails a broken relative link or anchor here instead of in the
+  # deploy after merge. No Doxygen: the API reference doesn't affect the check.
+  docs-site:
+    name: Docs site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      # Installs the pinned docs-kit (docs-site/package.json), builds the site as
+      # the deploy does, and checks every link and anchor in it.
+      - uses: branes-ai/docs-kit/actions/check@16e1d7b10d005cbbefffe2dac61035928c6973e5  # v0.2.1
+
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
     runs-on: ubuntu-22.04
