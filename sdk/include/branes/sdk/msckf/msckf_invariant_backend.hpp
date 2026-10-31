@@ -65,6 +65,11 @@ public:
         /// `chi2_per_dof · (#projected rows)`. Loose default, matches the body path.
         T chi2_per_dof = T{5};
         bool enable_gating = true;
+        /// S5 Gauss-Newton refinement steps after the linear triangulation
+        /// (`refine_invariant_feature`, #548). It converges in fewer on most
+        /// tracks; low-parallax ones (a slow start) need up to ~20. 0 keeps
+        /// the bare linear solve, which is over-confident on a slow start.
+        std::size_t max_triangulation_iters = 20;
         SO3 R_imu_cam{};   ///< camera↔IMU extrinsic rotation
         Vec3 p_imu_cam{};  ///< camera origin in the IMU frame
     };
@@ -220,8 +225,8 @@ public:
         const bool estimate_cal = !calib_.empty();
 
         // S5_triangulation
-        const auto tri = triangulate_invariant<T>(clones_, obs, active_cal);
-        if (!tri.ok)
+        auto tri = triangulate_invariant<T>(clones_, obs, active_cal);
+        if (!tri.ok || !refine_invariant_feature<T>(clones_, obs, tri.p_f, active_cal, cfg_.max_triangulation_iters))
             return false;
         // S6a_jacobians
         const auto M = build_invariant_measurement<T>(clones_, obs, tri.p_f, active_cal, estimate_cal);

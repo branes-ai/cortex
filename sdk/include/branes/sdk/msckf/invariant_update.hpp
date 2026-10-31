@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace branes::sdk::msckf {
@@ -224,6 +225,81 @@ template <math::Scalar T>
     }
     M.ok = true;
     return M;
+}
+
+/// Gauss-Newton refinement of a triangulated feature on the reprojection error,
+/// seeded by `triangulate_invariant` (#548). The linear solve minimizes an
+/// algebraic, unweighted ray distance, which is a poor estimate when the window's
+/// parallax is small: at a 1 s onset its depths came out metres wrong and the
+/// update, linearized there, turned roll/pitch over-confident (NEES ≈ 300). Each
+/// step solves (H_fᵀH_f) δ = H_fᵀ r with the same H_f and r the update uses, so
+/// the feature is refined under the projection model it is then marginalized with.
+/// Stops after `max_iters` steps or once a step moves the feature by less than
+/// 1e-6 of its distance from the first observing camera. Each step backtracks
+/// (halving, up to 8 times) until the feature stays in front of every camera and
+/// the reprojection cost drops; when none does, the last accepted estimate stands.
+/// Returns false (reject the track) only when the seed itself is behind a camera;
+/// a step whose normal equations do not factor leaves the current estimate in place.
+template <math::Scalar T>
+[[nodiscard]] bool refine_invariant_feature(const std::vector<InvariantClone<T>>& clones,
+                                            const std::vector<InvariantObs<T>>& obs,
+                                            branes::math::lie::detail::Vec<T, 3>& p_f,
+                                            const std::vector<InvariantCalib<T>>& calib,
+                                            std::size_t max_iters) {
+    using Vec3 = branes::math::lie::detail::Vec<T, 3>;
+    if (obs.empty() || obs.front().clone_index >= clones.size())
+        return false;
+    const Vec3 c0 = clones[obs.front().clone_index].p;
+    const auto cost_of = [](const InvariantMeasurement<T>& m) {
+        T c{0};
+        for (const T& v : m.r)
+            c += v * v;
+        return c;
+    };
+    InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f, calib, false);
+    if (!M.ok)
+        return false;
+    T cost = cost_of(M);
+    for (std::size_t it = 0; it < max_iters; ++it) {
+        DynMat<T> H(3, 3), g(3, 1), L;
+        for (std::size_t row = 0; row < M.rows2; ++row)
+            for (std::size_t a = 0; a < 3; ++a) {
+                g(a, 0) += M.H_f[row * 3 + a] * M.r[row];
+                for (std::size_t b = 0; b < 3; ++b)
+                    H(a, b) += M.H_f[row * 3 + a] * M.H_f[row * 3 + b];
+            }
+        // The same fixed 1e-9 ridge as CameraUpdater::triangulate, for the same
+        // reason: it keeps a depth-degenerate H factorable and stays far below
+        // H's informative eigenvalues (see the comment there before changing it).
+        for (std::size_t a = 0; a < 3; ++a)
+            H(a, a) += T(1e-9);
+        if (!cholesky(H, L))
+            break;
+        const DynMat<T> dx = cholesky_solve(L, g);
+        Vec3 step{{dx(0, 0), dx(1, 0), dx(2, 0)}};
+        // Backtrack: a full Gauss-Newton step can raise the cost or carry the
+        // feature across a camera plane, which would reject a usable track.
+        bool accepted = false;
+        for (int half = 0; half <= 8; ++half) {
+            InvariantMeasurement<T> Mc = build_invariant_measurement<T>(clones, obs, p_f + step, calib, false);
+            if (Mc.ok && cost_of(Mc) < cost) {
+                p_f = p_f + step;
+                cost = cost_of(Mc);
+                M = std::move(Mc);
+                accepted = true;
+                break;
+            }
+            step = step * T(0.5);
+        }
+        if (!accepted)
+            break;
+        const Vec3 range = p_f - c0;
+        const T s2 = step[0] * step[0] + step[1] * step[1] + step[2] * step[2];
+        const T r2 = range[0] * range[0] + range[1] * range[1] + range[2] * range[2];
+        if (!(s2 > T(1e-12) * r2))
+            break;
+    }
+    return true;
 }
 
 /// Apply one feature track to the invariant clone window. `clones`/`cov` carry the

@@ -14,9 +14,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <random>
 #include <vector>
 
 namespace {
@@ -193,4 +195,78 @@ TEST_CASE("invariant update: H annihilates the 4-DoF gauge at the actual clone p
     REQUIRE(leak(s.feats[0]) < 1e-12);
     REQUIRE(leak(s.feats[7]) < 1e-12);
     REQUIRE(leak(s.feats[15]) < 1e-12);
+}
+
+TEST_CASE("invariant triangulation: Gauss-Newton refinement repairs a low-parallax linear solve",
+          "[sdk][riekf][triangulation]") {
+    // A slow start (#548): 11 clones 1 cm apart, so a feature 3-8 m away spans
+    // about 1 deg of parallax, against a pixel noise of 0.005 (0.29 deg): the
+    // first window a 1 s onset fuses.
+    std::vector<ms::InvariantClone<T>> clones(11);
+    for (std::size_t c = 0; c < clones.size(); ++c) {
+        clones[c].R = SO3::exp(Vec3{{0.002 * c, -0.001 * c, 0.003 * c}});
+        clones[c].p = Vec3{{0.01 * c, 0.006 * c, 0.0}};
+    }
+    auto cost = [&](const std::vector<ms::InvariantObs<T>>& obs, const Vec3& pf) {
+        T sse = 0;
+        for (const auto& o : obs) {
+            const Vec2 h = project(clones[o.clone_index], pf);
+            sse += (h[0] - o.xy[0]) * (h[0] - o.xy[0]) + (h[1] - o.xy[1]) * (h[1] - o.xy[1]);
+        }
+        return sse;
+    };
+    std::mt19937 rng(548u);
+    std::normal_distribution<T> nd(0, 1);
+    std::uniform_real_distribution<T> uxy(-1, 1), uz(3, 8);
+    std::vector<T> err_lin, err_gn;
+    std::size_t seeds_valid = 0;
+    for (int i = 0; i < 200; ++i) {
+        const Vec3 L{{uxy(rng), uxy(rng), uz(rng)}};
+        std::vector<ms::InvariantObs<T>> obs;
+        for (std::size_t c = 0; c < clones.size(); ++c) {
+            const Vec2 xy = project(clones[c], L);
+            const T n0 = nd(rng), n1 = nd(rng);
+            obs.push_back({c, 0, Vec2{{xy[0] + 0.005 * n0, xy[1] + 0.005 * n1}}});
+        }
+        const auto tri = ms::triangulate_invariant<T>(clones, obs);
+        if (!tri.ok)
+            continue;
+        // A seed in front of every camera is never rejected: each step backtracks
+        // until it stays in front and lowers the cost, else the estimate stands.
+        if (!ms::build_invariant_measurement<T>(clones, obs, tri.p_f).ok)
+            continue;
+        ++seeds_valid;
+        Vec3 pf = tri.p_f;
+        REQUIRE(ms::refine_invariant_feature<T>(clones, obs, pf, {}, 20));
+        REQUIRE(ms::build_invariant_measurement<T>(clones, obs, pf).ok);
+        // Gauss-Newton never ends above the cost of its own seed.
+        CHECK(cost(obs, pf) <= cost(obs, tri.p_f));
+        err_lin.push_back(det::norm(tri.p_f - L));
+        err_gn.push_back(det::norm(pf - L));
+    }
+    INFO(err_gn.size() << " of 200 tracks kept");
+    REQUIRE(err_gn.size() == seeds_valid);
+    REQUIRE(err_gn.size() > 150);
+    std::sort(err_lin.begin(), err_lin.end());
+    std::sort(err_gn.begin(), err_gn.end());
+    const T med_lin = err_lin[err_lin.size() / 2], med_gn = err_gn[err_gn.size() / 2];
+    INFO("median feature error: linear " << med_lin << " m, refined " << med_gn << " m");
+    CHECK(med_gn < med_lin / 2);
+}
+
+TEST_CASE("invariant triangulation: refinement keeps an exact feature and rejects one behind a camera",
+          "[sdk][riekf][triangulation]") {
+    const Scene s = make_scene();
+    for (const Vec3& L : s.feats) {
+        const auto obs = track(s, L);
+        const auto tri = ms::triangulate_invariant<T>(s.clones, obs);
+        REQUIRE(tri.ok);
+        Vec3 pf = tri.p_f;
+        REQUIRE(ms::refine_invariant_feature<T>(s.clones, obs, pf, {}, 20));
+        CHECK(det::norm(pf - L) < 1e-9);
+    }
+    // A seed behind every camera fails the cheirality check: reject the track.
+    const auto obs = track(s, s.feats[0]);
+    Vec3 behind{{0.0, 0.0, -3.0}};
+    CHECK_FALSE(ms::refine_invariant_feature<T>(s.clones, obs, behind, {}, 20));
 }
