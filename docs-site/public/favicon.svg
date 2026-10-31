@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Cortex">
+  <rect width="320" height="320" rx="64" fill="#0d1521"/>
+  <!-- The hero's spatial-dataflow tile grid. -->
+  <g fill="none" stroke="#2f80ed" stroke-width="16">
+    <rect x="52" y="52" width="56" height="56" rx="10"/>
+    <rect x="132" y="52" width="56" height="56" rx="10"/>
+    <rect x="212" y="52" width="56" height="56" rx="10"/>
+    <rect x="52" y="132" width="56" height="56" rx="10"/>
+    <rect x="212" y="132" width="56" height="56" rx="10"/>
+    <rect x="52" y="212" width="56" height="56" rx="10"/>
+    <rect x="132" y="212" width="56" height="56" rx="10"/>
+    <rect x="212" y="212" width="56" height="56" rx="10"/>
+  </g>
+  <rect x="132" y="132" width="56" height="56" rx="10" fill="#9ec5fe"/>
+</svg>

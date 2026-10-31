@@ -1,0 +1,345 @@
+---
+title: Numerical Thresholds Across Arithmetic Types
+description: Why constants tuned in double break in float, posits and narrow hardware formats, and how cortex fixes them (#449, PR #512). A tolerance scales with the arithmetic; a regularizer does not. Measured error models for the SO(3) small-angle hand-off and the initializer's ridge, with guidance for a hardware implementation.
+sidebar:
+  label: "Numerical Thresholds Across Types"
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The pipeline was written and tuned in double. Every constant that sits next to a rounding error,
+such as a small-angle cut-off or a ridge on a normal matrix, was chosen against double's unit roundoff
+$\varepsilon = 2.2\times10^{-16}$. When the same code runs in float, in a posit, or in a format
+built into hardware, those constants can stop doing their job. This page records which constants
+are sensitive, why, what [PR #512](https://github.com/branes-ai/cortex/pull/512) did about each,
+and what was measured. It is the starting point for anyone choosing a number format for a hardware
+implementation of these stages.
+
+<Aside type="tip" title="The one rule">
+  Before changing a constant, decide what it is.
+  - **A tolerance** decides how much rounding to forgive, so it must **scale with the arithmetic**
+    (with $\varepsilon_T$).
+  - **A regularizer** changes the problem being solved, so it must be set by **the problem**, far below
+    the information it would otherwise erase, and must **not** scale with $\varepsilon_T$.
+
+  PR #512 first treated both as tolerances, and the S1 bench caught the mistake.
+</Aside>
+
+| Constant | Where | Kind | After PR #512 |
+|---|---|---|---|
+| small-angle hand-off, 1e-5 | `math/lie/so3.hpp`, `sim3.hpp` (θ) | tolerance (a choice between two error sources) | $\max(10^{-5},\ \varepsilon_T^{1/3})$ via `lie::detail::small_angle<T>()` |
+| scale-rate hand-off, 1e-5 | `math/lie/sim3.hpp` (σ integrals) | tolerance, but no single value works | series summed to convergence for $\lvert\sigma\rvert < 1$, closed form above |
+| PSD check slack, 1e-9 | `sdk/msckf/dense.hpp` `is_positive_semidefinite` | tolerance | floored at $16\,\varepsilon_T\,\max_i P_{ii}$ (a norm of P) via `math::at_least_roundoff` |
+| up-vector degeneracy, 1e-9 | `sdk/imu_init.hpp` `align_to_world_up` | tolerance on a sine in [0, 1] | floored at $16\,\varepsilon_T$ |
+| alignment ridge, 1e-9 | `sdk/imu_init.hpp` `solve_alignment` | **regularizer** | fixed 1e-9 in every T |
+| gyro-bias ridge, 1e-9 | `sdk/imu_init.hpp` | **regularizer** | fixed 1e-9 in every T |
+| triangulation ridge, 1e-9 | `sdk/msckf/camera_updater.hpp` | **regularizer** | fixed 1e-9 in every T |
+
+For `T = double`:
+- `small_angle` returns 1e-5 exactly.
+- `at_least_roundoff` returns the old 1e-9 unless the entry it is scaled by exceeds about
+  $2.8\times10^5$, where $16\,\varepsilon\,\lvert\text{scale}\rvert$ passes 1e-9. That depends on the
+  input, so it is not a guarantee.
+
+As measured, the bench snapshot (132 outputs) and the EuRoC V1_01, MH_05 and V2_03 trajectories are
+unchanged bit for bit.
+
+## 1. The small-angle hand-off
+
+### Where the error comes from
+
+SO(3)'s left Jacobian is
+
+$$
+J_l(\phi) = I + a(\theta)\,W + b(\theta)\,W^2,\qquad
+a = \frac{1-\cos\theta}{\theta^2},\quad b = \frac{\theta-\sin\theta}{\theta^3},
+$$
+
+with $W = [\phi]_\times$ and $\theta = \lVert\phi\rVert$. Two ways of evaluating it fail in opposite
+directions as $\theta \to 0$.
+
+- **The closed form cancels.** $1-\cos\theta$ is a difference of two numbers near 1, so it carries
+  an absolute rounding error of about $\varepsilon_T$, whatever its true size. After dividing by
+  $\theta^2$ and multiplying by $W$ (entries of order $\theta$), the error in $J_l$ is about
+  $\varepsilon_T/\theta$. It **grows** as $\theta$ shrinks. In float, $\cos\theta$ rounds to exactly
+  1 once $\theta^2/2$ is below half an ulp of 1, which happens for $\theta \lesssim 2.4\times10^{-4}$.
+  Then $a = 0$ and $J_l$ silently loses its $W/2$ term.
+- **The series truncates.** The code's series $J_l \approx I + W/2 + W^2/6$ drops terms of order
+  $\theta^3/24$. That error **shrinks** as $\theta$ shrinks.
+
+The best hand-off balances the two:
+
+$$
+\frac{\varepsilon_T}{\theta} = \frac{\theta^3}{24}
+\quad\Longrightarrow\quad
+\theta^\star \approx (24\,\varepsilon_T)^{1/4}.
+$$
+
+The model bounds rounding from above, so measured crossovers sit a little lower: about $2\times10^{-4}$
+for double (model $2.7\times10^{-4}$) and $2.5\times10^{-2}$ for float (model $4.1\times10^{-2}$).
+
+The exponential and logarithm also have small-angle branches. Their IEEE closed forms,
+$\sin(\theta/2)/\theta$ and $2\,\mathrm{atan2}(\lVert v\rVert, w)/\lVert v\rVert$, do **not** cancel,
+so in float and double they are accurate at any $\theta > 0$ and the branch only avoids $0/0$.
+Posits are different (see below).
+
+### Measured
+
+The maximum entry error of $J_l$ over $\theta \in [10^{-6}, 0.1]$, evaluated at the same T-rounded
+$\phi$. This table, and the $J_l^{-1}$ and exponential figures below, come from a one-off sweep
+that is not in the tree. It compared against $a$ and $b$ summed as Taylor series in long double, an
+exact reference at these angles. The regression test that guards these numbers
+(`so3_jacobian_sweep_error` in `tests/math/lie_groups.cpp`) compares against `SO3<double>` instead.
+For float and the posits, double is accurate enough to reproduce the bounds, but it cannot measure
+double's own error.
+
+| Type | $\varepsilon_T$ at 1 | hand-off 1e-5 (before) | hand-off $\max(10^{-5}, \varepsilon^{1/3})$ (#512) | threshold used |
+|---|---|---|---|---|
+| double | 2.2e-16 | ~1e-12 | ~1e-12 (unchanged, bit for bit) | 1e-5 |
+| float | 1.2e-7 | **5.7e-5** | 1.8e-6 | 4.9e-3 |
+| posit⟨32,2⟩ | 7.5e-9 | **1.8e-5** | 1.4e-7 | 2.0e-3 |
+| posit⟨16,1⟩ | 2.4e-4 | **3.2e-3** (13 ulps) | 1.3e-4, its rounding floor | 6.3e-2 |
+
+The inverse Jacobian $J_l^{-1} = I - W/2 + c\,W^2$, with $c = 1/\theta^2 - \cot(\theta/2)/(2\theta)$,
+behaves differently. $c$ is a difference of two terms of size $1/\theta^2$, so $c$ itself is
+inaccurate, but it multiplies $W^2$ (of size $\theta^2$). In IEEE the error in $J_l^{-1}$ stays near
+$\varepsilon$ at every angle: float measured at most 1.3e-7.
+
+### Why $\varepsilon^{1/3}$ and not $\theta^\star$
+
+cortex holds `T = double` bit for bit through every change of this kind (#448's gate).
+$\theta^\star$ for double ($2.7\times10^{-4}$) is above 1e-5, so using it would move double's
+results. $\varepsilon^{1/3}$ is below 1e-5 for double and long double ($6.1\times10^{-6}$ and
+$4.8\times10^{-7}$), so they keep 1e-5 exactly. For every narrower format it is above 1e-5, and
+there it bounds:
+- the series' truncation error by $\varepsilon/24$;
+- the closed forms' cancellation by $\varepsilon^{2/3}$.
+
+That is a 30× improvement in float and 130× in posit32, but not the optimum.
+
+<Aside type="caution" title="Known improvement, not taken">
+  Double itself is not error-optimal. For $\theta \in [10^{-5}, 2\times10^{-4}]$ its closed-form
+  Jacobian is off by up to about $10^{-12}$, about 4,500 ulps, where the series would be near
+  $10^{-16}$. Float would gain about 4× more from $\theta^\star$ (about 4e-7 instead of 1.8e-6).
+  Moving to $\theta^\star$ is a deliberate, gated change. It moves double's trajectories, so it
+  needs the statistical comparison that a rounding change requires (see
+  [Mixed Precision on MTL5](mixed-precision.mdx)), not the bit-identity gate.
+</Aside>
+
+### Tapered formats: $\varepsilon$ at 1 is not the precision at $\theta$
+
+A posit has the most fraction bits near magnitude 1 and fewer as values move away from it. Small
+$\theta$, $\theta^2$ and $\sin\theta$, and large $1/\theta^2$, are represented with **less**
+precision than $\varepsilon_T$ suggests. At $3\times10^{-4}$, posit⟨16,1⟩ has about 7 fraction
+bits. The consequences, measured:
+
+- **The series stays safe.** It adds small corrections to O(1) terms, so the corrections' coarse
+  precision barely matters.
+- **The exponential's closed form fails.** $\sin(\theta/2)/\theta$ divides two small numbers that
+  were rounded separately: posit16 is off by **0.6 %** at $\theta = 3\times10^{-4}$, where IEEE has no
+  error at all. With the type-scaled threshold (6.3e-2), posit16 never evaluates it there.
+- **The inverse Jacobian's closed form degrades.** posit32 is off by 1.3e-6 (about 170 ε) at
+  $\theta = 10^{-5}$, because $1/\theta^2 \approx 10^{10}$ has few bits. The threshold (2.0e-3) keeps
+  posit32 on the series there.
+
+So for a tapered format, the threshold also guards formulas that are stable in IEEE.
+
+### Sim(3)'s scale-rate integrals: when no single hand-off works
+
+Sim(3)'s exponential needs $I_k(\sigma) = \int_0^1 u^k e^{\sigma u}\,du$ for $k = 0, 1, 2$, where
+$\sigma$ is the log-scale rate. The closed forms cancel, and more deeply as $k$ grows:
+
+| | closed form | numerator size | relative error |
+|---|---|---|---|
+| $I_0$ | $(e^\sigma - 1)/\sigma$ | $\sigma$ | $\sim \varepsilon/\sigma$ |
+| $I_1$ | $(e^\sigma(\sigma-1)+1)/\sigma^2$ | $\sigma^2/2$ | $\sim 2\varepsilon/\sigma^2$ |
+| $I_2$ | $(e^\sigma(\sigma^2-2\sigma+2)-2)/\sigma^3$ | $\sigma^3/3$ | $\sim 6\varepsilon/\sigma^3$ |
+
+The code used SO(3)'s hand-off and a three-term series for all three, which is wrong for every
+type. CodeRabbit flagged it on PR #512, and a one-off sweep against the series summed in long double
+showed:
+
+| Arithmetic, hand-off | worst $I_2$ error |
+|---|---|
+| double, 1e-5 (before) | **33 %** at $\sigma = 10^{-5}$ (3 % at $3\times10^{-5}$) |
+| float, 1e-5 (before) | **100 %** or more, up to $10^7\times$ at $\sigma = 3\times10^{-5}$ |
+| float, $\varepsilon^{1/3}$ (#512's first version) | **42 %** at $\sigma = 10^{-2}$ |
+| any type, series summed to convergence for $\lvert\sigma\rvert<1$ (#512) | about 1 ulp |
+
+The fix avoids choosing a threshold at all. For $\lvert\sigma\rvert < 1$ the Taylor series
+$I_k = \sum_n \sigma^n / (n!\,(n+k+1))$ has no cancellation, and it is summed until a term no
+longer changes the sum: at most 18 terms in double and 11 in float. For $\lvert\sigma\rvert \ge 1$ the
+closed forms lose at most a few ulps; the worst case is $\sigma = -1$, where $I_2$'s numerator is
+$5/e - 2 \approx -0.16$. The hand-off at 1 is the same for every type.
+
+The improvement in Sim3's exponential, translation error against long double (test
+`Sim3 exp is accurate at small scale rates in every type`):
+- double: $3.1\times10^{-13} \to 9.9\times10^{-15}$;
+- float: $3.4\times10^{-7} \to 4.6\times10^{-8}$.
+
+Double's remainder comes from the $\theta$ branch of the same function, whose closed forms
+$B/\theta$ and $C/\theta^2$ cancel like SO(3)'s Jacobian and still share `small_angle`. That branch
+has not been swept. Sim(3) is used by no pipeline stage today, so none of this moves a VIO result.
+
+For hardware, this is the general pattern. When a family of formulas cancels to different orders, a
+convergent series below a **type-independent** cut-off is simpler and more accurate than a
+per-formula, per-format threshold. In fixed-function hardware, the series becomes a fixed-length
+FMA chain whose length is set by the format's $\varepsilon$.
+
+## 2. Ridges on normal equations
+
+### What a ridge does
+
+Three solves in the pipeline add a ridge $\lambda$ to the diagonal of a normal matrix
+$H = J^\top J$ before the Cholesky factorization:
+- triangulation's Gauss-Newton step;
+- the initializer's gyro-bias solve;
+- the initializer's velocity/gravity/scale alignment.
+
+The ridge makes an unexcited direction factorable. It also changes the answer. With
+$H = \sum_i \sigma_i v_i v_i^\top$,
+
+$$
+x_\lambda = (H+\lambda I)^{-1} b = \sum_i \frac{\sigma_i}{\sigma_i+\lambda}\;\frac{v_i^\top b}{\sigma_i}\,v_i,
+$$
+
+so each component of the solution is shrunk by $\lambda/(\sigma_i+\lambda)$. A ridge is harmless
+only if it is far below every eigenvalue that carries information. Those eigenvalues come from the
+motion and the geometry, **not** from the number format.
+
+### The bug PR #512 almost shipped
+
+The audit (#449) flagged `T(1e-9)` as a constant that "vanishes in 16-bit types", and the first
+version of #512 floored it at $16\,\varepsilon_T$. The S1 SfM bench
+(`sfm_two_view_pnp` on the known-answer window, float) failed:
+
+| Alignment ridge | float scale error (bench) | tolerance |
+|---|---|---|
+| fixed 1e-9 (main, kept) | 0.88 % (double: 0.78 %) | 2.12 % |
+| floored flat at $16\,\varepsilon_{\text{float}} = 1.9\times10^{-6}$ | **17.2 %** | 2.12 % |
+| floored at 16 ulps of each diagonal entry | **24.8 %** | 2.12 % |
+
+To see why, the alignment's $H$ and $b$ were dumped from the double run and analysed offline.
+
+| Alignment pass | smallest eigenvalues of $H$ | $\kappa(H)$ |
+|---|---|---|
+| rough (gravity free) | 1.4e-12 (a genuine near-null mode), 3.1e-4, … | 2.9e12 |
+| refined (gravity magnitude pinned) | **5.5e-6** (its eigenvector includes the scale), 3.1e-4, … | 7.1e5 |
+
+The refined pass's weakest informative mode has $\sigma = 5.5\times10^{-6}$:
+- a ridge of $10^{-9}$ shrinks it by $1.8\times10^{-4}$;
+- a ridge of $1.9\times10^{-6}$ shrinks it by **26 %**.
+
+Replaying the three ridges on the dumped system reproduces the bench:
+
+| Ridge | scale bias, exact arithmetic | scale bias, float32 solve |
+|---|---|---|
+| fixed 1e-9 | 0.000 % | 0.55 % |
+| flat $16\,\varepsilon_{\text{float}}$ | 17.2 % | 17.5 % |
+| $16\,\varepsilon_{\text{float}}\,\lvert H_{ii}\rvert$ | 28.6 % | 28.8 % |
+
+The exact-arithmetic column is the point. The bias is **regularization, not rounding**: it is
+there even with no rounding at all. Scaling the ridge with $\varepsilon_T$ ties a property of the
+problem to a property of the format, and here that removed a quarter of the information about scale.
+So all three ridges stay at a fixed 1e-9.
+
+Doesn't 1e-9 vanish in a coarse type? Only where it isn't needed. On a unit-scale diagonal it is
+absorbed ($1 + 10^{-9} = 1$ in float), but there the matrix is already factorable. The ridge exists
+for an (almost) zero diagonal, and there 1e-9 survives in every bench type.
+
+### Precision: conditioning, and why normal equations hurt narrow formats
+
+Rounding moves the solution by about $\kappa(H)\,\varepsilon_T$. That is the 0.55 % in the float32
+column above, with $\kappa = 7\times10^5$. Forming $H = J^\top J$ squares the conditioning of the
+constraints: $\kappa(H) = \kappa(J)^2$, so $\kappa(J) \approx 840$ here. For a format whose
+$\kappa(H)\,\varepsilon_T \gtrsim 1$, the normal equations cannot resolve the scale at all. A QR or
+square-root solve of the stacked constraints works with $\kappa(J)\,\varepsilon_T$ instead, a
+square root less. That is an estimate from the standard bounds, not measured here.
+
+### Representability of the ridge itself
+
+Whether 1e-9 survives depends on the format's dynamic range, not its precision:
+
+| Format | $\varepsilon$ at 1 | `small_angle` | 1e-9 rounds to | $\kappa(H)\,\varepsilon$ at $\kappa = 7\times10^5$ |
+|---|---|---|---|---|
+| double | 2.2e-16 | 1e-5 | 1e-9 | 1.6e-10 |
+| float | 1.2e-7 | 4.9e-3 | 1e-9 | 0.08 |
+| posit⟨32,2⟩ | 7.5e-9 | 2.0e-3 | 1e-9 | 5.2e-3 |
+| posit⟨16,1⟩ | 2.4e-4 | 6.3e-2 | 3.7e-9 (minpos) | 171 |
+| bfloat16 | 7.8e-3 | 0.20 | 1.0e-9 | 5,500 |
+| IEEE half | 9.8e-4 | 0.10 | **0** | 680 |
+| posit⟨8,0⟩ | 3.1e-2 | 0.31 | **0.016** | 22,000 |
+| Q16.16 fixed point | (absolute step 1.5e-5) | n/a | **0** | n/a |
+
+What this means for a port:
+- **Half and Q16.16 round the ridge to zero.** In Q16.16 the scale mode's eigenvalue (5.5e-6) is
+  also below one step.
+- **posit8 rounds it up to 0.016.** That is about 3,000× the scale mode, which it would erase.
+- **In all three, flooring or raising the ridge is the wrong fix.** The problem has to be rescaled
+  (equilibrated) so that its informative eigenvalues sit where the format has precision, or solved
+  in a wider format.
+
+## 3. Tolerances that do scale
+
+Two 1e-9 constants really are tolerances, and they now scale with T through
+`math::at_least_roundoff(nominal, scale)` $= \max(\text{nominal},\ 16\,\varepsilon_T\,\lvert\text{scale}\rvert)$:
+
+- **The PSD check's slack** (`is_positive_semidefinite`). This is how far below zero an
+  eigenvalue may sit and still count as rounding. A covariance computed in T carries rounding of
+  about $\varepsilon_T\,\lVert P\rVert$ in every entry, and an exactly singular P (a clone copied
+  from its pose) has its zero eigenvalue land near $-\varepsilon_T\,\lVert P\rVert$. So the slack
+  is floored at $16\,\varepsilon_T\,\max_i P_{ii}$ on every diagonal entry. With a fixed 1e-9,
+  float would reject an exactly singular PSD matrix, because $1 + 10^{-9}$ rounds to $1$. A floor
+  per entry, $16\,\varepsilon_T\,\lvert P_{ii}\rvert$, was the first fix and was not enough: on a
+  row whose variance is far below $\lVert P\rVert$ the rounding comes from the large entries it is
+  coupled to. An end-to-end float run of the estimator broke it within seven frames
+  ($\lambda_{\min} \approx -10^{-7}\lVert P\rVert$, diagonals spread 27×). Two tests cover this
+  (`the PSD check keeps its ridge in a coarse type`, `the PSD check measures rounding against the
+  norm of P`).
+- **The up-vector degeneracy test** (`align_to_world_up`). This compares $s = \lvert u \times \hat z\rvert$,
+  a sine in [0, 1], against 1e-9. In float, $s$ carries about $10^{-7}$ of rounding, so a fixed 1e-9
+  would accept rounding noise as a rotation axis.
+
+For double the floor exceeds 1e-9 only on entries above about $2.8\times10^5$, so double results
+are unchanged.
+
+## Guidance for a hardware implementation
+
+1. **Classify every constant** as a tolerance or a regularizer before porting it. Tolerances scale
+   with the format's $\varepsilon$ at the magnitude they are compared with. Regularizers stay
+   problem-scaled.
+2. **Fix thresholds per format at design time.** `small_angle<T>()` is a tuning constant computed
+   once per type. In hardware it is a per-format constant (see the table above). The Jacobian
+   branches compare $\theta^2$ against the squared constant, so they need no square root.
+3. **For a new format, use $\theta^\star = (24\varepsilon)^{1/4}$, then measure.** The bit-identity
+   constraint that holds cortex at $\varepsilon^{1/3}$ does not bind a fresh hardware datapath.
+   Verify $\theta^\star$ with the sweep below, because the model is an upper bound.
+4. **Evaluate the series with an FMA chain** (Horner form). The series is the well-conditioned
+   branch, and fused operations keep it so.
+5. **For a tapered format, check precision at the operating magnitude,** not at 1. Divisions of two
+   small or two large quantities lose the most.
+6. **Prefer QR or square-root forms to normal equations in narrow formats.** They need
+   $\kappa(J)\,\varepsilon \ll 1$ instead of $\kappa(J)^2\,\varepsilon \ll 1$.
+7. **Check the ridge's representability.** A format without the range for 1e-9 needs the problem
+   rescaled, not a different ridge.
+
+## Reproducing the measurements
+
+- **The SO(3) error bounds** are a regression test in `tests/math/lie_groups.cpp`
+  (`SO3 small-angle hand-off scales with the arithmetic type`). It sweeps
+  $\theta \in [10^{-6}, 0.1]$ in float, posit32 and posit16 and holds the measured maxima above with
+  about 2× headroom. The posit16 run is a few dozen scalar evaluations: cheap, despite emulation.
+- **The tolerance floors** are tested in `tests/math/arithmetic_types.cpp` (per type and per scale)
+  and `tests/sdk/msckf_state.cpp` (the float PSD check).
+- **The ridge regression** is guarded by the S1 bench:
+
+  ```bash
+  ./build/tools/s1_initialization_bench --types double,float --variant sfm_two_view_pnp
+  #   truth.sfm_scale_error   0.7803  2      %  PASS   (double, known-answer window)
+  #   truth.sfm_scale_error   0.8766  2.119  %  PASS   (float)
+  ```
+
+- **The eigen-analysis of the alignment system** used a temporary dump of $H$ and $b$ in
+  `ImuInitializer::solve_alignment`, run on the known-answer window, followed by an eigendecomposition
+  and replayed solves in NumPy. The dump is not in the tree; re-adding it before the ridge loop is a
+  few lines, if a new format needs the spectrum.

@@ -1,10 +1,8 @@
-/* Cortex docs theme — cool slate with a perception-blue accent. */
+/* Cortex's look beyond the docs-kit theme: cool slate backgrounds and grays
+   in dark mode (the perception-blue accent is in docs-kit.config.mjs). Light
+   mode is the kit's. */
 
-:root {
-  --sl-color-accent-low: #14233a;
-  --sl-color-accent: #2f80ed;
-  --sl-color-accent-high: #9ec5fe;
-
+:root:not([data-theme='light']) {
   --sl-color-bg: #0d1521;
   --sl-color-bg-nav: #14202f;
   --sl-color-bg-sidebar: #14202f;
@@ -18,13 +16,6 @@
   --sl-color-gray-6: #1a2738;
   --sl-color-text: var(--sl-color-gray-1);
   --sl-color-text-accent: var(--sl-color-accent-high);
-}
-
-/* Light mode keeps the same accent. */
-:root[data-theme='light'] {
-  --sl-color-accent-low: #c8dcfb;
-  --sl-color-accent: #1d63d8;
-  --sl-color-accent-high: #11305f;
 }
 
 .hero {
