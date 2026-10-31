@@ -4,7 +4,7 @@
 // keystone, issue #372).
 //
 // A serializable, human-readable envelope for the INPUT and OUTPUT of every
-// VIO pipeline stage boundary S0–S10 (docs/arch/vio-pipeline-canonical.md).
+// VIO pipeline stage boundary S0–S10 (docs/pipeline/canonical-pipeline.md).
 // The running pipeline dumps one record per stage per frame; each per-stage
 // inspector replays from the trace, re-runs the *real* stage operator on the
 // recorded input, and renders. This is the concrete, writable/readable form of

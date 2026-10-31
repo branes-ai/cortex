@@ -2,7 +2,7 @@
 //
 // branes/tools/vio_stage_contracts.hpp — the machine-readable registry of the
 // VIO pipeline stage contracts S0–S10, the executable counterpart of
-// docs/arch/vio-pipeline-canonical.md.
+// docs/pipeline/canonical-pipeline.md.
 //
 // Each `StageInfo` carries the stage's signature, pre/post-conditions, the
 // native-unit assessments that test the post-conditions, the CSV artifacts the

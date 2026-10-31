@@ -2,7 +2,7 @@
 //
 // s6d_gating_bench — the S6d_gating stage bench (issue #457). Runs
 // stages::s6d_gating::apply on its fixtures, in several arithmetic types,
-// and prints the invariant report. See docs/arch/stage-benches.md for the flags.
+// and prints the invariant report. See docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s6d_gating_bench.hpp>
 

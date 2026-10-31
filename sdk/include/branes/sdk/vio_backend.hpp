@@ -48,7 +48,7 @@ struct VioConfig {
     /// S5 parallax gate: reject a triangulation whose maximum inter-view parallax
     /// is below this many degrees (degenerate depth — see the S5 probe). Default 0
     /// = disabled; ~2–5° trades feature coverage for depth quality and must be
-    /// validated end-to-end before being turned on (docs/arch/vio-pipeline-canonical.md).
+    /// validated end-to-end before being turned on (docs/pipeline/canonical-pipeline.md).
     double min_parallax_deg = 0.0;
     /// S10 calibration-uncertainty term: a camera↔IMU **extrinsic-rotation** σ (in
     /// degrees) folded into the visual measurement noise `R`, so the filter stops
@@ -56,7 +56,7 @@ struct VioConfig {
     /// empirical "R×4 restores NEES" — see the S10 probe). Default 0 = disabled;
     /// ~1° (≈ the EuRoC extrinsic uncertainty) reproduces the R×4 variance
     /// inflation. Validate end-to-end before turning on
-    /// (docs/arch/vio-pipeline-canonical.md §S10).
+    /// (docs/pipeline/canonical-pipeline.md §S10).
     double calib_ext_rot_sigma_deg = 0.0;
     /// S10 online extrinsic calibration: estimate the camera↔IMU extrinsics
     /// `T_CI` as filter state (one 6-DoF block per camera) instead of trusting

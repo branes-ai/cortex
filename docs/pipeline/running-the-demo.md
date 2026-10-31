@@ -1,6 +1,9 @@
-# The VIO pipeline demo
-
-## What, why, how — and how accurate is "good enough"?
+---
+title: Running the VIO Pipeline Demo
+description: How to run vio_pipeline, the end-to-end noise-to-robustness demo, read its scene video, and judge what position accuracy a platform needs.
+sidebar:
+  label: Running the Demo
+---
 
 A practical guide to `vio_pipeline` — the end-to-end demo that runs the whole
 Visual-Inertial Odometry pipeline as a stream, measures how well the filter
@@ -8,10 +11,12 @@ cleans up additive sensor noise, and visualizes it. It also answers the question
 that actually matters for a robot program: **what position accuracy does my
 platform need, and at what error does the mission start to fail?**
 
-- Tool: `tools/src/vio_pipeline.cpp` · Source data: `sdk/eval/synthetic_world.hpp`
+- Tool: [`tools/src/vio_pipeline.cpp`](../../tools/src/vio_pipeline.cpp) · Source data:
+  [`sdk/eval/synthetic_world.hpp`](../../sdk/include/branes/sdk/eval/synthetic_world.hpp)
 - Visualizers: `docs-site/scripts/gen-sensor-model-figures.mjs` (curves),
-  `docs-site/scripts/gen-overlay.mjs` (scene video overlay)
-- Background: `docs/arch/vio-pipeline-canonical.md` (the pipeline as stage contracts)
+  `docs-site/scripts/gen-overlay.mjs` (scene video overlay), and the
+  [3D Path & Pose Viewer](../vio/scene3d.mdx)
+- Background: [The Canonical VIO Pipeline](canonical-pipeline.md) (the pipeline as stage contracts)
 
 ---
 
@@ -90,13 +95,22 @@ for f in /tmp/vio_run/frames/*.svg; do rsvg-convert "$f" -o "${f%.svg}.png"; don
 ffmpeg -framerate 20 -i /tmp/vio_run/frames/frame_%05d.png -pix_fmt yuv420p /tmp/vio_run/scene.mp4
 ```
 
-Flags: 
-- `--source synthetic|euroc`
-- `--dataset <mav0>` (EuRoC)
-- `--noise S`(noise multiplier, 1 = matches the filter's model)
-- `--sweep`
-- `--video`
-- `--robot ground|drone|default` (motion aggressiveness).
+Flags (`vio_pipeline --help` lists them all):
+
+- `--source synthetic|euroc`, and `--dataset <mav0>` for EuRoC
+- `--noise S`: the noise multiplier (synthetic; 1 = matches the filter's model)
+- `--sweep`: the noise level → robustness curve (synthetic)
+- `--video`: per-frame scene and overlay data (`frames.jsonl`)
+- `--robot ground|drone`: motion aggressiveness (synthetic)
+- `--out DIR`: where the JSONL stream and CSVs go
+- `--invariant`: the Right-Invariant EKF backend instead of the standard MSCKF
+- `--covariance full|sqrt`: the MSCKF's Joseph-form `P` (default) or its square-root
+  factor (see [MSCKF Backend](../vio/msckf-backend.md))
+- `--stage-types NAME`: the arithmetic type each MSCKF stage computes in (see
+  [Mixed Precision on MTL5](../debugging/mixed-precision.mdx))
+- `--prefer-dynamic`: EuRoC, initialize by dynamic visual-inertial alignment only
+- `--capture …` and `--live-assert`: capture stage boundaries as bench fixtures, or check
+  each against its bench (see [Capture & Composition](../debugging/capture-and-composition.mdx))
 
 
 ### Reading the scene-video overlay
@@ -119,7 +133,9 @@ Flags:
 The sweep injects increasing sensor noise (a multiplier on the filter's *assumed*
 noise) and records the trajectory error (ATE, RMS position vs ground truth) and
 the consistency (NIS, normalized innovation; **1 = the filter's uncertainty
-matches reality**). Representative synthetic result (gentle "ground" motion):
+matches reality**). Representative synthetic result (gentle "ground" motion,
+measured in June 2026; [Engineering Status](engineering-status.mdx) has the
+backend's current state):
 
 | noise × | ATE (m) | NIS | interpretation |
 |---:|---:|---:|---|
@@ -218,5 +234,6 @@ first-class acceptance gate, not just ATE.**
 - Stream artifacts: `run.jsonl` (typed per-frame `gt`/`est`), `trajectory.csv`,
   `noise_sweep.csv`, `frames.jsonl` (overlay data)
 - The #212 over-confidence on the right of the NIS curve is decomposed stage by
-  stage in `docs/arch/vio-pipeline-canonical.md` (S10 calibration ≈ the `R×4`
-  component; plus process noise and the S5 parallax gate).
+  stage in [The Canonical VIO Pipeline](canonical-pipeline.md), and what the
+  measurements found is on [Consistency Analysis](consistency-analysis.mdx) and
+  [Engineering Status](engineering-status.mdx).

@@ -18,7 +18,7 @@ is how a clean perception stack turns into an unportable monolith.
 
 ## The cxx bridge — how tensors cross into Rust
 
-The Rust/C++ boundary is defined in `core/src/lib.rs` under
+The Rust/C++ boundary is defined in `core/src/bridge.rs` under
 `#[cxx::bridge(namespace = "branes::core")]`. Tensor metadata crosses as a `repr(C)`
 struct — `TensorMetadata { data_ptr, rows, cols, ... }`: a **raw pointer plus shape**,
 no Arrow-style metadata, no ownership semantics. The C++ side immediately wraps the

@@ -1,4 +1,4 @@
-// S0 sensor-&-calibration-model probe (docs/arch/vio-pipeline-canonical.md).
+// S0 sensor-&-calibration-model probe (docs/pipeline/canonical-pipeline.md).
 //
 // These tests assert the S0 contracts in units native to the modeling problem —
 // pixels, px/ms, px/deg, px/mm, m/s², mm — each against an oracle INDEPENDENT of

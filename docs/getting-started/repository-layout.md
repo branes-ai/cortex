@@ -27,7 +27,7 @@ branes-ai/cortex/
 ## What lives where
 
 - **`core/`** — the Rust Resource Manager. `memory_provider.rs` is the SITL-vs-KPU
-  HAL trait; the cxx bridge is defined in `core/src/lib.rs` under
+  HAL trait; the cxx bridge is defined in `core/src/bridge.rs` under
   `#[cxx::bridge(namespace = "branes::core")]`. Expand the HAL here, not in C++.
 
 - **`math/include/branes/math/`** — header-only numerics: Lie groups (SO3/SE3/Sim3),
@@ -60,5 +60,7 @@ it's `branes::`.)
 
 ## The authoritative design record
 
-`docs/arch/cortex-repo.md` is the canonical architecture document. When the code is
-ambiguous, it wins. This site distills it; that file is the source of truth.
+The [architecture decision records](../adr/README.md) say what was intended: when the code
+is ambiguous, they decide. Each was distilled from a section of
+[`docs/arch/cortex-repo.md`](../arch/cortex-repo.md), the original design conversation,
+which they cite as their source; it is kept as the record they came from.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/triangulation_probe.hpp — the S5 (feature triangulation) probe
-// of the VIO contract program (docs/arch/vio-pipeline-canonical.md).
+// of the VIO contract program (docs/pipeline/canonical-pipeline.md).
 //
 // S5's pre-condition is "sufficiently-parallax" observations; its post-condition
 // bounds the triangulation normal-matrix condition number. The #212-relevant

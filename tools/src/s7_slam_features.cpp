@@ -4,7 +4,7 @@
 //
 // Prints the stage contract (pre/post-conditions + native-unit assessments) so
 // the stage is studyable now; wire its probe in sdk/eval/ and drive it here,
-// following tools/src/s0_sensor_model.cpp. See docs/arch/vio-pipeline-canonical.md.
+// following tools/src/s0_sensor_model.cpp. See docs/pipeline/canonical-pipeline.md.
 
 #include <branes/tools/vio_stage_contracts.hpp>
 

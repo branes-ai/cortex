@@ -1,12 +1,16 @@
-# Keeping the covariance physically feasible — practice and a plan for cortex
+---
+title: Keeping the Covariance Physically Feasible
+description: How deployed estimators (PX4, ArduPilot, OpenVINS) keep the covariance P symmetric, positive semi-definite and in range at run time, and what cortex would need.
+sidebar:
+  label: Covariance Safeguards
+---
 
 Is it customary for a deployed state estimator to check its covariance P at run time
 (symmetric, positive semi-definite, variances in range), so that a numerical failure
 does not take the vehicle or the path planner down with it? What would cortex need?
 
-- Related: `docs-site/src/content/docs/debugging/mixed-precision.mdx` (the float
-  divergence this answers), `docs/assessments/covariance-architecture.md` (the
-  square-root backend, #187), #450, #533.
+- Related: [Mixed Precision on MTL5](mixed-precision.mdx) (the float divergence this
+  answers), the [square-root covariance form](../vio/msckf-backend.md) (#187), #450, #533.
 - License note: ArduPilot and OpenVINS are GPLv3. They are described here by function
   name and behaviour only; no code was copied, per the no-GPL rule.
 

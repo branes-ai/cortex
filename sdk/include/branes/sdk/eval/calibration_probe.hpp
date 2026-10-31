@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/calibration_probe.hpp — the S10 (online calibration) probe of
-// the VIO contract program (docs/arch/vio-pipeline-canonical.md), and the
+// the VIO contract program (docs/pipeline/canonical-pipeline.md), and the
 // leading candidate for the #212 over-confidence.
 //
 // The cortex MSCKF treats the camera↔IMU calibration (extrinsics T_CI, time

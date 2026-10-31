@@ -63,7 +63,7 @@ mapped onto your existing code. That's the artifact your stage-by-stage instrume
    2
    3 > **Purpose.** We have a clean-room OpenVINS-style MSCKF that runs but is structurally
    4 > over-confident (NEES ≫ 1) and we have not been able to find the defect by trial and error
-   5 > (FEJ was implemented and *refuted* by measurement — see `docs/assessments/vio-troubleshooting.md`).
+   5 > (FEJ was implemented and *refuted* by measurement — see `docs/sessions/2026-06-04-vio-troubleshooting-fej.md`).
    6 > This document goes back to first principles: it distills the **canonical** VIO pipeline as
    7 > designed by OpenVINS (and contrasts MINS / VINS-Mono / ROVIO / ORB-SLAM3), decomposed into
    8 > discrete **stages**. Each stage is written as a *contract*: a type signature, the

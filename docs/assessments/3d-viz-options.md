@@ -4,8 +4,8 @@ A 3D environment to visualize drone **paths and pose** for **educational videos*
 and **dissemination**. This records the requirement, what our data already
 supports, the options we evaluated, and the direction we selected.
 
-- Related: `docs/assessments/vio-pipeline-howto.md` (the 2D scene-video demo this
-  extends), `docs/arch/vio-pipeline-canonical.md` (the #212 over-confidence story
+- Related: `docs/pipeline/running-the-demo.md` (the 2D scene-video demo this
+  extends), `docs/pipeline/canonical-pipeline.md` (the #212 over-confidence story
   the uncertainty view supports).
 
 ---

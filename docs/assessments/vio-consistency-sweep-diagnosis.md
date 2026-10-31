@@ -1,13 +1,18 @@
 # VIO over-confidence — the consistency-sweep diagnosis (root cause of #212)
 
+> **Superseded (kept as the record of the raw sweeps).** Its conclusion, that First-Estimate
+> Jacobians (FEJ, #280) were the fix, was refuted by measurement: see the FEJ results in
+> [`docs/sessions/2026-06-04-vio-troubleshooting-fej.md`](../sessions/2026-06-04-vio-troubleshooting-fej.md).
+> The current account is [Consistency Analysis](../pipeline/consistency-analysis.mdx).
+
 A record of the diagnostic chain that turned "the MSCKF drifts ~18% RPE and
 nobody knows why" (#212) into a localized, evidence-backed root cause. It is the
 payoff of the instrumentation program (epic #261): instead of editing across the
 pipeline and reading end-to-end ATE, we drove two well-defined noise knobs and
 read the filter-consistency instrument (`eval/consistency.hpp`,
 `eval/nav_consistency.hpp`). Companion to
-[`vio-diagnostic-methodology.md`](vio-diagnostic-methodology.md) (why ATE-only
-debugging fails) and [`filter-consistency-nees-nis.md`](filter-consistency-nees-nis.md)
+[Diagnostic Methodology](../pipeline/diagnostic-methodology.mdx) (why ATE-only
+debugging fails) and [Reading the Metrics](../pipeline/metrics.mdx)
 (what NEES/NIS mean).
 
 **Bottom line up front:** the over-confidence is **not** a mistuned noise dial.

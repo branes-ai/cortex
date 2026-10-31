@@ -1,4 +1,4 @@
-// S1 initialization probe (docs/arch/vio-pipeline-canonical.md).
+// S1 initialization probe (docs/pipeline/canonical-pipeline.md).
 //
 // Locks the S1 contract findings against independent oracles: static init
 // levels a synthetic tilted gravity to machine precision and recovers |g| and

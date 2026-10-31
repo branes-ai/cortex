@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s9_marginalization.hpp — stage S9_marginalization as
-// an explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md
+// an explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md
 // §S9).
 //
 //   apply(state, clone index)      → (state' without the clone, diagnostics)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/msckf/stages/s0_sensor_model.hpp — stage S0_sensor_model as an
-// explicit transformation (issue #452, docs/arch/vio-pipeline-canonical.md §S0).
+// explicit transformation (issue #452, docs/pipeline/canonical-pipeline.md §S0).
 //
 //   apply(camera, (u, v)) → (normalized image point x/z, y/z | rejected)
 //

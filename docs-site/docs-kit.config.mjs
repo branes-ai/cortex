@@ -14,9 +14,10 @@ export default {
     phases: 'Roadmap & Phases',
     meta: 'Maintaining These Docs',
   },
-  // Not published yet: the engineering notes and analyses, until each is
-  // merged into the site or published as its own folder; and the session logs.
-  unpublished: ['arch', 'assessments', 'benchmark', 'dfm', 'performance-engineering', 'sessions'],
+  // Not published: the working records (design history, investigations, and
+  // research and strategy notes outside the site's subject) and the session logs.
+  // What each holds, and why, is in docs/plan/docs-site/README.md.
+  unpublished: ['arch', 'assessments', 'dfm', 'performance-engineering', 'sessions'],
   accent: {
     dark: { low: '#14233a', accent: '#2f80ed', high: '#9ec5fe' },
     light: { low: '#c8dcfb', accent: '#1d63d8', high: '#11305f' },

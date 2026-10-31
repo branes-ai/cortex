@@ -4,8 +4,8 @@
 // evaluation: NEES (normalized estimation error squared) and NIS (normalized
 // innovation squared), plus a chi-square run-consistency band.
 //
-// The keystone diagnostic instrument from docs/assessments/
-// vio-diagnostic-methodology.md: a *consistent* (correctly-tuned, unbiased)
+// The keystone diagnostic instrument from
+// docs/pipeline/diagnostic-methodology.mdx: a *consistent* (correctly-tuned, unbiased)
 // estimator satisfies
 //   - NEES:  e = x̂ ⊟ x_true,  E[eᵀ P⁻¹ e]  = dim(state)
 //   - NIS:   ν = z − ẑ,        E[νᵀ S⁻¹ ν]  = dim(measurement)

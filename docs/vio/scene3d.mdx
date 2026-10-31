@@ -5,7 +5,7 @@ description: An interactive Three.js view of the VIO drone trajectory, pose, and
 
 import Scene3D from '@site/components/Scene3D.astro';
 
-The 2-D [scene-video overlay](https://github.com/branes-ai/cortex/blob/main/docs/assessments/vio-pipeline-howto.md)
+The 2-D [scene-video overlay](../pipeline/running-the-demo.md)
 shows what the camera sees. This is the **3-D** companion: the drone's path and
 pose in the world, driven by the same `run.jsonl` stream that `vio_pipeline`
 emits. Drag to orbit, scroll to zoom, and
@@ -41,8 +41,8 @@ This is exactly the over-confidence tracked in
 the reported position σ shrinks to ~13 cm while the true error grows past 2 m —
 the ellipsoid collapses to a fraction of the actual error. A controller trusting
 that covariance would act decisively on a wrong position. See the
-[pipeline how-to](https://github.com/branes-ai/cortex/blob/main/docs/assessments/vio-pipeline-howto.md)
-and the [canonical contract doc](https://github.com/branes-ai/cortex/blob/main/docs/arch/vio-pipeline-canonical.md)
+[pipeline how-to](../pipeline/running-the-demo.md)
+and the [canonical contract doc](../pipeline/canonical-pipeline.md)
 for the stage-by-stage decomposition.
 
 ## Generate your own
