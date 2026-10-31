@@ -1,0 +1,121 @@
+---
+title: S4 — Visual Frontend
+description: Track generation — FAST detection + pyramidal KLT. The shipped primitives are sub-pixel accurate, but the frontend applies no forward-backward check and no RANSAC, so drifted tracks reach the backend un-gated.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The frontend turns raw images into the feature **tracks** the backend consumes:
+detect corners, follow them frame-to-frame, and reject the ones that don't hold up.
+Its job is to hand the backend correspondences that are *correct* — no backend
+trick repairs a confidently-wrong match — and to report the *true* pixel noise on
+the ones that survive. The probe drives the shipped FAST detector + pyramidal KLT
+on synthetic textured imagery warped by a known translation.
+
+## What it does
+
+FAST detection with grid-bucketed coverage and min-distance suppression; pyramidal
+**KLT** tracking frame-to-frame (the IMU gyro prior can seed the search); and — per
+the canonical contract — a **forward-backward** consistency check and **RANSAC** on
+the epipolar constraint to drop outliers before the backend.
+
+## The contract
+
+| | |
+|---|---|
+| **Signature** | `track(image_t, prev_tracks) → observations[(id, cam, u, v)]` |
+| **Pre** | image in expected format; previous tracks available; (optional) gyro rotation prior |
+| **Post / invariants** | every surviving track passes forward-backward (round-trip pixel error < τ) · RANSAC inlier ratio above a floor; outliers removed **before** the backend · spatial coverage across the image grid · track-length distribution healthy (not all length-2 — that starves [parallax](s5-triangulation.mdx)) |
+| **cortex** | frontend in `vio_estimator.hpp` (`FrontendParams`); pyramidal KLT (`cv/klt.hpp`), FAST (`cv/fast.hpp`) |
+
+For the API-level treatment of the tracker, see the
+[Visual Front End](../../vio/front-end.md) reference.
+
+## Metrics
+
+The [S4 probe](../diagnostic-methodology.mdx) detects FAST corners on a textured
+pattern, then tracks A→B and B→A with the **shipped** KLT to measure self-consistency.
+
+| metric | value | note |
+|---|---:|---|
+| features detected (FAST) | 80 | level-0 corners |
+| forward-tracked (KLT) | 51 / 80 | status = Tracked |
+| forward-backward residual (median) | **0.0016 px** | tracks are self-consistent |
+| endpoint RMS (all backward-tracked) | **0.001 px** | the un-gated frontend's actual error |
+| RANSAC inlier ratio | **n/a** | RANSAC not shipped — no geometric gate applied |
+| grid coverage occupancy | **100 %** | 8×6 grid — well distributed |
+| mean track length | **7.3 frames** | over a 12-frame sequence |
+
+The shipped primitives are **sound**: near-zero forward-backward residual, sub-pixel
+endpoint accuracy, full grid coverage, and healthy track lengths.
+
+### Pixel-noise → track-noise
+
+Sweeping image noise, the recovered-track endpoint error scales roughly linearly
+with the image noise:
+
+![Track endpoint noise vs image pixel noise](../../assessments/figures/s4/frontend_noise.svg)
+![Track-length distribution](../../assessments/figures/s4/frontend_tracklen.svg)
+
+<Aside type="note" title="An honest caveat on the noise number">
+  On this *ideal* high-contrast synthetic texture KLT is sub-pixel accurate even at
+  4 px image noise (~0.02 px endpoint error). Real-data track noise is far larger —
+  it comes from motion blur, illumination change, perspective foreshortening, and
+  repetitive texture that this purely-geometric probe does not model. So the
+  measurement-σ the backend should use must ultimately be calibrated on **real**
+  tracks; the synthetic sweep gives only the best-case slope.
+</Aside>
+
+## Real-data inspector (`s4_inspect`)
+
+The metrics above come from the *synthetic* probe — known warps, exact ground
+truth, run in CI. Its real-data companion, **`s4_inspect`**, runs the shipped
+stage itself (`stages::s4_frontend::track`, the function `VioEstimator` calls per
+frame: FAST + pyramidal KLT) on actual EuRoC `cam0`
+frames and renders the result, so you can watch the frontend on real motion, blur,
+and repetitive texture.
+
+```bash
+s4_inspect --dataset /path/to/V1_01_easy/mav0 --out build/s4
+#   --fast-threshold  --target-features  --pyramid-levels  --fb-max  --min-dist
+node docs-site/scripts/gen-overlay.mjs build/s4      # → build/s4/frames/*.svg
+```
+
+It writes `frames.jsonl`, one record per frame, carrying per track the
+previous→current pixel, the **forward-backward residual**, age, and status, plus
+the FAST detections, the pyramid geometry, and a coverage grid. The overlay draws
+these over the EuRoC image: KLT **flow vectors coloured by FB residual**, new
+detections, the coverage grid, a pyramid schematic, and a count HUD.
+
+Crucially — and unlike both the probe and the production path — `s4_inspect`
+**always** computes the forward-backward residual, even when the gate is disabled.
+That lets you *see* exactly which tracks a gate would cull on real imagery before
+committing to enabling `fb_max_residual` (below). It is the template member of the
+trace-tapped, real-data inspector family (epic #371); see `tools/README.md`.
+
+## The S4 candidate — the outlier gate
+
+By default the frontend applies **only KLT's own `Lost`/`OutOfBounds` status
+filter** — no forward-backward check, no RANSAC. On real data a track that drifts
+onto repetitive texture or across an occlusion follows KLT to a
+**confidently-wrong** location and reaches the
+[backend](s6-msckf-update.mdx) **at full weight** — the same
+"optimistic information" failure mode as the
+[S5 parallax gate](s5-triangulation.mdx).
+
+A **forward-backward gate** is now implemented — `FrontendParams::fb_max_residual`
+re-tracks each survivor back to the previous frame and drops it if the round-trip
+error exceeds the threshold (the [S4-gate unit test](../diagnostic-methodology.mdx)
+confirms a strict gate drops every drifted track while a disabled gate keeps them).
+It ships **default-off** and doubles the per-frame KLT cost when enabled, so it
+awaits end-to-end validation before being turned on. (RANSAC remains future work —
+it needs an essential-matrix solver not yet in the codebase.)
+
+<Aside type="caution" title="Status — gate implemented, default-off pending validation">
+  FAST + pyramidal KLT are accurate and well-distributed (measured). The
+  forward-backward outlier gate (`fb_max_residual`) is **implemented and
+  unit-tested** but ships **default-off** pending end-to-end validation; RANSAC and
+  a real-data measurement-σ calibration remain open. Both feed the #212
+  over-confidence by handing the filter correspondences it should not fully trust.
+  Tracked on [Engineering Status](../engineering-status.mdx).
+</Aside>

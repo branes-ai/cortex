@@ -1,5 +1,9 @@
 {
   "extends": "astro/tsconfigs/strict",
   "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist"]
+  "exclude": ["dist"],
+  "compilerOptions": {
+    // docs-kit's alias: the pages in ../docs import the site's code as @site/….
+    "paths": { "@site/*": ["./src/*"] }
+  }
 }
