@@ -37,13 +37,18 @@ bool observe(const lie::SO3<T>& R,
     xy = lie::detail::Vec<T, 2>{{u, v}};
     return true;
 }
-}  // namespace
 
-// [!mayfail] until #537: the filter diverges on this seed (58 m RMS) and on 4 of
-// 20 others, on every compiler. The test still runs and reports its metrics, but
-// a failure does not fail the suite. Remove the tag when #537 lands.
-TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update divergence FIXED, #366)",
-          "[sdk][riekf][backend][s365][!mayfail]") {
+/// What one end-to-end run measured; the structural checks and the accuracy
+/// bounds are asserted in separate test cases on the same run.
+struct EndToEnd {
+    double rms_pos = 0;
+    ev::ConsistencyAccumulator nees_full, nees_yaw, nees_rp;
+    bool psd_ok = true;
+    std::size_t nees_skip = 0;
+    std::size_t num_clones = 0;
+};
+
+EndToEnd run_end_to_end() {
     using T = double;
     using SO3 = lie::SO3<T>;
     using SE3 = lie::SE3<T>;
@@ -176,20 +181,49 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
     }
 
     REQUIRE(ndiag > 0);
-    const double rms_pos = std::sqrt(sum_pos2 / ndiag);
-    WARN("invariant VIO backend: RMS pos err="
-         << rms_pos << " m  | full NEES=" << nees_full.report().normalized << "  yaw=" << nees_yaw.report().normalized
-         << "  roll/pitch=" << nees_rp.report().normalized << " | skipped NEES samples: " << nees_skip);
+    EndToEnd out;
+    out.rms_pos = std::sqrt(sum_pos2 / ndiag);
+    out.nees_full = nees_full;
+    out.nees_yaw = nees_yaw;
+    out.nees_rp = nees_rp;
+    out.psd_ok = psd_ok;
+    out.nees_skip = nees_skip;
+    out.num_clones = be.num_clones();
+    return out;
+}
 
-    // Convergence check: R-IEKF should track better than dead-reckoning (~15m).
-    // Decoupled into independent REQUIRE statements to enforce both accuracy and consistency gates.
-    REQUIRE(rms_pos < 6.0);
-    REQUIRE(nees_yaw.report().normalized < 15.0);
-    REQUIRE(psd_ok);
-    REQUIRE(std::isfinite(rms_pos));
-    REQUIRE(nees_full.samples() > 50);
-    REQUIRE(nees_yaw.samples() > 50);
-    REQUIRE(nees_rp.samples() > 50);
-    REQUIRE(nees_skip == 0);
-    REQUIRE(be.num_clones() <= 11);
+/// The run is ~14 s in a debug build; test cases in one process share it.
+const EndToEnd& end_to_end() {
+    static const EndToEnd run = run_end_to_end();
+    return run;
+}
+}  // namespace
+
+TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update divergence FIXED, #366)",
+          "[sdk][riekf][backend][s365]") {
+    const EndToEnd& e = end_to_end();
+    WARN("invariant VIO backend: RMS pos err=" << e.rms_pos << " m  | full NEES=" << e.nees_full.report().normalized
+                                               << "  yaw=" << e.nees_yaw.report().normalized
+                                               << "  roll/pitch=" << e.nees_rp.report().normalized
+                                               << " | skipped NEES samples: " << e.nees_skip);
+
+    // Structural checks: they hold even on the divergent seeds, so they gate.
+    REQUIRE(e.psd_ok);
+    REQUIRE(std::isfinite(e.rms_pos));
+    REQUIRE(e.nees_full.samples() > 50);
+    REQUIRE(e.nees_yaw.samples() > 50);
+    REQUIRE(e.nees_rp.samples() > 50);
+    REQUIRE(e.nees_skip == 0);
+    REQUIRE(e.num_clones <= 11);
+}
+
+// [!mayfail] until #537: the filter diverges on this seed (58 m RMS, yaw NEES
+// 104) and on 4 of 20 others, on every compiler. Only these two accuracy bounds
+// are exempt; the structural checks above still gate. Remove the tag when #537
+// lands.
+TEST_CASE("invariant VIO backend: end-to-end accuracy (diverges until #537)", "[sdk][riekf][backend][s365][!mayfail]") {
+    const EndToEnd& e = end_to_end();
+    // R-IEKF should track better than dead-reckoning (~15 m).
+    CHECK(e.rms_pos < 6.0);
+    CHECK(e.nees_yaw.report().normalized < 15.0);
 }
