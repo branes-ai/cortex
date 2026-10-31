@@ -96,6 +96,42 @@ over-confidence is dominated by the other input-side source, the
 [S10 unmodeled calibration](s10-online-calibration.mdx). This is the
 measure-don't-assume discipline working: a plausible lead, refuted by one experiment.
 
+### The R-IEKF triangulator — refine, don't gate (#548)
+
+The R-IEKF backend triangulated with the linear ray-perpendicular solve
+alone (`triangulate_invariant`); the body-frame `CameraUpdater` follows it with a
+Gauss-Newton refinement. On the synthetic world the difference shows up only when
+motion starts slowly. With a 1 s onset the first window the filter fuses spans
+about 0.9° of parallax against a pixel noise of 0.29°. Every one of its 234
+features came out more than 1 m off (mean 5.6 m, at depths of 3–8 m). The update,
+linearized at those points, made roll/pitch over-confident (NEES 30–600), and the
+corrupted trajectory kept later windows wrong too.
+
+Substituting the true landmark positions for the updates in the first second alone
+restored consistency (roll/pitch NEES 294 → 0.8), so the triangulation was the
+whole cause. Two remedies compared:
+
+| onset | linear only (21 seeds) | linear + 2° gate (3 seeds) | Gauss-Newton, ≤ 20 steps (21 seeds) |
+|---|---|---|---|
+| 0.25 s | 0/21 out of band (RMS ≤ 7.6 cm) | — | 0/21 (≤ 7.1 cm) |
+| 1 s | 14/21 (roll/pitch NEES ≤ 624) | in band | **0/21** (≤ 6.9 cm) |
+| 2 s | 21/21 (≤ 125) | in band | **0/21** (≤ 7.7 cm) |
+| 3 s | 21/21 (≤ 9013) | — | 1/21 (roll/pitch NEES 6.5) |
+
+The gate works only in a narrow window. At 1° it does nothing, and at 3° it
+breaks a seed at 2 s by starving the start. Each run rejects hundreds of tracks.
+Added on top of the refinement, a 2° gate makes 3 s worse (4/21 out of band, not
+1/21). Refinement adds no parallax gate and needs no threshold; it still rejects
+a track whose linear seed lies behind a camera, as the update would.
+`refine_invariant_feature` minimizes the
+reprojection error under the same H_f and residual the update then marginalizes
+with. Each step backtracks until it lowers the cost and keeps the feature in
+front of every camera, and the refinement stops early once a step moves the
+feature by less than 1e-6 of its range. Five steps (the body-frame default) is not enough from a seed this bad:
+2 s held 1/21 out at 5 steps and 0/21 at 10.
+`MsckfInvariantBackend::Config::max_triangulation_iters` is 20; 50 gives the
+same results.
+
 ## Real-data inspector (`s5_inspect`)
 
 The sweep above is the *synthetic* probe — exact two-view geometry, known parallax,

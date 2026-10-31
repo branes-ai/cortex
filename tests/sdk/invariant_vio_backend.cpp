@@ -7,6 +7,10 @@
 // world stepped the velocity by ≈1 m/s at the end of warm-up with no
 // accelerometer impulse, and the adapter integrated the warm-up IMU from a state
 // seeded after it. With both fixed, every seed tracks to centimetres at NEES ≈ 1.
+//
+// #548: a slow start (onset ≥ 1 s) made it over-confident again, through the
+// linear triangulation of low-parallax windows; the slow-onset cases lock the
+// Gauss-Newton refinement that fixed it.
 
 #include <branes/sdk/eval/consistency.hpp>
 #include <branes/sdk/eval/nav_consistency.hpp>
@@ -56,7 +60,9 @@ struct EndToEnd {
     std::size_t num_clones = 0;
 };
 
-EndToEnd run_end_to_end(std::uint32_t seed) {
+/// `onset_s` is the world's motion ramp (0.25 s by default); a slow start fuses
+/// its first windows at low parallax (#548).
+EndToEnd run_end_to_end(std::uint32_t seed, double onset_s) {
     using T = double;
     using SO3 = lie::SO3<T>;
     using SE3 = lie::SE3<T>;
@@ -66,6 +72,7 @@ EndToEnd run_end_to_end(std::uint32_t seed) {
 
     ev::SyntheticConfig<T> scfg;
     scfg.seed = 0x5EEDu;
+    scfg.onset_s = onset_s;
     const auto world = ev::generate_world<T>(scfg);
     REQUIRE(world.frames.size() > 50);
 
@@ -213,10 +220,11 @@ EndToEnd run_end_to_end(std::uint32_t seed) {
 // so the full 21-seed sweep is the hidden [.sweep] case below.
 constexpr std::array<std::uint32_t, 4> kSeeds{{0xA11CE, 13, 8, 3}};
 
-std::vector<EndToEnd> run_seeds(std::span<const std::uint32_t> seeds) {
+std::vector<EndToEnd> run_seeds(std::span<const std::uint32_t> seeds,
+                                double onset_s = ev::SyntheticConfig<double>{}.onset_s) {
     std::vector<EndToEnd> r;
     for (const std::uint32_t seed : seeds)
-        r.push_back(run_end_to_end(seed));
+        r.push_back(run_end_to_end(seed, onset_s));
     return r;
 }
 
@@ -281,17 +289,51 @@ TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[
     check_accuracy(kSeeds, end_to_end());
 }
 
-// The full sweep the #537 bounds were set from: ~9 min in a debug build, ~1 min
-// in release. Run with `invariant_vio_backend "[.sweep]"`.
-TEST_CASE("invariant VIO backend: 21-seed sweep", "[sdk][riekf][backend][.sweep]") {
-    std::array<std::uint32_t, 21> seeds{};
-    seeds[0] = 0xA11CE;
-    for (std::uint32_t k = 1; k < seeds.size(); ++k)
-        seeds[k] = k;
-    const auto runs = run_seeds(seeds);
+// #548: with a 2 s onset the first windows span about 1 deg of parallax, and the
+// bare linear triangulation put their features metres off; the update, linearized
+// there, drove roll/pitch NEES to 20-120 on every seed. The Gauss-Newton
+// refinement holds a 2 s start to the same bands as the default 0.25 s one.
+// Seeds 13 and 8 are two of the worst before the fix.
+TEST_CASE("invariant VIO backend: a slow 2 s start stays consistent", "[sdk][riekf][backend][s365]") {
+    constexpr std::array<std::uint32_t, 2> seeds{{13, 8}};
+    const auto runs = run_seeds(seeds, 2.0);
     for (std::size_t k = 0; k < runs.size(); ++k) {
         INFO("seed " << seeds[k]);
         check_structure(runs[k]);
     }
     check_accuracy(seeds, runs);
+}
+
+// The full sweep the #537 bounds were set from: ~9 min in a debug build, ~1 min
+// in release. Run with `invariant_vio_backend "[.sweep]"`.
+// The slow-onset sweep (#548) repeats it at 1 s and 2 s: three times as long.
+namespace {
+std::array<std::uint32_t, 21> sweep_seeds() {
+    std::array<std::uint32_t, 21> seeds{};
+    seeds[0] = 0xA11CE;
+    for (std::uint32_t k = 1; k < seeds.size(); ++k)
+        seeds[k] = k;
+    return seeds;
+}
+
+void check_sweep(double onset_s) {
+    const auto seeds = sweep_seeds();
+    const auto runs = run_seeds(seeds, onset_s);
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        INFO("seed " << seeds[k]);
+        check_structure(runs[k]);
+    }
+    check_accuracy(seeds, runs);
+}
+}  // namespace
+
+TEST_CASE("invariant VIO backend: 21-seed sweep", "[sdk][riekf][backend][.sweep]") {
+    check_sweep(ev::SyntheticConfig<double>{}.onset_s);
+}
+
+TEST_CASE("invariant VIO backend: 21-seed sweep at slow onsets", "[sdk][riekf][backend][.sweep]") {
+    for (const double onset_s : {1.0, 2.0}) {
+        INFO("onset " << onset_s << " s");
+        check_sweep(onset_s);
+    }
 }
