@@ -121,11 +121,13 @@ whole cause. Two remedies compared:
 The gate works only in a narrow window. At 1° it does nothing, and at 3° it
 breaks a seed at 2 s by starving the start. Each run rejects hundreds of tracks.
 Added on top of the refinement, a 2° gate makes 3 s worse (4/21 out of band, not
-1/21). Refinement uses every track and needs no threshold.
+1/21). Refinement adds no parallax gate and needs no threshold; it still rejects
+a track whose linear seed lies behind a camera, as the update would.
 `refine_invariant_feature` minimizes the
 reprojection error under the same H_f and residual the update then marginalizes
-with, and stops early once a step moves the feature by less than 1e-6 of its
-range. Five steps (the body-frame default) is not enough from a seed this bad:
+with. Each step backtracks until it lowers the cost and keeps the feature in
+front of every camera, and the refinement stops early once a step moves the
+feature by less than 1e-6 of its range. Five steps (the body-frame default) is not enough from a seed this bad:
 2 s held 1/21 out at 5 steps and 0/21 at 10.
 `MsckfInvariantBackend::Config::max_triangulation_iters` is 20; 50 gives the
 same results.

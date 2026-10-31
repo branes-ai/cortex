@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace branes::sdk::msckf {
@@ -234,9 +235,11 @@ template <math::Scalar T>
 /// step solves (H_fᵀH_f) δ = H_fᵀ r with the same H_f and r the update uses, so
 /// the feature is refined under the projection model it is then marginalized with.
 /// Stops after `max_iters` steps or once a step moves the feature by less than
-/// 1e-6 of its distance from the first observing camera. Returns false (reject
-/// the track) when the feature leaves the front of a camera; a step whose normal
-/// equations do not factor leaves the current estimate in place.
+/// 1e-6 of its distance from the first observing camera. Each step backtracks
+/// (halving, up to 8 times) until the feature stays in front of every camera and
+/// the reprojection cost drops; when none does, the last accepted estimate stands.
+/// Returns false (reject the track) only when the seed itself is behind a camera;
+/// a step whose normal equations do not factor leaves the current estimate in place.
 template <math::Scalar T>
 [[nodiscard]] bool refine_invariant_feature(const std::vector<InvariantClone<T>>& clones,
                                             const std::vector<InvariantObs<T>>& obs,
@@ -247,10 +250,17 @@ template <math::Scalar T>
     if (obs.empty() || obs.front().clone_index >= clones.size())
         return false;
     const Vec3 c0 = clones[obs.front().clone_index].p;
+    const auto cost_of = [](const InvariantMeasurement<T>& m) {
+        T c{0};
+        for (const T& v : m.r)
+            c += v * v;
+        return c;
+    };
+    InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f, calib, false);
+    if (!M.ok)
+        return false;
+    T cost = cost_of(M);
     for (std::size_t it = 0; it < max_iters; ++it) {
-        const InvariantMeasurement<T> M = build_invariant_measurement<T>(clones, obs, p_f, calib, false);
-        if (!M.ok)
-            return false;
         DynMat<T> H(3, 3), g(3, 1), L;
         for (std::size_t row = 0; row < M.rows2; ++row)
             for (std::size_t a = 0; a < 3; ++a) {
@@ -266,15 +276,30 @@ template <math::Scalar T>
         if (!cholesky(H, L))
             break;
         const DynMat<T> dx = cholesky_solve(L, g);
-        const Vec3 step{{dx(0, 0), dx(1, 0), dx(2, 0)}};
-        p_f = p_f + step;
+        Vec3 step{{dx(0, 0), dx(1, 0), dx(2, 0)}};
+        // Backtrack: a full Gauss-Newton step can raise the cost or carry the
+        // feature across a camera plane, which would reject a usable track.
+        bool accepted = false;
+        for (int half = 0; half <= 8; ++half) {
+            InvariantMeasurement<T> Mc = build_invariant_measurement<T>(clones, obs, p_f + step, calib, false);
+            if (Mc.ok && cost_of(Mc) < cost) {
+                p_f = p_f + step;
+                cost = cost_of(Mc);
+                M = std::move(Mc);
+                accepted = true;
+                break;
+            }
+            step = step * T(0.5);
+        }
+        if (!accepted)
+            break;
         const Vec3 range = p_f - c0;
         const T s2 = step[0] * step[0] + step[1] * step[1] + step[2] * step[2];
         const T r2 = range[0] * range[0] + range[1] * range[1] + range[2] * range[2];
         if (!(s2 > T(1e-12) * r2))
             break;
     }
-    return build_invariant_measurement<T>(clones, obs, p_f, calib, false).ok;
+    return true;
 }
 
 /// Apply one feature track to the invariant clone window. `clones`/`cov` carry the

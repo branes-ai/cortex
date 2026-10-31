@@ -219,6 +219,7 @@ TEST_CASE("invariant triangulation: Gauss-Newton refinement repairs a low-parall
     std::normal_distribution<T> nd(0, 1);
     std::uniform_real_distribution<T> uxy(-1, 1), uz(3, 8);
     std::vector<T> err_lin, err_gn;
+    std::size_t seeds_valid = 0;
     for (int i = 0; i < 200; ++i) {
         const Vec3 L{{uxy(rng), uxy(rng), uz(rng)}};
         std::vector<ms::InvariantObs<T>> obs;
@@ -230,15 +231,21 @@ TEST_CASE("invariant triangulation: Gauss-Newton refinement repairs a low-parall
         const auto tri = ms::triangulate_invariant<T>(clones, obs);
         if (!tri.ok)
             continue;
+        // A seed in front of every camera is never rejected: each step backtracks
+        // until it stays in front and lowers the cost, else the estimate stands.
+        if (!ms::build_invariant_measurement<T>(clones, obs, tri.p_f).ok)
+            continue;
+        ++seeds_valid;
         Vec3 pf = tri.p_f;
-        if (!ms::refine_invariant_feature<T>(clones, obs, pf, {}, 20))
-            continue;  // left the front of a camera: the backend drops the track
+        REQUIRE(ms::refine_invariant_feature<T>(clones, obs, pf, {}, 20));
+        REQUIRE(ms::build_invariant_measurement<T>(clones, obs, pf).ok);
         // Gauss-Newton never ends above the cost of its own seed.
-        CHECK(cost(obs, pf) <= cost(obs, tri.p_f) * (1 + 1e-9));
+        CHECK(cost(obs, pf) <= cost(obs, tri.p_f));
         err_lin.push_back(det::norm(tri.p_f - L));
         err_gn.push_back(det::norm(pf - L));
     }
     INFO(err_gn.size() << " of 200 tracks kept");
+    REQUIRE(err_gn.size() == seeds_valid);
     REQUIRE(err_gn.size() > 150);
     std::sort(err_lin.begin(), err_lin.end());
     std::sort(err_gn.begin(), err_gn.end());
