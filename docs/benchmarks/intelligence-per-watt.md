@@ -24,6 +24,11 @@ There is no single industry-standard energy number for VIO, so `vio_bench` repor
 
 ## Running it
 
+It runs on one EuRoC MAV sequence in ASL format. Download the sequence's ASL `.zip`
+(e.g. V1_01_easy) from the [ETH ASL datasets page](https://projects.asl.ethz.ch/datasets/)
+and unzip it; you get a `mav0/` folder with `imu0/`, `cam0/` and
+`state_groundtruth_estimate0/`.
+
 ```bash
 # Build the optimized tool (energy budgets are only meaningful with -O2).
 cmake --preset sitl-release && cmake --build --preset sitl-release --target vio_bench
@@ -33,6 +38,15 @@ cmake --preset sitl-release && cmake --build --preset sitl-release --target vio_
 
 # v101.json (machine-readable) + v101.md (human-readable) are written.
 ```
+
+The Markdown report goes to stdout only when the run finishes. Until then the tool
+prints a `processed N/total frames (P%)` progress line to stderr, which is how you
+tell it is working rather than hung. Runtime is roughly the sequence duration
+divided by the real-time factor it reports: a few minutes for V1_01_easy (~2.9k
+frames).
+
+**No dataset?** The component unit tests run without one: `ctest -R '^bench\.'` (C++)
+and `cd bench/energy_model && python -m unittest` (Python).
 
 ### Energy backend (`--energy`)
 
@@ -99,3 +113,12 @@ The operator FLOP/byte coefficients are analytic estimates (ops per pixel / per
 feature / per matrix element), not measured FLOP counts, and the per-stage timing is
 not yet broken out (only aggregate `feed_image` latency). Both are honest inputs for
 energy *modeling* and are slated to be refined with hardware performance counters.
+
+## Future work
+
+- **An OpenVINS/MINS baseline**, run as external programs on the same sequence and
+  scored with these metrics for a side-by-side table. Both are GPL-3.0, so they are
+  only ever run as separate processes, never vendored or linked into cortex.
+- **A robustness metric:** completion/divergence rate across a dataset, and on
+  aggressive datasets (UZH-FPV drone racing, TUM-VI), where many stacks that ace
+  EuRoC fall over on fast motion.

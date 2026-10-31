@@ -1,4 +1,4 @@
-// S5 (feature triangulation) probe (docs/arch/vio-pipeline-canonical.md).
+// S5 (feature triangulation) probe (docs/pipeline/canonical-pipeline.md).
 //
 // Locks the measured S5 finding: the shipped triangulator (CameraUpdater::
 // triangulate) recovers correct depth from clean observations across the whole

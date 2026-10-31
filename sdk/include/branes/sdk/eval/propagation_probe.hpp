@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/propagation_probe.hpp — the S2 (IMU propagation) probe of the
-// VIO contract program (docs/arch/vio-pipeline-canonical.md).
+// VIO contract program (docs/pipeline/canonical-pipeline.md).
 //
 // S2 advances the mean (strapdown integration) and the covariance
 // (P ← Φ P Φᵀ + Q_d) between measurement updates. Its contract:

@@ -2,7 +2,7 @@
 //
 // s6c_compression_bench — the S6c_compression stage bench (issue #457). Runs
 // stages::s6c_compression::apply on its fixtures, in several arithmetic types,
-// and prints the invariant report. See docs/arch/stage-benches.md for the flags.
+// and prints the invariant report. See docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s6c_compression_bench.hpp>
 

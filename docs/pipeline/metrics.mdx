@@ -95,7 +95,17 @@ its mean). The test averages over a run: the sum of `N` samples is `χ²(D)` wit
 `D = Σ dofᵢ`, which for large `D` is ≈ `Normal(D, 2D)`. The dof-normalized average
 `S/D` lands near **1.0** with a tight confidence band, turning a noisy stream into
 a verdict: **consistent**, **over-confident** (`> 1`, the dangerous one), or
-**under-confident** (`< 1`).
+**under-confident** (`< 1`). The two-sided $(1-\alpha)$ acceptance band is
+$1 \pm z\sqrt{2/D}$ with $z = \Phi^{-1}(1-\alpha/2)$ ($z = 1.96$ at 95%): the
+classic Bar-Shalom NEES/NIS consistency test. The band tightens as the run grows.
+
+**The per-update χ² gate is a different use of the same statistic.** Before
+applying a measurement, the filter checks its NIS against a χ² threshold and
+rejects a wild outlier (a mistracked feature). That is a single-sample *gate*; the
+consistency test is a *run average*. Both compute the same `νᵀ S⁻¹ ν`, and #264
+logs the gate's value so the consistency test can run on it. The shipped gate
+accepts γ ≤ 5 per dof, which is loose at low dof
+([#481](https://github.com/branes-ai/cortex/issues/481)).
 
 ### Innovation whiteness
 
@@ -111,7 +121,31 @@ see.
 The quadratic form `eᵀ P⁻¹ e` is `normalized_squared(e, P)` in
 `eval/consistency.hpp` (a Cholesky solve, never an explicit inverse). NIS is
 accumulated on every camera update (`nis_consistency()`); innovation whiteness is
-the directional/temporal discriminator (`innovation_whiteness()`).
+the directional/temporal discriminator (`innovation_whiteness()`). The headers are
+under `sdk/include/branes/sdk/`.
+
+| Piece | Header | Role |
+|---|---|---|
+| `normalized_squared` / `nis` / `nees` | `eval/consistency.hpp` | the `eᵀ P⁻¹ e` form; a Cholesky solve that throws on a non-positive-definite covariance |
+| `ConsistencyAccumulator` / `ConsistencyReport` | `eval/consistency.hpp` | `add(d², dof)` per sample; `report()` gives the normalized average and the band verdict |
+| per-update NIS | `msckf/camera_updater.hpp` → `MsckfBackend::nis_consistency()` | the gate's `γ = νᵀ S⁻¹ ν`, recorded on every camera update |
+| `nav_error` / `gauge_align` / `align_truth` / `core_covariance` | `eval/nav_consistency.hpp` | the 15-vector state error against ground truth, in the filter's convention and frame |
+| EuRoC report | `tests/sdk/vio_euroc.cpp` | warns with the run's NIS and NEES verdicts |
+
+### Two VIO-specific subtleties
+
+1. **The error lives in the filter's tangent space and ordering.** The state error
+   is `[δθ δp δv δbg δba]`, with the attitude error a rotation on the manifold,
+   `δθ = Log(R̂⁻¹ R_true)`, not a quaternion difference. `nav_error` builds exactly
+   this, so it matches the layout of `P`.
+2. **The gauge is yaw-only, not SE(3).** A VIO solution is fixed only up to four
+   unobservable degrees of freedom: global position and yaw about gravity. Roll and
+   pitch are observable, because the accelerometer feels gravity. The estimate and
+   the truth therefore live in different world frames, and only that 4-DoF gauge may
+   be removed before differencing. `gauge_align` builds a yaw-only rotation plus a
+   translation (Zhang & Scaramuzza's "posyaw" alignment). A full 6-DoF SE(3)
+   alignment would rotate away the observable roll/pitch error and report a
+   flatteringly small NEES, a bug caught in review.
 
 <Aside type="caution" title="Status">
   On EuRoC the cortex filter's NEES runs persistently **above** dof — structural
@@ -120,3 +154,46 @@ the directional/temporal discriminator (`innovation_whiteness()`).
   decomposition and tracking issues are on
   [Engineering Status](engineering-status.mdx).
 </Aside>
+
+## Reading the verdict
+
+| Reading | Meaning | First suspects |
+|---|---|---|
+| normalized ≈ 1, in band | **consistent**: the covariance honestly bounds the error | (healthy) |
+| normalized above the band (over-confident) | real errors exceed the claimed uncertainty | process noise `Q` too small; a wrong or sign-flipped Jacobian; an unmodeled bias making residuals systematically biased |
+| normalized below the band (under-confident) | the claimed uncertainty exceeds the real errors | measurement noise `R` too large; over-inflated `Q`; the filter ignoring usable information |
+| **NIS consistent, NEES ≫ 1** | innovations fine, *state* drifting unmodeled | a systematic scale or bias error the covariance doesn't represent (a prime #212 signature) |
+| per-block NEES spikes in one state | that state is the culprit | e.g. attitude-block NEES climbing first ⇒ gyro bias or the propagation Jacobian |
+
+A divergence or a drift now has a *direction*: not "it's wrong, edit something and
+re-measure ATE," but "the filter is over-confident, in the attitude block first,
+from the second propagation," which points at a component and a term (see the
+[diagnostic methodology](diagnostic-methodology.mdx)).
+
+## Caveats
+
+- **It is a large-sample test.** The Gaussian band assumes hundreds to thousands of
+  updates; on a handful of samples it is meaningless. At the nominal α a perfectly
+  consistent filter is still flagged α of the time by chance, so treat a marginal
+  verdict as a prompt to look, not a proof.
+- **Samples within one run are correlated.** The band assumes independent χ² terms;
+  consecutive frames of one run are not, so the sum's variance can exceed 2D and the band
+  is too narrow. A single-run verdict is approximate; independent Monte Carlo runs give the
+  exact test.
+- **The covariance and the error must be the same object:** the same tangent space,
+  state ordering and units. A NEES against a mismatched `P` is nonsense, which is
+  why `nav_error` and `core_covariance` are tied to `msckf::State`'s documented
+  layout.
+- **A non-positive-definite covariance is itself a failure.** `normalized_squared`
+  throws on it, and the EuRoC report counts and surfaces any frames it had to skip.
+
+## References
+
+- Y. Bar-Shalom, X.-R. Li, T. Kirubarajan, *Estimation with Applications to Tracking
+  and Navigation* (2001): the NEES/NIS consistency tests and the χ² acceptance
+  bounds.
+- J. Hesch, D. Kottas, S. Bowman, S. Roumeliotis, *Consistency Analysis and
+  Improvement of Vision-aided Inertial Navigation* (T-RO 2014): VIO observability
+  and filter consistency, the 4-DoF unobservable subspace.
+- Z. Zhang, D. Scaramuzza, *A Tutorial on Quantitative Trajectory Evaluation for
+  Visual(-Inertial) Odometry* (IROS 2018): the yaw-only ("posyaw") gauge alignment.

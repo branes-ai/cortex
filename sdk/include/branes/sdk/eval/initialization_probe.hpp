@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/initialization_probe.hpp — the S1 (initialization) probe of
-// the VIO contract program (docs/arch/vio-pipeline-canonical.md).
+// the VIO contract program (docs/pipeline/canonical-pipeline.md).
 //
 // S1 bootstraps the manifold: orientation (gravity-aligned), gyro bias, and —
 // on the dynamic path — gravity, per-keyframe velocity, and the metric SCALE.

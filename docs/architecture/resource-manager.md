@@ -30,7 +30,7 @@ caller requests a buffer of a given size/alignment, locks it to get a raw pointe
 
 ## The cxx bridge
 
-The FFI is defined in `core/src/lib.rs` under
+The FFI is defined in `core/src/bridge.rs` under
 `#[cxx::bridge(namespace = "branes::core")]`, with headers generated at build time by
 `build.rs`. Tensor metadata crosses as a `repr(C)` `TensorMetadata` — a raw pointer
 plus shape, no ownership. The C++ side wraps it in `std::span<T>` without copying.

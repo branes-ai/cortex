@@ -3,7 +3,7 @@
 // s2_propagation_bench — the S2_propagation stage bench (issue #455). Runs
 // stages::s2_propagation::apply over IMU segments on its
 // fixtures, in several arithmetic types, and prints the invariant report. See
-// docs/arch/stage-benches.md for the flags.
+// docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s2_propagation_bench.hpp>
 

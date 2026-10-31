@@ -1,26 +1,27 @@
-# The Canonical VIO Pipeline — Distilled for Contract-Driven Reconstruction
+---
+title: The Canonical VIO Pipeline
+description: The S0–S10 stage contracts distilled from OpenVINS and MINS — each stage's signature, pre- and post-conditions, probes and tests — and the probe utilities that run them.
+sidebar:
+  label: Canonical Pipeline (Contracts)
+---
 
-> **Purpose.** We have a clean-room OpenVINS-style MSCKF that runs but is structurally
-> over-confident (NEES ≫ 1). The defect is now **localized by measurement** to a **yaw
-> observability leak** (the `observability_probe`, #337): the camera Jacobian preserves the
-> 4-DoF unobservable null space at one consistent linearization but leaks into yaw at the
-> evolving estimate — matching attitude-NEES ≈ 993 on slow V1_01. The textbook fix is FEJ; both
-> a measurement-only and a full (propagation-`Φ`) FEJ were built and **measurably diverge** (§1
-> candidate #5), so the escalation is the Right-Invariant EKF. This document goes back to first principles: it distills the **canonical** VIO pipeline as
-> designed by OpenVINS (and contrasts MINS / VINS-Mono / ROVIO / ORB-SLAM3), decomposed into
-> discrete **stages**. Each stage is written as a *contract*: a type signature, the
-> **pre-conditions** that must hold on its inputs, the **post-conditions / invariants** that must
-> hold on its outputs, the **probes** that measure whether those conditions hold, and the
-> **unit tests + sensitivity analyses** that validate them.
+> **Purpose.** This document goes back to first principles: it distills the **canonical** VIO
+> pipeline as designed by OpenVINS (and contrasts MINS / VINS-Mono / ROVIO / ORB-SLAM3),
+> decomposed into discrete **stages**. Each stage is written as a *contract*: a type signature,
+> the **pre-conditions** that must hold on its inputs, the **post-conditions / invariants** that
+> must hold on its outputs, the **probes** that measure whether those conditions hold, and the
+> **unit tests + sensitivity analyses** that validate them. The code cites its sections (`§S0`–
+> `§S10`); the [stage pages](overview.mdx) explain each stage, and
+> [Engineering Status](engineering-status.mdx) has what the probes found.
 >
 > The method this enables: for every stage, build the probe, write the test, confirm the
 > contract holds *in isolation* before composing. A VIO filter is a chain of transformations
 > where one violated invariant three stages upstream surfaces as "drift" or "over-confidence"
 > with no local symptom. Contracts localize the fault.
->
-> **Companion docs:** `docs/arch/visual-inertial-odometry.md` (the deep offline math treatment —
-> sensor models, preintegration covariance, marginalization+FEJ, the structured solve, the
-> frontend). This document is the *operational* counterpart: what the canonical reference
+
+> **Companion:** [`docs/arch/visual-inertial-odometry.md`](../arch/visual-inertial-odometry.md), the deep offline math
+> treatment (sensor models, preintegration covariance, marginalization+FEJ, the structured solve,
+> the frontend). This document is the *operational* counterpart: what the canonical reference
 > systems actually do, stage by stage, and how to instrument each stage.
 
 ---
@@ -668,114 +669,11 @@ compose. Probes that already exist in `sdk/include/branes/sdk/eval/` are marked 
 
 ---
 
-## 5. Where the running cortex filter most likely diverges from canonical
+## 5. Where the running filter diverges from canonical
 
-The map shows the *algebra* is textbook-correct (null-space projection, Joseph update,
-marginalization-by-submatrix, FEJ storage all present and right). FEJ was implemented and refuted
-by measurement. So the over-confidence is **not** in the parts that look hard in the papers. The
-ranked candidates, each a contract above with a test that decides it:
-
-1. **S10 — unmodeled calibration uncertainty — diagnosis CONFIRMED, blunt `R`-term REFUTED as the
-   V2_03 fix (measured 2026-06-11).** The `s10_online_calibration` probe (run 2026-06-05) confirms
-   the analytic link: a realistic **1° extrinsic uncertainty induces ~8 px of reprojection error —
-   larger than the filter's assumed ~4.6 px — for an R-inflation of ~4×, quantitatively matching the
-   empirical `R×4`** from #212. The end-to-end R-sweep reproduces the EuRoC over-confidence almost
-   exactly (synthetic pose **NEES ≈ 43 at R×1 ≈ MH_05's 43**), and R-inflation drives NEES back
-   toward dof. **A physically-derived calibration term was then built and validated end-to-end:**
-   `CameraUpdaterOptions::calib_rot_sigma` folds a camera↔IMU extrinsic-rotation σ into the
-   measurement noise (isotropic, so the S6 null-space/Joseph algebra is unchanged), plumbed through
-   `VioConfig::calib_ext_rot_sigma_deg` + a `CORTEX_CALIB_ROT_SIGMA_DEG` knob; a unit test confirms
-   it restores NIS/dof → 1 on a self-consistent scene. **The decisive V2_03 sweep is a sharp,
-   instructive split:**
-
-   | V2_03 | calib off | 1° | 2° |
-   |---|---:|---:|---:|
-   | ATE (m) | **0.27** | 0.62 | 4.74 (diverged) |
-   | NIS (ideal ≈ dof) | 14.7 | 3.95 | **1.41** |
-   | NEES (ideal ≈ dim) | 140 | 101 | 3074 |
-
-   The term does **exactly** what the S6 probe predicted at the **innovation** level — NIS collapses
-   14.7 → 3.95 → 1.41, near-consistent at 2°, confirming R was genuinely understated and unmodeled
-   calibration is real. **But the *state* estimate regresses**: ATE blows up and NEES explodes,
-   because a blunt **global isotropic** `R`-inflation down-weights *all* vision uniformly, starving
-   the aggressive-motion filter into IMU dead-reckoning. This is the same lesson as the empirical
-   `R×4` (a "crude proxy") and the S5 gate: it **cures the symptom (NIS) and worsens the disease
-   (state divergence)**. *Verdict:* the calibration-uncertainty diagnosis holds, but the fix is to
-   **estimate** the calibration (online `T_CI`/`t_d` states, OpenVINS/MINS-style) — correcting the
-   bias — not to drown the visual signal under a uniform `R`-scale. Keep the term **default-off**;
-   it is a diagnostic instrument and a per-feature/anisotropic future, not the shipped remedy.
-
-   **Online extrinsic estimation built and measured — spatial calibration largely CLEARED as the
-   driver (measured 2026-06-12, #332).** Following that verdict, the camera↔IMU extrinsics `T_CI`
-   (6-DoF/cam) were promoted to in-state estimation: a calibration block after the IMU, the
-   `∂h/∂δθ_ic`/`∂h/∂δp_ic` Jacobians (FD-validated to 1e-16), a prior, and the box-plus — gated by
-   `VioConfig::estimate_extrinsics` (default-off) + a `CORTEX_ESTIMATE_EXTRINSICS` knob. A synthetic
-   recovery test confirms the mechanism *works*: seeded ~2.9° off, the filter drives `T_CI` back to
-   <25% of the error. **But on V2_03 it does not resolve #212:**
-
-   | V2_03 | estimate off | on, 1°/10mm prior | on, 3°/30mm prior |
-   |---|---:|---:|---:|
-   | ATE (m) | **0.27** | 0.35 | 0.32 |
-   | NIS (ideal ≈ dof) | 14.7 | 14.7 | 14.5 |
-   | NEES (ideal ≈ dim) | 140 | 153 | **110** |
-   | innovation bias (mean_z) | −4.35 | −5.00 | −3.12 |
-
-   A generous prior extracts a *minor* real effect — NEES 140 → 110 (~21%) and the innovation bias
-   eases — so there is a *small* genuine extrinsic error. But the decisive number, **NIS, is
-   unchanged across the whole sweep** (~14.5–14.7): the innovations stay ~15× oversized no matter
-   what the extrinsic estimate does, and ATE never beats baseline. *Verdict:* the **spatial**
-   extrinsics are accurate enough on EuRoC that estimating them is **not** the #212 lever — the
-   unchanged NIS pins the dominant cause to understated **measurement noise `R`** and the unmodeled
-   **time offset `t_d`** (the EuRoC cam↔IMU temporal offset — the deferred Tier-2 calibration state),
-   not the spatial transform. Kept **default-off**. Next S10 lever: `t_d` as state.
-2. **S2 — diagonal `Q_d` — MEASURED and largely DE-PRIORITIZED.** The `s2_propagation` probe
-   (run 2026-06-04) confirms the cortex `Q_d` is diagonal and drops the canonical position-block
-   (`¼σ_a²Δt³`) and v–p cross (`½σ_a²Δt²`) terms — but quantifies the cost as **~7% position-σ
-   under-report inter-frame, 0.7% at 0.5 s** (Φ-reconstruction validated to 1e-16). Decisively,
-   **propagation-only NEES ≈ 6.4 at the cortex default `Q` (6-DoF target 6)** with a clean
-   `NEES ∝ 1/Q` — so the IMU process noise is approximately *consistent on its own*. The
-   over-confidence is therefore **not** an S2/`Q` fault; it must enter at the update (S6) or via
-   unmodeled calibration (S10). Fix the diagonal `Q` for correctness, but it is not the driver.
-3. **S5 — no parallax / conditioning gate on triangulated features — gate REFUTED as the V2_03 fix
-   (measured 2026-06-11).** The shipped triangulator admits low-parallax features at full weight
-   (S5 probe: depth σ up to ~127% of depth, no soft gate). The decisive test was run end-to-end:
-   `min_parallax_deg` was plumbed through `VioConfig` + a `CORTEX_MIN_PARALLAX_DEG` knob and swept on
-   EuRoC **V2_03**. Enabling the gate **monotonically regressed both accuracy and consistency** —
-   ATE 0.27 m → 0.89 m (2°) → 1.99 m (5°); NIS 14.7 → 17.5 → 26.7; NEES 140 → 170 → 322 — because the
-   gate starves the fast-motion filter of the short-baseline features it depends on (a 5° gate drops
-   >half the updates: 21 585 → 10 180). So the low-parallax admission is a genuine contract gap but
-   **not** the V2_03 over-confidence driver; rejecting those features costs more than it saves. Keep
-   the gate **default-off**. The over-confidence is dominated by the other input-side source,
-   **S10 unmodeled calibration** (candidate #1).
-4. **S6d — gate threshold under aggressive motion.** A too-tight χ² gate rejects good measurements
-   exactly when motion is hard, starving corrections → divergence. *Decisive test:* gate-threshold
-   sweep on V2_03.
-5. **Yaw observability leak — the LEADING candidate for the dominant NEES symptom; FEJ refuted, escalate
-   to R-IEKF (measured 2026-06-12, #337/#339).** A motion-spectrum sweep split the over-confidence in
-   two: NIS (innovation) is motion-dependent (1.5 slow → 14.5 aggressive — the `t_d`/kinematics lever,
-   parked), but **NEES (state) is worst on the *slowest* sequence** (V1_01 NEES 436, **attitude-NEES
-   993**, NIS a healthy 1.5). That inverse-with-motion signature is **spurious information gain along
-   the unobservable manifold**. The `observability_probe` (`eval/observability_probe.hpp`, on main)
-   confirms it: the camera Jacobian annihilates the 4-DoF null space (translation + gravity-yaw) at one
-   consistent linearization (‖H·N‖_yaw = 2e-16) but **leaks into yaw** (0.15 at σ=2 cm, monotonic) at
-   the evolving estimate — the EKF has no FEJ anchor. *Fix attempt — FEJ, refuted by measurement:* a
-   measurement-only FEJ regressed (MH_05 ATE 0.76 → 20.9 m), and a *full* FEJ (propagation-`Φ` +
-   measurement) **diverged catastrophically** (V1_01 0.29 → **2281 m**, attitude-NEES 993 → **134k**;
-   MH_05 → **11 km**) — a forever-propagated IMU first-estimate trajectory dead-reckons to garbage, so
-   `Φ` linearizes at a wild point. Correct FEJ needs *short-lived per-clone* anchors (OpenVINS), not a
-   frozen IMU path; two hand-rolled variants both failed, and the measure-first gate caught both before
-   shipping. *Escalation:* the **Right-Invariant EKF (R-IEKF)**, whose Jacobians are state-independent
-   so yaw observability holds *by construction* — no linearization point to freeze. The
-   `observability_probe` is the ready acceptance gate (yaw-leak → 0 at any σ). The FEJ experiment lives
-   on the parked `feat/fej-*` branches (`use_fej` default-off, never merged).
-
-These five are independent and individually testable. The discipline the user proposed —
-probe + test + sensitivity per stage — is exactly what separates them: instead of one more global
-re-tune, each candidate has a *local* measurement that confirms or kills it. Per the standing
-guidance (`cortex-212-overconfidence-structural`), do not edit the estimator for #212 until the
-over-confidence is traced to one of these named contract violations with a matching instrument reading.
-
----
+The ranking of where cortex's filter departs from the canonical pipeline, and what each
+measurement settled, is kept current on [Engineering Status](engineering-status.mdx) and
+[Consistency Analysis](consistency-analysis.mdx).
 
 ## 6. Running the contracts: the stage-probe utilities
 
@@ -798,97 +696,18 @@ The architecture: the probe *computation* lives in header-only, type-generic
 that prints the contract, runs the probes, prints a native-unit results table, and writes the CSV
 artifacts the figure generator renders.
 
-**S0 is wired** and reports in native units — px (round-trip, Jacobian linearization), px/ms (time
-offset), px/deg & px/mm (extrinsics), m/s² & mm (IMU drift). Its reading: the EuRoC camera model
-and analytic Jacobian round-trip and linearize to **machine precision** (the S0 *camera* contract
-holds — the over-confidence is not a projection bug), while the time-offset (0.12→0.87 px/ms) and
-extrinsic (≈8 px/deg, 0.21 px/mm @2 m) sensitivities quantify the uncertainty the filter omits by
-treating calibration as perfect — the **S10 candidate**. The IMU drift cases make gravity leakage
-visceral: a 0.5° attitude error is **4.3 m** of position drift in 10 s. Figures:
-`docs/assessments/figures/s0/`.
-
-**S2 is wired** (`s2_propagation`, probe `sdk/eval/propagation_probe.hpp`, test
-`tests/sdk/propagation_probe.cpp`). It drives the real `Propagator` and reports: Q-structure
-(cortex diagonal vs canonical `B·Σ·Bᵀ`), position-σ growth cortex-vs-canonical (mm), GT-injection
-discretization error (clean **O(dt)**, ~15 mm @200 Hz over a 2 s tumble), and **propagation-only
-NEES vs Q-scale** (the #212 lever). Headline reading: **NEES ≈ 6 at the default `Q`** ⇒ propagation
-is approximately consistent and the diagonal-`Q` deficit is ~7% inter-frame — the over-confidence is
-**downstream of S2**. Figures: `docs/assessments/figures/s2/`.
-
-**S1 is wired** (`s1_initialization`, probe `sdk/eval/initialization_probe.hpp`, test
-`tests/sdk/initialization_probe.cpp`). It drives the real `ImuInitializer` (+ `ImuPreintegrator` for
-the dynamic keyframes) and reports: static gravity-leveling residual (machine zero) + leveling error
-vs accel noise (the stationarity gate rejects an over-noisy window); dynamic metric-scale recovery
-(<1% under excitation) and the **scale-observability cliff** — the gate *declines* once
-`resolved_motion` falls below the 0.05 m floor; and the initial covariance, which is an **isotropic
-σ·I** (σ=0.1) — *not* enlarged on the unobservable yaw/scale or the weakly-observable accel bias, a
-structural observation worth noting for the S10 calibration work. Figures: `docs/assessments/figures/s1/`.
-
-**S10 is wired** (`s10_online_calibration`, probe `sdk/eval/calibration_probe.hpp`, test
-`tests/sdk/calibration_probe.cpp`). It measures the leading #212 candidate: (1) the analytic
-calibration noise budget — **1° extrinsic uncertainty ⇒ ~8 px induced error ⇒ R-inflation ~4×**,
-matching the empirical `R×4`; (2) an end-to-end R-sweep that reproduces the EuRoC over-confidence
-(synthetic **NEES ≈ 43 ≈ MH_05**) and shows R is the consistency lever. Honest finding: calibration
-cleanly accounts for the **`R×4` component**, but full restoration needs more (the empirical fix also
-raised `Q`), so #212 is multi-source — calibration + process noise + the S5 parallax gate. Figures:
-`docs/assessments/figures/s10/`.
-
-**S3, S5, and S9 are also wired** (drivers `s3_augmentation`, `s5_triangulation`,
-`s9_marginalization`; probe headers `clone_window_probe.hpp`, `triangulation_probe.hpp`) and now
-carry regression tests (`tests/sdk/clone_window_probe.cpp`, `tests/sdk/triangulation_probe.cpp`)
-that lock their readings as CI gates. Their measured verdicts:
-
-- **S3 augment — eliminated.** Clone marginal, cross-covariance, and augment∘marginalize round-trip
-  residuals are all **identically zero**: `P' = G P Gᵀ` with a copy-selection `G` is exact algebra,
-  so the clone carries the full correlation (no zero-cross-covariance inconsistency). Not a #212 source.
-- **S9 marginalize — eliminated.** Kept-marginal residual **identically zero**; `cov.marginalize` is
-  exact principal-submatrix extraction, `P'` stays PSD. Not a #212 source.
-- **S5 triangulate — confirmed optimistic-information injection.** Clean-geometry depth is correct at
-  every parallax, but the only guard is the *hard* Cholesky breakdown — there is **no soft parallax /
-  conditioning gate on the admit path**. At 0.1–1° parallax the depth σ under 1 px noise is 90–127% of
-  the depth itself (cond up to 1.3e6), yet `triangulate()` returns success and the feature reaches the
-  EKF update at full weight. The 5%-of-depth uncertainty budget is met only at **~5°**. The
-  `min_parallax_deg` gate exists but is **default-off** — the leading S5 candidate for the V2_03 divergence.
-
-**S6 is now wired** (`s6_msckf_update`, probe `sdk/eval/update_probe.hpp`, test
-`tests/sdk/update_probe.cpp`) — the consistency-critical stage, and its verdict closes the
-localization loop:
-
-- **S6 update — algebra measured-CONSISTENT.** Driven in isolation on a self-consistent `(P, R)`
-  scene (clone poses perturbed by a draw from the filter's own `P`, image noise at exactly the
-  assumed σ), the shipped `CameraUpdater::update` returns **NIS/dof = 1.002** (χ² band [0.98, 1.02],
-  4000 updates), with the left-null-space projection marginalizing the feature (`‖NᵀH_f‖ = 2.8e-16`)
-  via orthonormal reflectors (`‖NᵀN − I‖ = 2.2e-16`, so projected noise stays σ²I) at the correct
-  dimension `2m−3`, and Joseph keeping `P⁺` PSD on every update. A noise-mismatch sweep confirms the
-  lever: NIS/dof = 0.84 → **1.00** → 1.64 → 4.17 as injected noise outgrows the modeled `R`. **The
-  #212 over-confidence is therefore not in the update math — it enters via the INPUTS `P⁻`/`R`**
-  (the S2 process noise and the S10 unmodeled calibration), exactly as §5 hypothesized.
-  *Not yet instrumented:* the analytic-vs-numeric Jacobian check and FEJ-divergence telemetry (the
-  updater currently linearizes at the live poses, not a frozen first estimate).
-
-**The remaining scaffolds are S4, S7, S8.** With S0/S2/S3/S5/S6/S9/S10 measured, the over-confidence
-is conclusively localized to the **noise budget entering the update** (`P⁻`/`R`), with the EKF
-algebra itself measured-consistent (S6) and the S5 parallax-gate fix **refuted end-to-end** on V2_03.
-The leading driver is **S10 unmodeled calibration** (the quantified `R×4` component) alongside the
-process-noise budget — the fix is to *model those inputs* (online `T_CI`/`t_d` or a calibration term
-in `R`), not to gate features or rewrite the update. Next decisive measurement: the `CORTEX_R_SCALE`
-/ `CORTEX_Q_SCALE` sweep on V2_03/MH_05 to quantify how much of the residual NEES the honest
-calibration+process noise budget recovers.
+Each stage's driver prints its contract and a native-unit results table; what each probe
+measured is on that stage's page (for example [S0](stages/s0-sensor-models.mdx),
+[S6](stages/s6-msckf-update.mdx)), and the overall verdict on
+[Engineering Status](engineering-status.mdx).
 
 ### End-to-end noise→robustness demo
 
 Beside the per-stage probes, `tools/src/vio_pipeline.cpp` runs the **whole pipeline as a stream**:
-a synthetic world with exact ground truth (`sdk/eval/synthetic_world.hpp`) → an additive-noise
-injector on the camera + IMU streams → the real MSCKF backend → an estimate stream, measuring how
-well the filter rejects the noise. It writes a saveable typed stream (`run.jsonl`) plus CSVs the
-figure generator renders to: estimated-vs-GT trajectory, position error over time, **error vs
-noise level**, and **NIS vs noise level**. The measured envelope on the synthetic source: the
-filter tracks (sub-metre on gentle motion) and is over-conservative when sensors are clean
-(NIS ≪ 1), **NIS crosses 1 exactly where the injected noise matches the filter's assumed model**
-(scale = 1), becomes over-confident above it, and **loses lock past ~2–4×** — a quantified operating
-window. Building a synthetic world with exact GT also surfaced a backend behaviour worth a probe:
-features spanning the static→motion boundary triangulate degenerately (no parallax gate, the S5
-candidate), and unestimated accel bias dead-reckons into metres — both consistent with the #212 leads.
+a synthetic world with exact ground truth → an additive-noise injector → the real MSCKF backend
+→ an estimate stream, measuring how well the filter rejects the noise; or a recorded EuRoC
+sequence, without the injector, → the same backend.
+[Running the Demo](running-the-demo.md) shows how to run it and read its output.
 
 ---
 
@@ -904,7 +723,7 @@ candidate), and unestimated accel bias dead-reckons into metres — both consist
 - Forster, Carlone, Dellaert, Scaramuzza, *On-Manifold Preintegration*, TRO 2017.
 - Lee, Geneva, Chen, Huang, *MINS: Efficient and Robust Multisensor-aided Inertial Navigation
   System*, JFR 2025 — <https://arxiv.org/abs/2309.15390>, <https://github.com/rpng/MINS>.
-- Companion: `docs/arch/visual-inertial-odometry.md`; `docs/assessments/vio-troubleshooting.md`.
+- Companion: [`docs/arch/visual-inertial-odometry.md`](../arch/visual-inertial-odometry.md); the FEJ measurements, [`docs/sessions/2026-06-04-vio-troubleshooting-fej.md`](../sessions/2026-06-04-vio-troubleshooting-fej.md).
 
 > **Licensing note.** OpenVINS and MINS are GPL. This distillation is derived from their
 > *documentation and the underlying papers* (algorithmic/architectural level), not from their

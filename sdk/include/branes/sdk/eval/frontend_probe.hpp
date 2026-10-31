@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // branes/sdk/eval/frontend_probe.hpp — the S4 (visual frontend) probe of the VIO
-// contract program (docs/arch/vio-pipeline-canonical.md).
+// contract program (docs/pipeline/canonical-pipeline.md).
 //
 // Drives the SHIPPED frontend primitives — the FAST detector (cv/fast.hpp) and the
 // pyramidal KLT tracker (cv/klt.hpp) — on synthetic richly-textured images warped

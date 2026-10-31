@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 issue: branes-ai/cortex#528
 ---
 # Plan: generate the site from docs/, and publish what docs/ already holds
@@ -16,6 +16,8 @@ Today the site's 55 pages live in `docs-site/src/content/docs/`, and `docs/` hol
 
 ### 1. The move: every route kept
 
+Implemented in [#541](https://github.com/branes-ai/cortex/pull/541).
+
 - **The pages move to `docs/`** at the same paths, so every route stays. `docs/index.mdx` is the landing page.
   - The MDX pages import the site's components and data through docs-kit's `@site/` alias (the site's `src/`) instead of `../../../` paths.
   - Links written as routes (`/vio/overview/`, `./getting-started/introduction/`) become relative links to the documents, so docs-kit checks them.
@@ -28,7 +30,36 @@ Today the site's 55 pages live in `docs-site/src/content/docs/`, and `docs/` hol
 
 ### 2. The merge: one set of documents
 
-For each document in `arch/`, `assessments/` and the single-document folders, one decision: merge it into a page that covers its subject, publish it as a page of its own, or leave it unpublished as a working record. Where both sets cover a subject (`vio`, `stage-benches`, the architecture), they become one document, and a page that is absorbed redirects to the one that absorbed it. The second PR lists the decisions in this plan.
+For each document in `arch/`, `assessments/` and the single-document folders, one decision (decided on #528, 2026-10-31). No published page was absorbed, so no route redirects.
+
+**Published as pages:**
+
+| Document | Now |
+|---|---|
+| `arch/vio-pipeline-canonical.md` | [The Canonical VIO Pipeline](../../pipeline/canonical-pipeline.md): the S0–S10 contracts the code cites (`§S0`–`§S10`). Its dated status sections (the June divergence ranking, which probes were wired) point to [Engineering Status](../../pipeline/engineering-status.mdx) instead; the code's references are repointed. |
+| `assessments/vio-pipeline-howto.md` | [Running the VIO Pipeline Demo](../../pipeline/running-the-demo.md), with the tool's current flags. |
+| `assessments/covariance-feasibility-safeguards.md` | [Keeping the Covariance Physically Feasible](../../debugging/covariance-safeguards.md), after Mixed Precision on MTL5, which points to it. |
+
+**Merged into pages, and deleted:**
+
+| Document | Into |
+|---|---|
+| `arch/stage-benches.md` | [Stage Benches](../../debugging/stage-benches.mdx): its developer reference (layout, bench catalogue, fixtures, the bench contract, file formats). The benches' comments point there. |
+| `assessments/covariance-architecture.md` | [MSCKF Backend](../../vio/msckf-backend.md): the square-root covariance form (#187). |
+| `assessments/filter-consistency-nees-nis.md` | [Reading the Metrics](../../pipeline/metrics.mdx): the gate vs the run-average test, the code map, the VIO subtleties, reading the verdict, references. |
+| `assessments/current-pipeline.md` | The [S0](../../pipeline/stages/s0-sensor-models.mdx) and [S10](../../pipeline/stages/s10-online-calibration.mdx) stage pages: how to run their probes. |
+| `assessments/vio-diagnostic-methodology.md` | [Diagnostic Methodology](../../pipeline/diagnostic-methodology.mdx): the Sim3-vs-SE3 ATE heuristic; the rest was already there or in Invariants. |
+| `benchmark/vio.md`, `assessments/intelligency-per-watt.md` | [Intelligence per Watt](../../benchmarks/intelligence-per-watt.md): the dataset, progress and fallback notes, and two future-work lines. |
+
+**Kept unpublished, as working records:**
+
+- `arch/`: `cortex-repo.md` (the design conversation the ADRs were distilled from; the ADRs, not it, decide when the code is ambiguous), `phase0-foundation/` and `phase1-design/` (summarized by the phase pages), `visual-inertial-odometry.md` (offline background; it recommends libraries cortex chose against).
+- `assessments/`: `3d-viz-options.md` (the record of the 3D viewer's tooling choice), `vio-consistency-sweep-diagnosis.md` (the raw sweep data; marked superseded), the `figures/` the pages show.
+- Notes outside the site's subject: `arch/flight-controller-analysis.md`, `assessments/ai-coding-assistant-failures.md`, `assessments/embodied-ai-workload-analysis.md`, `dfm/product-engineering.md`, `performance-engineering/vio-pipeline-parallelization.md`. `assessments/workloads.md`, an earlier draft of the workload analysis, is deleted.
+
+**Moved to `sessions/`:** three session transcripts filed as notes, now dated session logs: `2026-06-03-vio-euroc-troubleshooting.md`, `2026-06-04-vio-troubleshooting-fej.md` (the FEJ measurements) and `2026-06-05-vio-first-principles.md`.
+
+**Fixed on the way:** four pages placed the cxx bridge in `core/src/lib.rs` (it is `core/src/bridge.rs`); Stage Benches called the shipped S10 bench "in review"; the S10 page contradicted itself on calibration states; Repository Layout called `cortex-repo.md` the source of truth.
 
 ## Acceptance
 
@@ -36,9 +67,9 @@ For each document in `arch/`, `assessments/` and the single-document folders, on
 2. Every route on today's site still exists, or redirects to the page that absorbed it.
 3. Every document in `docs/` is either a page or in a folder listed as unpublished or as records.
 4. Figures, 3D scenes and benchmark data render on the deployed site.
-5. A broken relative link in `docs/` fails the PR.
+5. A broken relative link in a published document of `docs/` fails the PR. (The records are checked by the architecture site's check; the unpublished working records are not checked, since they keep the links they had when written.)
 
-The first PR meets 1, 4 and 5, and 2 and 3 with today's routes and the unpublished folders above; the second completes 2 and 3.
+The first PR met 1, 4 and 5, and 2 and 3 with today's routes and the unpublished folders above; the second completes 2 and 3. All five were met on 2026-10-31.
 
 ## Departures
 

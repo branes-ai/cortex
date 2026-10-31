@@ -10,9 +10,10 @@ import { Aside } from '@astrojs/starlight/components';
   S9_marginalization bench as its worked example. The S0–S3 benches
   ([#454](https://github.com/branes-ai/cortex/issues/454), [#455](https://github.com/branes-ai/cortex/issues/455))
   and the S4–S5 benches ([#456](https://github.com/branes-ai/cortex/issues/456)) are merged, and the
-  S6 sub-step benches ([#457](https://github.com/branes-ai/cortex/issues/457)) are merged; the S9
-  policies and the S10 bench ([#458](https://github.com/branes-ai/cortex/issues/458)) are in review.
-  The developer reference is `docs/arch/stage-benches.md`.
+  S6 sub-step benches ([#457](https://github.com/branes-ai/cortex/issues/457)) are merged, as are the
+  S9 policies and the S10 bench ([#458](https://github.com/branes-ai/cortex/issues/458)). Every stage
+  S0–S6, S9 and S10 has a bench. The file layout, the bench catalogue and the full bench contract are
+  in the [developer reference](#developer-reference) below.
 </Aside>
 
 A **stage bench** is the focused debug, test, characterization and research environment for **one**
@@ -214,10 +215,15 @@ failure points at one sub-step. The S6 benches (#457) found:
 - **The shipped χ² gate is loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
   5-per-dof gate admits 59–70% of measurements biased by 2σ, against 22–44% for a 95% χ² gate
   ([#481](https://github.com/branes-ai/cortex/issues/481)).
-- **A square-root filter must carry its factor.** Re-factoring the covariance in float or posit32
-  zeroes the clone blocks' tiny pivots (36 of 51) and represents a different covariance; measured that
-  way the square-root update looked ≈330× worse than Joseph. With the factor carried, the two agree
-  within 2.3× in every type ([#482](https://github.com/branes-ai/cortex/issues/482)).
+- **A square-root filter must carry its factor.** The clone blocks are almost perfectly correlated
+  with the IMU pose, so their Schur-complement pivots are below float's (and posit32's) resolution of
+  P. Re-factoring the covariance in those types zeroes 36 of 51 pivots, where double zeroes only the 6
+  exact ones cloning makes, and represents a different covariance; measured that way the square-root
+  update looked ≈330× less precise than Joseph in posit32. The `sqrt_array` variant therefore factors
+  the fixture's covariance in double and rounds the factor to T, as a filter that carried its factor
+  would hold it. Then it lands within 1.3–2.3× of Joseph in every type
+  ([#482](https://github.com/branes-ai/cortex/issues/482)). The S2 and S3 benches' square-root
+  variants still re-factor P in T.
 - **Posits are precise near 1, not near 1e-17.** Residuals at the true state and covariance entries
   near σ² sit where a posit has few fraction bits, so checks on them use T's precision at that
   magnitude (`safety_at`), not its ε at 1.
@@ -227,11 +233,19 @@ failure points at one sub-step. The S6 benches (#457) found:
 The S10 bench applies the online-calibration stage to a fresh state with a believed extrinsic off
 from the world's true one, runs the filter, and then updates a window of tracks three ways: with the
 extrinsic estimated (shipped), trusted as fixed, or trusted with its prior folded into the
-measurement noise. Over one window, a 5° extrinsic rotation error raises NIS only to ≈0.002 per dof:
-the projected update absorbs a constant rotation almost entirely, so a wrong calibration is
-invisible to NIS and to the gate. Estimated, the extrinsic moves toward the truth with a consistent
-covariance, but by under 30% per window. A calibration error is something the filter has to be told
-about, not something it will notice.
+measurement noise. Over one 6-clone window (16 tracks), a constant camera↔IMU rotation error raises
+NIS only to ≈0.002 per dof at 5° and ≈8e-5 at 1°: the null-space projection absorbs almost all of it
+into the feature positions, so a wrong calibration is invisible to NIS and to the gate. Folding the
+prior into R lowers NIS further. Estimated, the extrinsic moves toward the truth, but by under 30% per
+window (1° → 0.955° with a 2° prior; 5° → 3.98° with a 5° prior), while its covariance stays consistent (NEES 0.49 against a
+χ²₀.₉₉₉(6) bound of 22.5), so recovery needs many windows of excitation. A calibration error is
+something the filter has to be told about, not something it will notice. The filter has no
+time-offset state, so the bench has no t_d sweep.
+
+The S9 window policies (#458) leave the marginalization contract unchanged: removing the oldest or
+the second-newest clone keeps the principal submatrix exactly. What a policy changes is which
+information the update had a chance to use first, a pipeline question
+([#447](https://github.com/branes-ai/cortex/issues/447)).
 
 ### Comparing alternative methods: S5 triangulation
 
@@ -264,8 +278,8 @@ A bench is a struct describing its stage: the I/O types, the codec, `run` (which
 `stages::<sN_name>::apply`, with research variants as extra branches), `flatten` (every output
 number, for the cross-type and replay comparisons), `invariants` (the stage's checks), the built-in
 fixtures, and optionally a sweep. `bench_main<B>` turns it into the executable. The S9 bench
-(`tools/include/branes/tools/bench/s9_marginalization_bench.hpp`) is the template; the developer
-reference spells out the full contract.
+(`tools/include/branes/tools/bench/s9_marginalization_bench.hpp`) is the template; the
+[developer reference](#the-bench-contract) spells out the full contract.
 
 ## The edit-compile-run loop
 
@@ -279,3 +293,156 @@ Measured by touching the stage header, then rebuilding and running only the benc
 
 Posits are software arithmetic, so posit work is best done in a Release build. Either way, a stage
 edit is re-checked in seconds.
+
+## Developer reference
+
+### Layout
+
+| Path | What |
+|---|---|
+| `tools/include/branes/tools/bench/bench.hpp` | the runner, the report, and the CLI (`bench_main<B>`) |
+| `tools/include/branes/tools/bench/fixture.hpp` | the fixture model, the exact JSON codec, and the capture writer |
+| `tools/include/branes/tools/bench/types.hpp` | the arithmetic types: `double`, `float`, `posit32` (`posit<32,2>`), `posit16` (`posit<16,1>`), `long_double` as the wider-than-double reference, and `strict_double` (`strict_double.hpp`, #449) |
+| `tools/include/branes/tools/bench/variant.hpp` | the variant slot: named alternative implementations of a stage |
+| `tools/include/branes/tools/bench/sweep.hpp` | declarative characterization sweeps and CSV tables |
+| `tools/include/branes/tools/bench/s<N>_<transformation>_bench.hpp` | one stage's bench (the adapter) |
+| `tools/benches/s<N>_<transformation>_bench.cpp` | the bench executable, a one-line `main` |
+| `tools/benches/fixtures/s<N>_<transformation>/*.json` | the stage's committed fixtures |
+| `tests/tools/stage_bench.cpp` | the Catch2 integration: the framework's guarantees, locked |
+
+The stage transformations the benches call are in `sdk/include/branes/sdk/msckf/stages/` (#452), and
+the full pipeline is their call sequence, so what a bench establishes about a stage holds where the
+backend calls it.
+
+### The benches
+
+| Bench | Issue | Variants | Sweep |
+|---|---|---|---|
+| `s0_sensor_model_bench` | #454 | `shipped` (Newton undistortion), `fixed_point` | distortion strength × radius → round trip, Jacobian, px per 1° extrinsic / per 1 ms offset |
+| `s1_initialization_bench` | #454, #472 | `shipped` (static), `gravity_align`, `dynamic` (VI alignment); SfM front end: `sfm_two_view_pnp`, `sfm_adjacent_bootstrap`, `sfm_keyframes_4hz` | window × IMU noise × excitation → roll/pitch and scale error; observation noise × window length × camera speed for the SfM variants |
+| `s2_propagation_bench` | #455, #471 | `shipped` (first-order Φ, diagonal Q_d), `canonical_qd`, `sqrt_covariance`, `higher_order_phi`, `invariant` (R-IEKF) | Δt × dynamics × Q scale → position error (body and invariant), yaw leak (first-order, second-order, exp(AΔt) and invariant Φ), diagonal-vs-canonical position-σ gap, λ_min/‖P‖ |
+| `s3_augmentation_bench` | #455 | `shipped`, `sqrt_covariance` | clones × conditioning → block residual, λ_min/‖P‖ |
+| `s4_frontend_bench` | #456 | `shipped` (FB gate off), `fb_gate_1px`, `klt_window_7` | image noise × shift → survival, end-point RMS, FB median |
+| `s5_triangulation_bench` | #456 | `shipped` (linear + Gauss-Newton), `linear_only`, `parallax_gate_2deg`, `midpoint_two_view`, `dlt_linear`, `inverse_depth_gn` | parallax × pixel noise → depth error per method, κ, gate rejection |
+| `s6a_jacobians_bench` | #457 | `shipped` | observations × depth → H_f, H_x finite-difference error, max \|H_f\| |
+| `s6b_nullspace_projection_bench` | #457 | `shipped` (Householder), `givens` | observations × depth → NᵀN − I, Nᵀ H_f, H₀·N per method |
+| `s6c_compression_bench` | #457 | `shipped` (identity), `qr` | features stacked → rows in/out, normal-equation error |
+| `s6d_gating_bench` | #457 | `shipped` (5 per dof), `chi2_95`, `gate_off` | dof × outlier size → inlier NIS/dof, acceptance per gate |
+| `s6e_ekf_update_bench` | #457 | `shipped` (Joseph), `sqrt_array` | pixel noise × calibration σ → trace ratio, information along N, ‖δx‖, NIS/dof |
+| `s9_marginalization_bench` | #453 (worked example), #458 | `shipped`, `direct_gather`, `policy_oldest`, `policy_second_newest` | clones × conditioning → residual, λ_min |
+| `s10_online_calibration_bench` | #458 | `shipped` (extrinsic estimated), `fixed`, `folded_into_r` | extrinsic rotation error × prior → remaining error, NIS/dof per treatment |
+
+- **The S6 sub-steps share a scene** (`s6_scene.hpp`): the synthetic world run through S2 and S3, so
+  the covariance is the one those stages produce, with each sub-step's input built by running the
+  shipped upstream sub-steps in double. A sub-step's bench (`S6a_…` to `S6e_…`) prints the S6
+  contract.
+- **Slow stages** in software arithmetic set `static constexpr int kTimingReps` (S2 and S3 use 1).
+- **A stage that is not generic in T** declares `using SupportedTypes = TypeList<...>`. S4's KLT front
+  end runs in double only; #449 decides whether it becomes generic. The S1 SfM variants run only in
+  native types by default (`runs_by_default`): their RANSAC runs hundreds of eigensolves per window,
+  and an emulated posit is ~10⁴× slower.
+- **Image fixtures** are stored losslessly as base64 bytes (`pack(cv::Image)`, `unpack_image`).
+- **Square-root variants** start from a real filter state with `psd_factor`, a Cholesky that
+  tolerates the exactly singular covariance a fresh clone produces.
+
+### Fixtures in detail
+
+The [fixture kinds](#fixtures) and the two runner checks are above. The `known_answer.residual`
+tolerance is `safety · n · ε_T · scale` (#445).
+
+- **Variant binding.** An `expected` output can belong to one implementation. The fixture's `variant`
+  field names it, and the runner applies the known-answer and replay checks only to that variant; it
+  can also name a list (`"shipped,direct_gather"`). An empty `variant` means every variant must
+  reproduce it. Captured fixtures record the variant that ran. S1 needs this: its static and dynamic
+  variants legitimately estimate different things from the same input.
+- **Comparisons against double references.** Known answers, ground truth and stored rotations all pass
+  through `double`, so a comparison is never held tighter than double's ε, even when the stage ran in
+  a wider type (`tolerance_vs_double<T>`).
+- **Checks on small quantities.** A posit is most precise near 1 and loses fraction bits as |x| moves
+  away; at 1e-17 posit32 keeps about 14 of its 28. A check on a residual at the true state, or a
+  covariance entry near σ², uses `safety_at<T>(magnitude)`, which scales the safety factor by
+  `eps_at<T>(magnitude) / ε_T`: T's relative spacing at that size. It is 1 for IEEE types. Don't apply
+  it to a lower bound (an SPD margin): a larger safety factor makes those stricter.
+
+A fixture file is one JSON document, schema `branes.vio.fixture/1`:
+
+```json
+{"schema": "branes.vio.fixture/1", "stage": "S9_marginalization", "kind": "captured",
+ "arithmetic": "double", "source": "…", "seed": 0, "description": "…", "variant": "…",
+ "input": {…}, "expected": {…}, "truth": {…}}
+```
+
+The payloads use a small vocabulary: numbers, vectors, row-major matrices `{"rows","cols","data"}`,
+rotations as unit quaternions `[w,x,y,z]`, and the full MSCKF state (navigation, calibration blocks,
+clone window, covariance P). The codec is bit-exact for every type whose values fit in a `double`, which
+is every type the benches store except `long double` where it is wider than `double` (x86 Linux):
+a fixture written from a `long double` run keeps only its `double` part:
+
+- every number goes through `double`, which holds every float, `posit<32,2>` and double value exactly;
+- nlohmann/json writes doubles in shortest round-trip form;
+- non-finite values are written as the strings `"nan"`, `"inf"` and `"-inf"`;
+- rotations are restored with `SO3::from_unit_quaternion`, without renormalizing, because
+  renormalizing is not bit-idempotent.
+
+### The bench contract
+
+The full contract is the header comment of `bench.hpp`:
+
+```cpp
+struct S9MarginalizationBench {
+    static constexpr std::string_view kStage = "S9_marginalization";
+    static constexpr inv::Stage kInvStage = inv::Stage::S9_marginalization;
+    static std::vector<Variant> variants();                        // "shipped" first
+    template <class T> struct Input;  template <class T> struct Output;
+    template <class T> static Input<T>  decode_input(const json&);
+    template <class T> static Output<T> decode_output(const json&);
+    template <class T> static json      encode_output(const Output<T>&);
+    template <class T> static Output<T> run(const Input<T>&, std::string_view variant);
+    template <class T> static std::vector<double> flatten(const Output<T>&);
+    template <class T> static std::vector<inv::InvariantResult>
+        invariants(const Input<T>&, const Output<T>&, const Fixture&);
+    static std::vector<NamedFixture> builtin_fixtures();
+    // optional characterization sweep
+    static Sweep default_sweep();
+    static std::vector<std::string> sweep_columns();
+    template <class T> static std::vector<double> sweep_point(const Point&);
+};
+```
+
+- **`run`** calls the stage's transformation, `stages::<sN_name>::apply`. A research variant is
+  another branch of `run`, selected by name.
+- **`invariants`** returns the stage's checks from `branes/sdk/eval/invariants.hpp`. The S9 bench
+  checks the principal submatrix; symmetry and positive-semidefiniteness; the dimension and window
+  bookkeeping; that the mean is untouched; and, for a ground-truth fixture, the kept clones against
+  the truth.
+- **`flatten`** lists every output number, for the comparison against `double` and the replay check.
+
+### Report, CSV and exit code
+
+The report prints the stage contract from the registry (`vio_stage_contracts.hpp`), then, per
+fixture, variant and type: every invariant with its value, threshold, unit and verdict; the largest
+deviation from the `double` run; and the stage's run time. `--capture DIR` writes the built-in
+fixtures as files.
+
+`--csv DIR` writes:
+
+- `<stage>_report.csv`: one row per fixture × variant × type × invariant;
+- `<stage>_sweep_<type>.csv` (with `--sweep`): one per type, columns = the sweep axes followed by the
+  bench's metrics, ready for the docs-site figure scripts;
+- `<stage>_precision.csv` (with `--precision`).
+
+A normal run exits non-zero if any invariant fails, or if nothing ran, so it can gate CI. Under
+`--precision` only a failure of the double reference, or an empty run, is fatal.
+
+### Existing per-stage assets
+
+The benches build on what was already there rather than replacing it at once:
+
+- `sdk/include/branes/sdk/eval/*_probe.hpp`: the stage probes (sensor model, initialization,
+  propagation, clone window, frontend, triangulation, update, calibration, observability). Their
+  scenarios became the benches' fixtures and sweeps in #454–#458.
+- `tools/src/s<N>_*.cpp` and `s<N>_inspect.cpp`: the contract printers, the CSV probes and the trace
+  inspectors. A bench prints the same contract from the same registry, and its sweep CSVs feed the
+  same figure scripts.
+- `tests/sdk/` stage tests, e.g. `msckf_stages.cpp` for the stage transformations: these stay as the
+  fast unit tests. The bench's Catch2 integration covers its fixtures.

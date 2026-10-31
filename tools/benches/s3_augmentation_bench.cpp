@@ -3,7 +3,7 @@
 // s3_augmentation_bench — the S3_augmentation stage bench (issue #455). Runs
 // stages::s3_augmentation::apply (stochastic cloning) on its
 // fixtures, in several arithmetic types, and prints the invariant report. See
-// docs/arch/stage-benches.md for the flags.
+// docs/debugging/stage-benches.mdx for the flags.
 
 #include <branes/tools/bench/s3_augmentation_bench.hpp>
 

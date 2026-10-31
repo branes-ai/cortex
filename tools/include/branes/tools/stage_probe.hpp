@@ -3,8 +3,8 @@
 // branes/tools/stage_probe.hpp — the shared harness for the VIO stage-probe
 // utilities (tools/src/sN_*.cpp).
 //
-// The VIO pipeline is deconstructed into stages S0–S10 (docs/arch/
-// vio-pipeline-canonical.md). Each stage is a CONTRACT: a type signature, the
+// The VIO pipeline is deconstructed into stages S0–S10 (docs/pipeline/
+// canonical-pipeline.md). Each stage is a CONTRACT: a type signature, the
 // pre-conditions its inputs must satisfy, the post-conditions/invariants its
 // outputs must satisfy, and the native-unit assessments that measure whether
 // those hold. This harness turns a contract into a self-documenting executable:
@@ -176,7 +176,7 @@ inline void note_artifacts(const ProbeArgs& a, const StageInfo& s) {
 inline int run_scaffold(int argc, char** argv, const StageInfo& s, const std::vector<StageInfo>* pipeline = nullptr) {
     ProbeArgs a = parse_args(argc, argv, s);
     if (a.list && pipeline) {
-        std::cout << "VIO pipeline stages (docs/arch/vio-pipeline-canonical.md):\n";
+        std::cout << "VIO pipeline stages (docs/pipeline/canonical-pipeline.md):\n";
         for (const auto& st : *pipeline)
             std::cout << "  " << std::left << std::setw(5) << st.id << std::setw(56) << st.title << '[' << st.status
                       << "]\n";

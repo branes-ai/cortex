@@ -2,7 +2,7 @@
 //
 // branes/sdk/eval/synthetic_world.hpp — a controllable synthetic VIO world with
 // EXACT ground truth, for the end-to-end noise→robustness demo
-// (docs/arch/vio-pipeline-canonical.md). The whole VIO premise is additive
+// (docs/pipeline/canonical-pipeline.md). The whole VIO premise is additive
 // noise: the filter is handed noisy camera + IMU streams and must deliver a
 // robust metric estimate. To show that — and measure it — we need a source whose
 // ground truth is known exactly, so noise→error is clean and attributable.
