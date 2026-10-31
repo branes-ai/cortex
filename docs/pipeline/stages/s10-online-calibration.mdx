@@ -70,25 +70,29 @@ nearly **double** the assumed noise — for an `R`-inflation of ~**4×**. That n
 is not a coincidence: it's the same `R×4` the EuRoC troubleshooting found restores
 consistency.
 
-### 2. End-to-end R-inflation sweep — the filter's measurement-noise deficit
+### 2. End-to-end R-inflation sweep — the perfect-calibration control
 
 On the synthetic world with **perfect calibration and clean sensors**, the backend
-is *already* over-confident — pose NEES ≫ dof — reproducing the EuRoC fault in
-isolation. Sweeping the measurement-noise variance `R` and watching NEES return
-toward dof = 6 confirms `R` is the lever:
+is **not** over-confident: pose NEES sits below dof = 6 at `R`×1, and inflating the
+measurement-noise variance `R` only makes it more pessimistic:
 
-| `R` scale | pose NEES (target 6) |
-|---|---|
-| ×1 | **42.6** |
-| ×4 | 24.8 |
-| ×16 | 10.7 |
-| ×32 | 6.09 |
+| `R` scale | pose NEES (target 6) | ATE |
+|---|---|---|
+| ×1 | **0.036** | 2.3 cm |
+| ×4 | 0.029 | 1.6 cm |
+| ×16 | 0.024 | 1.8 cm |
+| ×64 | 0.016 | 2.5 cm |
 
-![Pose NEES vs R-inflation — the sweep back to consistency](../../assessments/figures/s10/calib_r_sweep.svg)
+![Pose NEES vs R-inflation on the perfect-calibration world](../../assessments/figures/s10/calib_r_sweep.svg)
 
-The synthetic backend lands at **NEES ≈ 43 at R×1** — almost exactly the EuRoC
-MH_05 value (~43) — so this clean, ground-truthed setup is reproducing the real
-over-confidence, not a synthetic artifact.
+This sweep once showed **NEES ≈ 43 at R×1** (ATE 0.63 m), almost exactly the EuRoC
+MH_05 value, and was read as the clean setup reproducing the real over-confidence.
+It was a synthetic artifact: the world left its warm-up with a ≈1 m/s velocity
+step that no accelerometer sample recorded (#475, fixed in #537). With the world
+corrected, the perfect-calibration control is not over-confident, so the EuRoC
+over-confidence (#212) needs something the clean world lacks: unmodeled
+calibration uncertainty (the budget above), process noise, low parallax, or the
+real-data clone drift that drives the yaw leak.
 
 ## Run the probe
 
@@ -105,7 +109,7 @@ cmake --build build -j$(nproc) --target s10_online_calibration
 
 ```text
 R-inflation @ 1deg ext, slow          4.1  x   induced 8.1px vs assumed 4.6px
-pose NEES with perfect calibration    ~43      backend over-confident even with exact T_CI
+pose NEES with perfect calibration    0.036    below dof: the clean control is not over-confident
 ```
 
 | Tool | Location | Purpose |

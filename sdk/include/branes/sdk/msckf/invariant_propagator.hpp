@@ -107,24 +107,43 @@ public:
         return F;
     }
 
-    /// Propagate the mean (SE₂(3) strapdown) and the left-invariant covariance
-    /// P ← Φ P Φᵀ + Q over one IMU sample. Ignores non-positive dt.
+    /// The 15×12 discrete process-noise factor L (Q_d = L Lᵀ) at the extended pose
+    /// (R̂, v̂, p̂), columns [n_g, n_a, n_bg, n_ba]. The error is right-invariant, so
+    /// the noise enters through the same input map G as the biases in Φ:
+    ///   δθ̇ ← −R̂ n_g,   δv̇ ← −[v̂]× R̂ n_g − R̂ n_a,   δṗ ← −[p̂]× R̂ n_g,
+    ///   δḃg ← n_bg,     δḃa ← n_ba,
+    /// and Q_d = G Q_c Gᵀ dt is dense: gyro noise reaches velocity and position
+    /// through the lever arms [v̂]× and [p̂]×. A diagonal Q_d drops those terms,
+    /// under-models the position noise by ≈ |p̂|²σ_g² per second, and leaves the
+    /// filter over-confident — the #537 divergence.
+    [[nodiscard]] DynMat<T> noise_factor(const SO3& R, const Vec3& v, const Vec3& p, T dt) const {
+        using std::sqrt;
+        const Mat3 R_m = R.matrix();
+        const Mat3 vx = math::lie::detail::hat(v);
+        const Mat3 px = math::lie::detail::hat(p);
+        const T sg = noise_.gyro * sqrt(dt), sa = noise_.accel * sqrt(dt);
+        const T sbg = noise_.gyro_bias * sqrt(dt), sba = noise_.accel_bias * sqrt(dt);
+        DynMat<T> L(State::kDim, 12);
+        place3(L, State::kTheta, 0, R_m * (-sg));
+        place3(L, State::kVel, 0, (vx * R_m) * (-sg));
+        place3(L, State::kPos, 0, (px * R_m) * (-sg));
+        place3(L, State::kVel, 3, R_m * (-sa));
+        for (std::size_t i = 0; i < 3; ++i) {
+            L(State::kBg + i, 6 + i) = sbg;
+            L(State::kBa + i, 9 + i) = sba;
+        }
+        return L;
+    }
+
+    /// Propagate the mean (SE₂(3) strapdown) and the right-invariant covariance
+    /// P ← Φ P Φᵀ + L Lᵀ over one IMU sample. Ignores non-positive dt.
     template <class Cov>
     void propagate(State& s, Cov& cov, const Vec3& gyro, const Vec3& accel, T dt) const {
         if (!(dt > T{0}))
             return;
-        const Vec3 w = gyro - s.bg;
-        const Vec3 a = accel - s.ba;
         const SO3& R = s.X.rotation();
-
-        // Covariance in the left-invariant error coordinates.
         const DynMat<T> F = phi(R, s.X.velocity(), s.X.position(), dt);
-        std::array<NoiseTerm<T>, 12> q;
-        push_diag(q, 0, State::kTheta, noise_.gyro * noise_.gyro * dt);
-        push_diag(q, 3, State::kVel, noise_.accel * noise_.accel * dt);
-        push_diag(q, 6, State::kBg, noise_.gyro_bias * noise_.gyro_bias * dt);
-        push_diag(q, 9, State::kBa, noise_.accel_bias * noise_.accel_bias * dt);
-        cov.predict(F, std::span<const NoiseTerm<T>>{q});
+        cov.predict_factor(F, noise_factor(R, s.X.velocity(), s.X.position(), dt));
         propagate_mean(s, gyro, accel, dt);
     }
 
@@ -153,11 +172,6 @@ private:
         for (std::size_t i = 0; i < 3; ++i)
             for (std::size_t j = 0; j < 3; ++j)
                 M(r0 + i, c0 + j) += B(i, j);
-    }
-
-    static void push_diag(std::array<NoiseTerm<T>, 12>& q, std::size_t at, std::size_t off, T val) {
-        for (std::size_t i = 0; i < 3; ++i)
-            q[at + i] = NoiseTerm<T>{off + i, val};
     }
 
     ImuNoise<T> noise_;

@@ -197,8 +197,9 @@ struct Scene {
     sc.extrinsics = {world.R_imu_cam, world.p_imu_cam};
     auto& s = sc.state;
     const sdk::msckf::Propagator<double> prop({}, {{0.0, 0.0, -9.81}});
-    // Start at frame 1's true state at its time: frame 0 precedes the world's
-    // velocity step at the end of its warm-up (#475).
+    // Start at frame 1's true state at its time. (Frame 1 rather than frame 0
+    // dates from the world's old warm-up velocity step, fixed in #475/#537; kept
+    // so the S6 scenes and their fixtures stay as they were.)
     s.R = world.gt[1].R;
     s.p = world.gt[1].p;
     s.v = world.gt[1].v;

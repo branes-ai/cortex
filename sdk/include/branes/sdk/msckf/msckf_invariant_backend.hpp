@@ -161,8 +161,13 @@ public:
         for (std::size_t i = 0; i < Nav::kDim; ++i)
             for (std::size_t j = 0; j < Nav::kDim; ++j)
                 F(i, j) = Fn(i, j);
-        const std::array<NoiseTerm<T>, 12> q = nav_process_noise(dt);
-        cov_.predict(F, std::span<const NoiseTerm<T>>{q});
+        // Joint noise factor: the nav rows from the propagator, zero elsewhere.
+        const DynMat<T> Ln = prop_.noise_factor(nav_.X.rotation(), nav_.X.velocity(), nav_.X.position(), dt);
+        DynMat<T> L(d, Ln.cols);
+        for (std::size_t i = 0; i < Nav::kDim; ++i)
+            for (std::size_t j = 0; j < Ln.cols; ++j)
+                L(i, j) = Ln(i, j);
+        cov_.predict_factor(F, L);
         prop_.propagate_mean(nav_, gyro, accel, dt);  // joint covariance handled above
         nav_.timestamp += static_cast<double>(dt);
     }
@@ -304,19 +309,6 @@ private:
         }
         retract(dx);
         return true;
-    }
-
-    [[nodiscard]] std::array<NoiseTerm<T>, 12> nav_process_noise(T dt) const {
-        std::array<NoiseTerm<T>, 12> q;
-        auto fill = [&](std::size_t at, std::size_t off, T val) {
-            for (std::size_t i = 0; i < 3; ++i)
-                q[at + i] = NoiseTerm<T>{off + i, val};
-        };
-        fill(0, Nav::kTheta, cfg_.noise.gyro * cfg_.noise.gyro * dt);
-        fill(3, Nav::kVel, cfg_.noise.accel * cfg_.noise.accel * dt);
-        fill(6, Nav::kBg, cfg_.noise.gyro_bias * cfg_.noise.gyro_bias * dt);
-        fill(9, Nav::kBa, cfg_.noise.accel_bias * cfg_.noise.accel_bias * dt);
-        return q;
     }
 
     /// Box-plus the joint correction: nav on SE₂(3) (left/world-frame), biases
