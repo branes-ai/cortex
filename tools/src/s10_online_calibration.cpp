@@ -8,7 +8,7 @@
 //   (1) the analytic calibration noise budget → R-inflation factor (vs R×4);
 //   (2) an end-to-end R-inflation sweep on the perfect-calibration world (find
 //       the R-scale, if any, that brings NEES to dof, and compare it to the 1deg
-//       calibration budget; since #537 the backend is consistent here).
+//       calibration budget; since #537 the backend is not over-confident here).
 //
 //   ./s10_online_calibration --help / --list / --out DIR / --no-out
 

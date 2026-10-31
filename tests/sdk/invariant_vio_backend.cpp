@@ -251,6 +251,10 @@ void check_accuracy(std::span<const std::uint32_t> seeds, const std::vector<EndT
         CHECK(e.rms_pos < 0.15);
         CHECK(e.nees_full.report().normalized > 0.25);
         CHECK(e.nees_full.report().normalized < 3.0);
+        // One-sided by design: global position is gauge, so its σ is set by the
+        // initial prior (it stays near it) rather than earned from data, and a
+        // lower bound would test the prior, not the filter (measured 0.04–0.15).
+        // The full-state band above still rejects a uniformly pessimistic P.
         CHECK(e.nees_pos.report().normalized < 4.0);
         CHECK(e.nees_rp.report().normalized < 6.0);
         CHECK(e.nees_yaw.report().normalized < 3.0);

@@ -18,10 +18,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <random>
+#include <utility>
 
 namespace {
 namespace ms = branes::sdk::msckf;
@@ -160,4 +162,22 @@ TEST_CASE("invariant propagation: the predicted covariance matches a Monte-Carlo
         CHECK(emp / pred > 0.85);
         CHECK(emp / pred < 1.15);
     }
+
+    // The cross blocks carry the lever-arm signs, which the traces cannot see:
+    // compare correlation coefficients, whose sampling σ is ≈ 1/√runs ≈ 0.016.
+    // Some must be strongly correlated, or the comparison would be vacuous.
+    T strongest = 0;
+    for (const auto [ra, cb] :
+         {std::pair{St::kTheta, St::kVel}, std::pair{St::kTheta, St::kPos}, std::pair{St::kVel, St::kPos}}) {
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j) {
+                const std::size_t r = ra + i, c = cb + j;
+                const T pred = Pp(r, c) / std::sqrt(Pp(r, r) * Pp(c, c));
+                const T emp = C(r, c) / std::sqrt(C(r, r) * C(c, c));
+                INFO("P(" << r << "," << c << "): predicted corr " << pred << ", empirical " << emp);
+                CHECK(std::abs(emp - pred) < 0.06);  // ≈ 4σ; measured ≤ 0.014
+                strongest = std::max(strongest, std::abs(pred));
+            }
+    }
+    CHECK(strongest > 0.5);
 }

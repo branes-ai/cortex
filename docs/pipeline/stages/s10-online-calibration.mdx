@@ -89,7 +89,7 @@ This sweep once showed **NEES ≈ 43 at R×1** (ATE 0.63 m), almost exactly the 
 MH_05 value, and was read as the clean setup reproducing the real over-confidence.
 It was a synthetic artifact: the world left its warm-up with a ≈1 m/s velocity
 step that no accelerometer sample recorded (#475, fixed in #537). With the world
-corrected, the perfect-calibration control is consistent, so the EuRoC
+corrected, the perfect-calibration control is not over-confident, so the EuRoC
 over-confidence (#212) needs something the clean world lacks: unmodeled
 calibration uncertainty (the budget above), process noise, low parallax, or the
 real-data clone drift that drives the yaw leak.
@@ -109,7 +109,7 @@ cmake --build build -j$(nproc) --target s10_online_calibration
 
 ```text
 R-inflation @ 1deg ext, slow          4.1  x   induced 8.1px vs assumed 4.6px
-pose NEES with perfect calibration    0.036    below dof: the clean control is consistent
+pose NEES with perfect calibration    0.036    below dof: the clean control is not over-confident
 ```
 
 | Tool | Location | Purpose |
