@@ -211,3 +211,39 @@ TEST_CASE("the square-root gate and update stop at a singular innovation", "[sdk
     REQUIRE(dx2[1] == T{0});
     REQUIRE(dx2[2] == T{0});
 }
+
+TEST_CASE("the square-root update takes the rectangular factor clone augmentation leaves", "[sdk][msckf][sqrt]") {
+    // Augmentation maps a 3-state factor through a 5×3 G, so S is 5×3 until the
+    // next prediction re-squares it, and an update can arrive in between. The
+    // array update must size its pre-array by S's columns (#533: it read S and
+    // H S as square, past the end of each row, and diverged on EuRoC V1_01).
+    ms::SqrtCovariance<T> sq;
+    sq.S = ms::DynMat<T>(3, 3);
+    const std::array<T, 9> s0{0.9, 0, 0, 0.2, 0.7, 0, -0.1, 0.3, 0.5};
+    sq.S.d.assign(s0.begin(), s0.end());
+    ms::FullCovariance<T> full;
+    full.P = sq.covariance();
+
+    ms::DynMat<T> G(5, 3);  // keep the 3 states, then clone states 0 and 2
+    G(0, 0) = G(1, 1) = G(2, 2) = G(3, 0) = G(4, 2) = T{1};
+    sq.transform(G);
+    full.transform(G);
+    REQUIRE(sq.S.rows == 5);
+    REQUIRE(sq.S.cols == 3);
+
+    ms::DynMat<T> H(2, 5);
+    const std::array<T, 10> h{1, 0, 0.5, -1, 0, 0, 1, 0, 0.3, -1};
+    H.d.assign(h.begin(), h.end());
+    const std::vector<T> r{T{0.2}, T{-0.1}};
+    const std::vector<T> R_diag{T{0.01}, T{0.02}};
+    const std::vector<T> dx_sq = sq.update(H, std::span<const T>{r}, std::span<const T>{R_diag});
+    const std::vector<T> dx_full = full.update(H, std::span<const T>{r}, std::span<const T>{R_diag});
+
+    REQUIRE(sq.S.rows == 5);
+    REQUIRE(dx_sq.size() == 5);
+    for (std::size_t i = 0; i < 5; ++i)
+        REQUIRE_THAT(dx_sq[i], Catch::Matchers::WithinAbs(dx_full[i], 1e-12));
+    const ms::DynMat<T> P = sq.covariance();
+    for (std::size_t i = 0; i < P.d.size(); ++i)
+        REQUIRE_THAT(P.d[i], Catch::Matchers::WithinAbs(full.P.d[i], 1e-12));
+}

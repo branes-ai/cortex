@@ -687,9 +687,8 @@ work, and it is enough on its own: `float-ekf-double` runs every stage in float 
 0.298 m, and `update-float-ekf-double` (the counterfactual above, now a preset) at 0.263 m.
 S6e alone in float (`ekf-update-float`) does not diverge either, because double triangulation
 keeps P from growing before takeoff; it takes both halves to diverge. A square-root covariance,
-which is PSD by construction, is the remedy that would keep the whole update in float. It is not
-measured yet: the square-root backend gives NaN on V1_01 even in double, at frame 108 in the same
-takeoff window ([#533](https://github.com/branes-ai/cortex/issues/533)).
+which is PSD by construction, keeps the whole update in float: with it, `update-float` runs V1_01
+at 0.276 m (see [the square-root form in float](#the-square-root-form-in-float-533) below).
 
 ### Three sequences, with NEES
 
@@ -745,6 +744,51 @@ The NEES column also restates the known over-confidence
 where a consistent filter is near 1. Precision does not cause it: long double gives the same
 numbers on V1_01 and MH_05, and 134 against 140 on V2_03. How to keep a float fault from reaching the vehicle — the guards deployed autopilots
 run on P — is in `docs/assessments/covariance-feasibility-safeguards.md`.
+
+### The square-root form in float (#533)
+
+`--covariance sqrt` runs the square-root backend (#187), which carries a factor S with P = S·Sᵀ
+and updates it by QR instead of the Joseph form. It composes with every `--stage-types` preset.
+
+```bash
+vio_pipeline --source euroc --dataset .../MH_05_difficult/mav0 --covariance sqrt --stage-types float --out DIR
+```
+
+Until #533 the backend gave NaN on V1_01 even in double. The array update assumed a square S, but
+clone augmentation leaves S tall (81×75 on V1_01) until the next prediction, and that frame's
+updates run in between. The update read past the end of each row of S and H·S, so S grew from frame
+to frame and, from about frame 108, went non-finite. Where it failed changed from run to run.
+With the pre-array sized by S's columns, the square-root backend in double matches the
+full-covariance one on V1_01 to every printed digit.
+
+| Preset | V1_01 ATE · NIS | MH_05 ATE · NIS | V2_03 ATE · NIS |
+|---|---|---|---|
+| full `double` (reference) | 0.289 m · 1.51 | 0.755 m · 2.16 | 0.269 m · 14.7 |
+| sqrt `double` | 0.289 m · 1.51 | 0.755 m · 2.15 | 0.265 m · 14.9 |
+| sqrt `ekf-update-float` | 0.288 m · 1.51 | 0.755 m · 2.15 | 0.282 m · 14.7 |
+| sqrt `update-float` | 0.276 m · 1.54 | 0.761 m · 2.16 | 0.251 m · 15.0 |
+| sqrt `float-ekf-double` | 0.425 m · 1.50 | 0.768 m · 2.17 | 0.303 m · 14.9 |
+| sqrt `float` | 0.295 m · 1.51 | 0.784 m · 2.22 | 0.282 m · 15.0 |
+
+Each of the five presets measured holds on these three sequences, the whole filter in float
+included. The full-covariance form diverges with `update-float` on V1_01 and MH_05, and with any
+P-writing stage in float on MH_05. So on these runs the rule above was about P, not about the
+stages: a stage that writes the covariance needs double when the covariance is P, and float was
+enough when it was S. Three runs show that much and no more; they are not a guarantee for other
+sequences or other float stages.
+
+Why the factor does better: it carries the covariance in half the dynamic range (κ(S) = √κ(P)),
+and the update never forms P, so there is no cancellation of prior-sized terms like the Joseph
+form's. S·Sᵀ is positive semidefinite in exact arithmetic. Computed in floating point it can still
+have small negative eigenvalues from rounding, and S itself can become non-finite (as #533 did), so
+the health check the safeguards report recommends applies to the square-root form too. In these
+runs the takeoff collapse that breaks the float Joseph form left the factor intact.
+
+MH_05 is the hard case: all in float costs 3 cm of ATE (0.784 against 0.755 m). The V1_01 row
+for `float-ekf-double`, 0.425 m, is the one outlier: the S6e array update in double runs on a
+factor that the float stages wrote. One run per preset can't tell whether that is a precision
+effect or the run's sensitivity to any perturbation (V2_03 in double moves 4 mm between the two
+forms, which differ only in rounding).
 
 ## The MTL5 gap register (#451)
 
