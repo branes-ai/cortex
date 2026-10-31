@@ -82,9 +82,11 @@ public:
     }
 
     /// IMU sample: propagate from the previous sample (zero-order hold held over to
-    /// the next image time). Drops out-of-order / duplicate timestamps.
+    /// the next image time). Drops out-of-order / duplicate timestamps, and any
+    /// sample older than the time `set_nav` seeded: integrating those would run
+    /// the seeded state forward over an interval that precedes it.
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
-        if (have_last_ && t <= last_imu_time_)
+        if (have_last_ ? t <= last_imu_time_ : t < last_imu_time_)
             return;
         if (have_last_) {
             const double dt = t - last_imu_time_;

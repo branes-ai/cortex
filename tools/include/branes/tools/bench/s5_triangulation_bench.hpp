@@ -446,14 +446,18 @@ private:
         std::size_t id = 0;
     };
 
-    /// Pick the landmark observed in the most consecutive frames from frame 4,
+    /// Pick the landmark observed in the most consecutive frames from frame 6,
     /// and build its track over (up to) 6 of those frames: clones at the true
     /// poses with exact observations, or at the S2/S3 stage sequence's estimated
     /// poses with the world's pixels normalized through S0.
     [[nodiscard]] static Landmark landmark_window(bool true_poses) {
         namespace st = sdk::msckf::stages;
         const auto world = sdk::eval::generate_world<double>(sdk::eval::SyntheticConfig<double>{});
-        const std::size_t f0 = 4, m = 6;
+        // Frame 6 is past the world's 0.25 s onset ramp (#537); from frame 4 the
+        // window's parallax is too small to triangulate in posit16. posit16 is
+        // marginal here: windows from frames 8 and 10 pick landmarks it cannot
+        // resolve either, so a change to the world can move this again.
+        const std::size_t f0 = 6, m = 6;
         // The landmark seen in every one of frames f0 … f0+m−1.
         std::size_t id = 0;
         for (const auto& o : world.frames[f0].obs) {
@@ -483,9 +487,7 @@ private:
             const sdk::msckf::Propagator<double> prop({}, {{0.0, 0.0, -9.81}});
             // Start at frame 1's true state AT ITS TIME, so the estimated poses
             // carry only IMU-propagation drift (zero bias estimates against the
-            // world's true biases). Not frame 0: the synthetic trajectory steps
-            // from rest to ~1 m/s at the end of the warm-up, which no IMU stream
-            // can follow.
+            // world's true biases).
             s.R = world.gt[1].R;
             s.p = world.gt[1].p;
             s.v = world.gt[1].v;

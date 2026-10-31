@@ -81,6 +81,17 @@ over-confidence to the **yaw** gauge (see the candidate table) and validated the
 **R-IEKF** parameterization as the fix (mean yaw leak 0.39 → 2.3e-16 on the same real
 V2_03 clone-window perturbations).
 
+End to end on the synthetic world, the R-IEKF backend is **consistent** (#537): over
+21 noise seeds it tracks to 2–8 cm with a normalized NEES of 0.6–1.8. It had seemed
+to diverge on 5 of 21 seeds (21–120 m) only because the test world was wrong:
+the synthetic trajectory left its warm-up with a ≈1 m/s velocity step that no
+accelerometer sample recorded, and the adapter integrated the warm-up IMU from a
+state seeded after it. The world now ramps in smoothly. The process noise is
+also right-invariant now (gyro noise reaches δv, δp through the [v̂]×, [p̂]× lever
+arms), which a Monte-Carlo test checks 20 m from the origin. One weakness remains
+open: a slow (≥ 1 s) onset gives low-parallax tracks that the filter fuses
+over-confidently.
+
 ## Tracking index
 
 | Area | Issue |
@@ -89,7 +100,7 @@ V2_03 clone-window perturbations).
 | Consistency instrument (NEES/NIS) | <Issue id={264} /> |
 | Diagnostic-instrumentation epic | <Issue id={261} /> |
 | Real-data stage inspectors (epic — complete) | <Issue id={371} /> |
-| Right-Invariant EKF (the yaw-leak fix) | <Issue id={347} />, <Issue id={348} /> |
+| Right-Invariant EKF (the yaw-leak fix) | <Issue id={347} />, <Issue id={348} />, <Issue id={537} /> |
 | Stream characterization (Allan → Q) | <Issue id={268} /> |
 | Dynamic init on real EuRoC | <Issue id={211} />, <Issue id={247} /> |
 

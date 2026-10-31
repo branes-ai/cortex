@@ -4,9 +4,10 @@
 // Locks two findings: (1) the analytic noise budget — a realistic ~1° extrinsic
 // uncertainty induces a reprojection error larger than the filter's assumed
 // pixel noise, an R-inflation of order the empirical R×4; (2) the end-to-end
-// R-inflation sweep — the synthetic backend is strongly over-confident even with
-// perfect calibration (pose NEES ≫ dof), and inflating the measurement noise R
-// drives NEES back toward consistency (R is the lever).
+// R-inflation sweep — with perfect calibration and clean sensors the synthetic
+// backend is NOT over-confident (pose NEES < dof), so inflating R only adds
+// pessimism. Before #537 the world's velocity step made it look over-confident
+// (NEES ≈ 43, "reproducing" EuRoC MH_05); that reproduction was the defect.
 
 #include <branes/sdk/eval/calibration_probe.hpp>
 
@@ -40,19 +41,19 @@ TEST_CASE("S10 calibration noise budget: ~1deg extrinsic uncertainty ~ the empir
             ev::noise_budget<T>(0.0, 10.0, 0.0, 0.0, 10.0).ext_trans_px);
 }
 
-TEST_CASE("S10 end-to-end: backend over-confident with perfect calibration; R is the lever",
-          "[sdk][s10][calibration]") {
+TEST_CASE("S10 end-to-end: with perfect calibration the backend is not over-confident", "[sdk][s10][calibration]") {
     const auto sw = ev::r_inflation_sweep<T>();
     REQUIRE(sw.curve.size() >= 5);
-    // With PERFECT calibration and clean sensors the pose NEES is far above the
-    // 6-DoF target — the structural #212 over-confidence, reproduced.
+    // With PERFECT calibration and clean sensors the pose NEES is below the
+    // 6-DoF target (0.04 measured) and the pose tracks to centimetres.
     REQUIRE(sw.curve.front().r_scale == 1.0);
-    REQUIRE(sw.curve.front().nees > 15.0);
-    // Inflating R monotonically reduces NEES (R is the consistency lever)…
+    REQUIRE(sw.curve.front().nees < 6.0);
+    REQUIRE(sw.curve.front().ate < 0.05);
+    // Inflating R only makes the filter less confident…
     for (std::size_t i = 1; i < sw.curve.size(); ++i)
-        REQUIRE(sw.curve[i].nees < sw.curve[i - 1].nees);
-    // …and a finite R-scale restores NEES to the dof (the empirical deficit).
-    REQUIRE(sw.r_scale_for_consistency > 1.0);
+        REQUIRE(sw.curve[i].nees <= sw.curve[i - 1].nees);
+    // …and no R-scale is needed to reach consistency.
+    REQUIRE(sw.r_scale_for_consistency == 0.0);
     // The 1° calibration budget is a real fraction of that deficit (the R×4 part).
     REQUIRE(sw.budget_r_inflation_1deg > 3.0);
     REQUIRE(sw.budget_r_inflation_1deg < 6.0);

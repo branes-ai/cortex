@@ -50,6 +50,13 @@ struct SyntheticConfig {
     T motion_rate = T{1.2};  ///< rad/s of the path parameter
     T yaw_amp = T{0.5};      ///< rad of yaw oscillation
     T vbob_amp = T{0.15};    ///< m vertical bob
+    /// Ramp from rest into the loop over this long after warm-up: the path rate
+    /// rises as 3u² − 2u³, so velocity and acceleration both start at zero and
+    /// the IMU stream integrates to the ground truth. Starting the loop at full
+    /// rate stepped the velocity by ≈1 m/s with no accelerometer impulse (#537).
+    /// Kept short: a slow onset (≥ 1 s) means low-parallax tracks the MSCKF
+    /// fuses over-confidently.
+    T onset_s = T{1} / T{4};
 
     // Scene: landmarks ahead of the forward-looking camera (body +x).
     std::size_t num_landmarks = 240;
@@ -133,31 +140,54 @@ template <math::Scalar T>
     const Vec3 g_world{{T{0}, T{0}, -cfg.gravity}};
     const T w = cfg.motion_rate;
 
-    // Analytic trajectory (t' = max(0, t − warmup)). Stationary before warm-up.
-    auto active = [&](T t) { return t > cfg.warmup_s ? t - cfg.warmup_s : T{0}; };
+    // Analytic trajectory along the path parameter σ(t'), t' = max(0, t − warmup):
+    // stationary before warm-up, then σ̇ ramps 0 → 1 over `onset_s` (σ̇ = 3u² − 2u³,
+    // u = t'/onset_s) and stays 1. σ̈ is 0 at both ends of the ramp, so
+    // p(σ), v = p'σ̇ and a = p''σ̇² + p'σ̈ are all continuous.
+    struct Phase {
+        T s, sd, sdd;  // σ, σ̇, σ̈
+    };
+    auto phase = [&](T t) -> Phase {
+        if (!(t > cfg.warmup_s))
+            return {T{0}, T{0}, T{0}};
+        const T tp = t - cfg.warmup_s;
+        const T tau = cfg.onset_s;
+        if (!(tau > T{0}))
+            return {tp, T{1}, T{0}};
+        if (tp >= tau)
+            return {tau / T{2} + (tp - tau), T{1}, T{0}};
+        const T u = tp / tau;
+        return {tau * (u * u * u - u * u * u * u / T{2}), u * u * (T{3} - T{2} * u), T{6} * u * (T{1} - u) / tau};
+    };
     auto pos = [&](T t) -> Vec3 {
-        const T s = active(t);
+        const T s = phase(t).s;
         return Vec3{
             {cfg.trans_amp * (T{1} - cos(w * s)), cfg.trans_amp * sin(w * s), cfg.vbob_amp * sin(T{2} * w * s)}};
     };
-    auto vel = [&](T t) -> Vec3 {
-        if (!(t > cfg.warmup_s))
-            return Vec3{};
-        const T s = active(t);
+    // dp/dσ and d²p/dσ².
+    auto dpos = [&](T s) -> Vec3 {
         return Vec3{{cfg.trans_amp * w * sin(w * s),
                      cfg.trans_amp * w * cos(w * s),
                      cfg.vbob_amp * T{2} * w * cos(T{2} * w * s)}};
     };
-    auto acc = [&](T t) -> Vec3 {
-        if (!(t > cfg.warmup_s))
-            return Vec3{};
-        const T s = active(t);
+    auto ddpos = [&](T s) -> Vec3 {
         return Vec3{{cfg.trans_amp * w * w * cos(w * s),
                      -cfg.trans_amp * w * w * sin(w * s),
                      -cfg.vbob_amp * T{4} * w * w * sin(T{2} * w * s)}};
     };
-    auto yaw = [&](T t) { return cfg.yaw_amp * sin(w * active(t)); };
-    auto yaw_rate = [&](T t) { return t > cfg.warmup_s ? cfg.yaw_amp * w * cos(w * active(t)) : T{0}; };
+    auto vel = [&](T t) -> Vec3 {
+        const Phase ph = phase(t);
+        return dpos(ph.s) * ph.sd;
+    };
+    auto acc = [&](T t) -> Vec3 {
+        const Phase ph = phase(t);
+        return ddpos(ph.s) * (ph.sd * ph.sd) + dpos(ph.s) * ph.sdd;
+    };
+    auto yaw = [&](T t) { return cfg.yaw_amp * sin(w * phase(t).s); };
+    auto yaw_rate = [&](T t) {
+        const Phase ph = phase(t);
+        return cfg.yaw_amp * w * cos(w * ph.s) * ph.sd;
+    };
     auto rot = [&](T t) { return SO3::exp(ez * yaw(t)); };
 
     SyntheticData<T> out;

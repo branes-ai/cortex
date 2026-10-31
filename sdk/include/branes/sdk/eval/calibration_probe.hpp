@@ -19,12 +19,12 @@
 //      the empirical R×4?
 //
 //   2. End-to-end R-inflation sweep — on the synthetic world with PERFECT
-//      calibration and clean sensors, the backend is already over-confident
-//      (pose NEES ≫ dof — the structural #212 fault); sweep the measurement
-//      noise R and find the factor that restores NEES → dof, then compare it to
-//      the 1° calibration budget. (Honest finding: calibration uncertainty
-//      cleanly accounts for the R×4 *component*; full restoration needs more
-//      because the empirical fix also raised Q — calibration is one contributor.)
+//      calibration and clean sensors, sweep the measurement noise R and find
+//      the factor (if any) that brings pose NEES to dof, then compare it to the
+//      1° calibration budget. Finding (#537): the backend is NOT over-confident
+//      here (NEES 0.04 at R×1, below dof), so no R-scale is needed. The NEES ≈ 43
+//      once measured here came from the world's warm-up velocity step, not from
+//      the filter; the EuRoC over-confidence (#212) is real-data evidence only.
 //
 // Native units: pixels (induced reprojection error), × (R-inflation factor),
 // NEES (dimensionless, target = dof). Drives the REAL backend on the REAL
@@ -193,14 +193,12 @@ struct RInflationSweep {
     std::size_t dof = 6;
 };
 
-/// The decisive #212 measurement, done cleanly. On the synthetic world with
-/// PERFECT calibration and clean sensors, the backend is already over-confident
-/// (pose NEES ≫ dof) — the structural #212 fault. Sweep the measurement-noise
-/// variance R by a factor and find the factor that restores consistency
-/// (NEES → dof). Compare that empirical factor to the analytic calibration
-/// budget: if the R-inflation the filter needs ≈ what ~1° of unmodeled extrinsic
-/// uncertainty induces, then the empirical "R×4 fixes NEES" is explained by
-/// unmodeled calibration uncertainty — an S10 fault, not observability/FEJ.
+/// The #212 control: on the synthetic world with PERFECT calibration and clean
+/// sensors, sweep the measurement-noise variance R by a factor and find the
+/// factor that brings pose NEES down to dof — `r_scale_for_consistency`, 0 when
+/// NEES is already at or below dof at R×1 (as it is since #537). If the filter
+/// were over-confident here, comparing that factor to the analytic calibration
+/// budget would say whether ~1° of unmodeled extrinsic uncertainty explains it.
 template <math::Scalar T>
 [[nodiscard]] RInflationSweep<T> r_inflation_sweep() {
     using namespace calib_detail;

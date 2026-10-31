@@ -47,8 +47,8 @@ Backend make_backend(bool prefer_dynamic_init = false) {
 }
 
 /// Run the synthetic world through the backend for `frames` camera frames,
-/// with deterministic pixel noise (so updates carry a real residual).
-void run(Backend& be, std::size_t frames) {
+/// with deterministic pixel noise of `px` σ (so updates carry a real residual).
+void run(Backend& be, std::size_t frames, double px = 0.5) {
     const auto& w = world();
     std::size_t k = 0;
     std::uint32_t draw = 0;
@@ -57,8 +57,8 @@ void run(Backend& be, std::size_t frames) {
             be.process_imu(w.imu[k]);
         auto obs = w.frames[f].obs;
         for (auto& o : obs) {
-            o.u += 0.5 * bn::s6::pseudo_normal(draw++);
-            o.v += 0.5 * bn::s6::pseudo_normal(draw++);
+            o.u += px * bn::s6::pseudo_normal(draw++);
+            o.v += px * bn::s6::pseudo_normal(draw++);
         }
         be.process_camera(w.frames[f].t, std::span<const sdk::FrontendObservation<double>>(obs));
     }
@@ -157,9 +157,11 @@ TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-ide
     auto be = make_backend(/*prefer_dynamic_init=*/true);
     be.set_stage_tap(&rec);
     run(be, kFrames);
-    // No window aligns on this run (the S1 bench's SfM findings), so the backend
-    // attempts dynamic init on every frame from the fifth on.
-    REQUIRE(rec.fixtures().size() >= 10);
+    // The backend attempts dynamic init from the fifth frame until a window
+    // aligns (4 attempts on this run). Before #537 none aligned, because the
+    // world's velocity step left no IMU-consistent window.
+    REQUIRE(be.initialized());
+    REQUIRE(rec.fixtures().size() >= 1);
     REQUIRE(rec.stats().init_attempts == rec.fixtures().size());
     for (const auto& nf : rec.fixtures()) {
         INFO(nf.name);
@@ -273,7 +275,10 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     Recorder rec(opt, intrinsics());
     auto be = make_backend();
     be.set_stage_tap(&rec);
-    run(be, kFrames);
+    // 2 px of pixel noise: the first S5 violation then lands at frame 26. At
+    // 0.5 px the clean world first violates at frame 69, past kFrames.
+    constexpr double kPx = 2.0;
+    run(be, kFrames, kPx);
     rec.finish();
     REQUIRE(rec.stats().first_violation_frame.has_value());
     REQUIRE(rec.stats().boundaries == 1);
@@ -292,7 +297,7 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     Recorder all(upto, intrinsics());
     auto be2 = make_backend();
     be2.set_stage_tap(&all);
-    run(be2, kFrames);
+    run(be2, kFrames, kPx);
     all.finish();
     std::string first_failing;
     for (const auto& nf : all.fixtures())

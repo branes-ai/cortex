@@ -100,6 +100,19 @@ struct FullCovariance {
         P = std::move(Pn);
     }
 
+    /// Predict P ← F P Fᵀ + L Lᵀ with a dense noise factor L (d×m), for process
+    /// noise that is correlated across error states (the right-invariant IMU
+    /// noise reaches velocity and position through lever arms).
+    void predict_factor(const DynMat<T>& F, const DynMat<T>& L) {
+        DynMat<T> Pn = mul(mul(F, P), transpose(F));
+        const DynMat<T> Q = mul(L, transpose(L));
+        for (std::size_t i = 0; i < Pn.rows; ++i)
+            for (std::size_t j = 0; j < Pn.cols; ++j)
+                Pn(i, j) += Q(i, j);
+        symmetrize(Pn);
+        P = std::move(Pn);
+    }
+
     /// Measurement update with Jacobian H (k×d), residual r (k), and
     /// diagonal noise `R_diag` (k). Joseph form keeps P symmetric positive
     /// definite; returns δx = K r for the caller to apply to the mean.
