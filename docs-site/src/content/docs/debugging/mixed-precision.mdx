@@ -770,12 +770,19 @@ full-covariance one on V1_01 to every printed digit.
 | sqrt `float-ekf-double` | 0.425 m · 1.50 | 0.768 m · 2.17 | 0.303 m · 14.9 |
 | sqrt `float` | 0.295 m · 1.51 | 0.784 m · 2.22 | 0.282 m · 15.0 |
 
-Each of the five presets measured holds on every sequence, the whole filter in float included. The full-covariance
-form diverges with `update-float` on V1_01 and MH_05, and with any P-writing stage in float on
-MH_05. The rule above was about P, not about the stages: a stage that writes the covariance
-needs double when the covariance is P, and float is enough when it is S. A factor carries the
-covariance in half the dynamic range (√κ(P) where P needs κ(P)), and a product S·Sᵀ cannot go
-indefinite, so the collapse at takeoff that breaks the float Joseph form leaves the factor intact.
+Each of the five presets measured holds on these three sequences, the whole filter in float
+included. The full-covariance form diverges with `update-float` on V1_01 and MH_05, and with any
+P-writing stage in float on MH_05. So on these runs the rule above was about P, not about the
+stages: a stage that writes the covariance needs double when the covariance is P, and float was
+enough when it was S. Three runs show that much and no more; they are not a guarantee for other
+sequences or other float stages.
+
+Why the factor does better: it carries the covariance in half the dynamic range (κ(S) = √κ(P)),
+and the update never forms P, so there is no cancellation of prior-sized terms like the Joseph
+form's. S·Sᵀ is positive semidefinite in exact arithmetic. Computed in floating point it can still
+have small negative eigenvalues from rounding, and S itself can become non-finite (as #533 did), so
+the health check the safeguards report recommends applies to the square-root form too. In these
+runs the takeoff collapse that breaks the float Joseph form left the factor intact.
 
 MH_05 is the hard case: all in float costs 3 cm of ATE (0.784 against 0.755 m). The V1_01 row
 for `float-ekf-double`, 0.425 m, is the one outlier: the S6e array update in double runs on a

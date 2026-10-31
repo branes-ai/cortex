@@ -150,8 +150,8 @@ The cortex measurements fit this: the stages that write P need double, or a fact
 
 - **Prevention:** Joseph form and an explicit `symmetrize` after every predict,
   augment and update (`msckf/covariance.hpp`). A square-root backend exists (#187,
-  `vio_pipeline --covariance sqrt`). Since #533 it runs every EuRoC sequence, with
-  every stage in float (V1_01 0.295 m, MH_05 0.784 m, V2_03 0.282 m).
+  `vio_pipeline --covariance sqrt`). Since #533 it runs the three sequences measured,
+  V1_01, MH_05 and V2_03, with every stage in float (0.295 m, 0.784 m and 0.282 m).
 - **Detection:** the χ² gate rejects an update whose innovation covariance S doesn't
   factor. `spd_solve` returns a zero gain on a non-SPD S in release, and asserts in
   debug. There is no check of P after an operation, and the stage invariants
