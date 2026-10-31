@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.82.1](https://github.com/branes-ai/cortex/compare/v0.82.0...v0.82.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **sdk:** square-root update reads past a tall factor; vio_pipeline --covariance ([#533](https://github.com/branes-ai/cortex/issues/533)) ([#535](https://github.com/branes-ai/cortex/issues/535)) ([35fff41](https://github.com/branes-ai/cortex/commit/35fff416c54f6d63d746f82be6a64717f8bd89dd))
+
 ## [0.82.0](https://github.com/branes-ai/cortex/compare/v0.81.0...v0.82.0) (2026-10-30)
 
 
