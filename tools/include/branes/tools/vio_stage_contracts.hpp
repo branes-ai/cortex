@@ -237,8 +237,10 @@ inline const StageInfo kS10{
       "px, ×",
       "1° extrinsic uncertainty ⇒ ~R×4, matching the empirical #212 fix"},
      {"induced reprojection vs assumed pixel σ", "px", "calib error (~8px @1°) exceeds the filter's assumed ~4.6px"},
-     {"pose NEES with perfect calibration", "—", "backend over-confident (NEES~43 ≈ EuRoC MH_05) even with exact T_CI"},
-     {"R-scale that restores NEES≈dof", "×", "the empirical measurement-noise deficit; R is the lever"},
+     {"pose NEES with perfect calibration",
+      "—",
+      "the control: below dof on the synthetic world (#537), so not structural"},
+     {"R-scale that restores NEES≈dof", "×", "0 when none is needed; else the measurement-noise deficit"},
      {"calibration-state NEES (if estimated online)", "—", "the principled fix — OpenVINS/MINS-style online calib"}},
     {"calib_budget.csv", "calib_r_sweep.csv"},
     "default: no calibration states, optional extrinsic-rotation term in R (calib_rot_sigma); "

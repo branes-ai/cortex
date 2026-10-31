@@ -6,9 +6,9 @@
 // uncertainty shows up as measurement over-confidence (the empirical "R×4 fixes
 // NEES"). Drives sdk/eval/calibration_probe.hpp:
 //   (1) the analytic calibration noise budget → R-inflation factor (vs R×4);
-//   (2) an end-to-end R-inflation sweep on the perfect-calibration world (the
-//       backend is already over-confident; find the R-scale that restores NEES,
-//       and compare it to the 1deg calibration budget).
+//   (2) an end-to-end R-inflation sweep on the perfect-calibration world (find
+//       the R-scale, if any, that brings NEES to dof, and compare it to the 1deg
+//       calibration budget; since #537 the backend is consistent here).
 //
 //   ./s10_online_calibration --help / --list / --out DIR / --no-out
 
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
         rows.push_back({"R-scale that restores NEES≈dof (empirical)",
                         fmt(sw.r_scale_for_consistency, 2),
                         "x",
-                        "the filter's measurement-noise deficit"});
+                        "0 = none needed (NEES already <= dof at Rx1)"});
         rows.push_back({"R-inflation from 1deg calib (analytic)",
                         fmt(sw.budget_r_inflation_1deg, 2),
                         "x",
@@ -102,16 +102,15 @@ int main(int argc, char** argv) {
                  "     reprojection error (~8 px) LARGER than the filter's assumed pixel noise\n"
                  "     (~4.6 px) — an R-inflation of ~4x, quantitatively matching the empirical\n"
                  "     R×4 component of the #212 fix.\n"
-                 "  2. END-TO-END: the synthetic backend reproduces the EuRoC over-confidence\n"
-                 "     almost exactly (pose NEES ~43 at R×1, vs the troubleshooting's MH_05 ~43),\n"
-                 "     and inflating R drives NEES back toward dof=6 — confirming R is the lever.\n"
-                 "  Nuance, stated plainly: R-ONLY inflation needs ~x32 to fully restore NEES,\n"
-                 "  MORE than x4 — because the empirical MH_05 fix paired R×4 with Q×10, so R\n"
-                 "  alone has to do both jobs. So calibration uncertainty cleanly accounts for the\n"
-                 "  R×4 COMPONENT (analytically and in magnitude), but is one contributor, not the\n"
-                 "  whole over-confidence (the rest is process-noise Q and the S5 no-parallax-gate\n"
-                 "  effect reproduced earlier). Principled fix: MODEL calibration uncertainty\n"
-                 "  (estimate T_CI / t_d online, OpenVINS/MINS-style, or a calibration term in R)\n"
-                 "  rather than a blunt global R-scale.\n";
+                 "  2. END-TO-END CONTROL: with perfect calibration and clean sensors the\n"
+                 "     synthetic backend is NOT over-confident (pose NEES below dof=6 at R×1,\n"
+                 "     ATE ~2 cm); inflating R only adds pessimism. The NEES ~43 this once\n"
+                 "     showed was the synthetic world's warm-up velocity step (#537), not the\n"
+                 "     filter. So the EuRoC over-confidence (#212) is not reproduced by a\n"
+                 "     perfect-calibration world: it needs something the clean world lacks\n"
+                 "     (calibration error, Q, parallax, real-data clone drift for the yaw leak).\n"
+                 "  Principled fix for (1): MODEL calibration uncertainty (estimate T_CI / t_d\n"
+                 "  online, OpenVINS/MINS-style, or a calibration term in R) rather than a\n"
+                 "  blunt global R-scale.\n";
     return 0;
 }

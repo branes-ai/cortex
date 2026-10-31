@@ -1,6 +1,12 @@
 // R-IEKF VIO backend adapter (issue #365) — drive MsckfInvariantBackend through the
 // validated body-frame track lifecycle (InvariantVioBackend). This locks the
-// INTEGRATION end to end and reports the attitude split for visibility.
+// INTEGRATION end to end over a sweep of noise seeds, and checks the filter's
+// covariance is consistent with its error (NEES), not only that it tracks.
+//
+// #537: one seed passed and others diverged (2.4–120 m) because the synthetic
+// world stepped the velocity by ≈1 m/s at the end of warm-up with no
+// accelerometer impulse, and the adapter integrated the warm-up IMU from a state
+// seeded after it. With both fixed, every seed tracks to centimetres at NEES ≈ 1.
 
 #include <branes/sdk/eval/consistency.hpp>
 #include <branes/sdk/eval/nav_consistency.hpp>
@@ -9,8 +15,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <random>
 #include <span>
@@ -39,16 +47,16 @@ bool observe(const lie::SO3<T>& R,
 }
 
 /// What one end-to-end run measured; the structural checks and the accuracy
-/// bounds are asserted in separate test cases on the same run.
+/// bounds are asserted in separate test cases on the same runs.
 struct EndToEnd {
     double rms_pos = 0;
-    ev::ConsistencyAccumulator nees_full, nees_yaw, nees_rp;
+    ev::ConsistencyAccumulator nees_full, nees_pos, nees_yaw, nees_rp;
     bool psd_ok = true;
     std::size_t nees_skip = 0;
     std::size_t num_clones = 0;
 };
 
-EndToEnd run_end_to_end() {
+EndToEnd run_end_to_end(std::uint32_t seed) {
     using T = double;
     using SO3 = lie::SO3<T>;
     using SE3 = lie::SE3<T>;
@@ -61,7 +69,7 @@ EndToEnd run_end_to_end() {
     const auto world = ev::generate_world<T>(scfg);
     REQUIRE(world.frames.size() > 50);
 
-    std::mt19937 rng(0xA11CE);
+    std::mt19937 rng(seed);
     std::normal_distribution<T> nd(0, 1);
     // Landmarks above the trajectory (the pure-yaw motion ⇒ identity-extrinsic
     // camera looks straight up); good parallax from the lateral loop.
@@ -89,7 +97,7 @@ EndToEnd run_end_to_end() {
 
     SE3 anchor;
     bool anchored = false;
-    ev::ConsistencyAccumulator nees_full, nees_yaw, nees_rp;
+    ev::ConsistencyAccumulator nees_full, nees_pos, nees_yaw, nees_rp;
     double sum_pos2 = 0, ndiag = 0;
     std::size_t imu_idx = 0;
     bool psd_ok = true;
@@ -133,7 +141,8 @@ EndToEnd run_end_to_end() {
         const ev::NavSample<T> truth = ev::align_truth<T>(anchor, ev::NavSample<T>{gt.R, gt.p, gt.v, true_bg, true_ba});
         const SE23 X_est = be.nav().X;
 
-        // Simplified Left-Invariant error (matching the filter's retraction).
+        // The right-invariant error the filter estimates: truth = Exp(ξ)·estimate,
+        // matching its retraction R ← Exp(δθ)·R, v ← Exp(δθ)·v + δν, p ← Exp(δθ)·p + δρ.
         const SO3 R_err = truth.R * X_est.rotation().inverse();
         const Vec3 phi = R_err.log();
         const Vec3 nu = truth.v - R_err * X_est.velocity();
@@ -171,8 +180,14 @@ EndToEnd run_end_to_end() {
                 for (std::size_t j = 0; j < 2; ++j)
                     Prp(i, j) = P(i, j);
             const T rp_val = ev::nees<T>(std::span<const T>{std::array<T, 2>{{e[0], e[1]}}}, Prp);
+            ms::DynMat<T> Pp(3, 3);
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = 0; j < 3; ++j)
+                    Pp(i, j) = P(6 + i, 6 + j);
+            const T pos_val = ev::nees<T>(std::span<const T>{std::array<T, 3>{{e[6], e[7], e[8]}}}, Pp);
 
             nees_full.add(full_val, static_cast<int>(ev::kNavErrorDim));
+            nees_pos.add(pos_val, 3);
             nees_yaw.add(yaw_val, 1);
             nees_rp.add(rp_val, 2);
         } catch (const std::domain_error&) {
@@ -184,6 +199,7 @@ EndToEnd run_end_to_end() {
     EndToEnd out;
     out.rms_pos = std::sqrt(sum_pos2 / ndiag);
     out.nees_full = nees_full;
+    out.nees_pos = nees_pos;
     out.nees_yaw = nees_yaw;
     out.nees_rp = nees_rp;
     out.psd_ok = psd_ok;
@@ -192,22 +208,25 @@ EndToEnd run_end_to_end() {
     return out;
 }
 
-/// The run is ~14 s in a debug build; test cases in one process share it.
-const EndToEnd& end_to_end() {
-    static const EndToEnd run = run_end_to_end();
-    return run;
+// The CI seed (0xA11CE), the two worst of those that diverged before #537 (13 at
+// 120 m, 8 at 73 m), and one that tracked. One run takes ~25 s in a debug build,
+// so the full 21-seed sweep is the hidden [.sweep] case below.
+constexpr std::array<std::uint32_t, 4> kSeeds{{0xA11CE, 13, 8, 3}};
+
+std::vector<EndToEnd> run_seeds(std::span<const std::uint32_t> seeds) {
+    std::vector<EndToEnd> r;
+    for (const std::uint32_t seed : seeds)
+        r.push_back(run_end_to_end(seed));
+    return r;
 }
-}  // namespace
 
-TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update divergence FIXED, #366)",
-          "[sdk][riekf][backend][s365]") {
-    const EndToEnd& e = end_to_end();
-    WARN("invariant VIO backend: RMS pos err=" << e.rms_pos << " m  | full NEES=" << e.nees_full.report().normalized
-                                               << "  yaw=" << e.nees_yaw.report().normalized
-                                               << "  roll/pitch=" << e.nees_rp.report().normalized
-                                               << " | skipped NEES samples: " << e.nees_skip);
+/// Test cases in one process share the runs.
+const std::vector<EndToEnd>& end_to_end() {
+    static const std::vector<EndToEnd> runs = run_seeds(kSeeds);
+    return runs;
+}
 
-    // Structural checks: they hold even on the divergent seeds, so they gate.
+void check_structure(const EndToEnd& e) {
     REQUIRE(e.psd_ok);
     REQUIRE(std::isfinite(e.rms_pos));
     REQUIRE(e.nees_full.samples() > 50);
@@ -217,13 +236,58 @@ TEST_CASE("invariant VIO backend: end-to-end integration (continuous-update dive
     REQUIRE(e.num_clones <= 11);
 }
 
-// [!mayfail] until #537: the filter diverges on this seed (58 m RMS, yaw NEES
-// 104) and on 4 of 20 others, on every compiler. Only these two accuracy bounds
-// are exempt; the structural checks above still gate. Remove the tag when #537
-// lands.
-TEST_CASE("invariant VIO backend: end-to-end accuracy (diverges until #537)", "[sdk][riekf][backend][s365][!mayfail]") {
-    const EndToEnd& e = end_to_end();
-    // R-IEKF should track better than dead-reckoning (~15 m).
-    CHECK(e.rms_pos < 6.0);
-    CHECK(e.nees_yaw.report().normalized < 15.0);
+// Before #537 the seeds tracked to 2.4–120 m at a position NEES of ~10³. Now
+// each tracks to centimetres (worst 0.08 m over 21 seeds) and its NEES is near
+// its dimension (normalized 0.6–1.8 full, <= 3 roll/pitch). Yaw and global
+// position are the unobservable gauge: their σ stays near the prior while the
+// error stays at centimetres, so their NEES sits well below 1 (pessimistic,
+// never the over-confident ~10³ of before).
+void check_accuracy(std::span<const std::uint32_t> seeds, const std::vector<EndToEnd>& runs) {
+    std::vector<double> rms;
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        const EndToEnd& e = runs[k];
+        INFO("seed " << seeds[k]);
+        rms.push_back(e.rms_pos);
+        CHECK(e.rms_pos < 0.15);
+        CHECK(e.nees_full.report().normalized > 0.25);
+        CHECK(e.nees_full.report().normalized < 3.0);
+        CHECK(e.nees_pos.report().normalized < 4.0);
+        CHECK(e.nees_rp.report().normalized < 6.0);
+        CHECK(e.nees_yaw.report().normalized < 3.0);
+    }
+    std::sort(rms.begin(), rms.end());
+    CHECK(rms[rms.size() / 2] < 0.06);  // median
+}
+}  // namespace
+
+TEST_CASE("invariant VIO backend: end-to-end integration over a seed sweep", "[sdk][riekf][backend][s365]") {
+    const auto& runs = end_to_end();
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        const EndToEnd& e = runs[k];
+        INFO("seed " << kSeeds[k]);
+        WARN("invariant VIO backend seed "
+             << kSeeds[k] << ": RMS pos err=" << e.rms_pos << " m  | NEES full=" << e.nees_full.report().normalized
+             << "  pos=" << e.nees_pos.report().normalized << "  yaw=" << e.nees_yaw.report().normalized
+             << "  roll/pitch=" << e.nees_rp.report().normalized);
+        check_structure(e);
+    }
+}
+
+TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[sdk][riekf][backend][s365]") {
+    check_accuracy(kSeeds, end_to_end());
+}
+
+// The full sweep the #537 bounds were set from: ~9 min in a debug build, ~1 min
+// in release. Run with `invariant_vio_backend "[.sweep]"`.
+TEST_CASE("invariant VIO backend: 21-seed sweep", "[sdk][riekf][backend][.sweep]") {
+    std::array<std::uint32_t, 21> seeds{};
+    seeds[0] = 0xA11CE;
+    for (std::uint32_t k = 1; k < seeds.size(); ++k)
+        seeds[k] = k;
+    const auto runs = run_seeds(seeds);
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        INFO("seed " << seeds[k]);
+        check_structure(runs[k]);
+    }
+    check_accuracy(seeds, runs);
 }

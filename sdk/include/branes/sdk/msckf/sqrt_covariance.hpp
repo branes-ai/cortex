@@ -118,6 +118,21 @@ struct SqrtCovariance {
         S = retriangularize(B);
     }
 
+    /// Predict P ← F P Fᵀ + L Lᵀ = [F S | L][F S | L]ᵀ with a dense noise
+    /// factor L (d×m), re-triangularized.
+    void predict_factor(const DynMat<T>& F, const DynMat<T>& L) {
+        const DynMat<T> FS = mul(F, S);
+        const std::size_t d = FS.rows;
+        DynMat<T> B(d, FS.cols + L.cols);
+        for (std::size_t i = 0; i < d; ++i) {
+            for (std::size_t j = 0; j < FS.cols; ++j)
+                B(i, j) = FS(i, j);
+            for (std::size_t j = 0; j < L.cols; ++j)
+                B(i, FS.cols + j) = L(i, j);
+        }
+        S = retriangularize(B);
+    }
+
     /// Array measurement update. Triangularizing the pre-array
     ///   [ √R   H S ]            [ Re    0  ]
     ///   [  0    S  ]  ──QR──▶   [ Kbar  S' ]
