@@ -126,9 +126,9 @@ struct CalibRun {
     std::size_t frames = 0;
     // The same pose NEES split by direction, with attitude in the WORLD frame so
     // that yaw (about gravity, unobservable) separates from roll/pitch.
-    T nees_rp = T{0};   ///< roll/pitch, target 2
-    T nees_yaw = T{0};  ///< yaw, target 1
-    T nees_pos = T{0};  ///< position, target 3 (gauge: σ stays near its prior)
+    T nees_rp = T{0};          ///< roll/pitch, target 2
+    T nees_yaw = T{0};         ///< yaw, target 1
+    T nees_pos = T{0};         ///< position, target 3 (gauge: σ stays near its prior)
     T yaw_sigma_first = T{0};  ///< world-yaw σ at the first initialized frame (rad)
     T yaw_sigma_last = T{0};   ///< … at the last frame; a consistent filter never lowers it
 };
@@ -290,6 +290,9 @@ template <math::Scalar T>
 template <math::Scalar T>
 [[nodiscard]] calib_detail::CalibRun<T>
 matched_noise_control(std::uint32_t seed, T pixel_sigma = T{1}, T onset_s = SyntheticConfig<T>{}.onset_s) {
+    using std::cos;
+    using std::log;
+    using std::sin;
     using std::sqrt;
     SyntheticConfig<T> scfg;
     scfg.onset_s = onset_s;
@@ -298,20 +301,30 @@ matched_noise_control(std::uint32_t seed, T pixel_sigma = T{1}, T onset_s = Synt
     const T dt = T{1} / scfg.imu_rate_hz;
     const T gyro_sigma = static_cast<T>(vc.gyro_noise_density) / sqrt(dt);
     const T accel_sigma = static_cast<T>(vc.accel_noise_density) / sqrt(dt);
+    // Box-Muller on raw mt19937 output, not std::normal_distribution: the
+    // engine's sequence is fixed by the standard but the distribution's is not,
+    // so MSVC and libstdc++ would draw different noise for the same seed.
     std::mt19937 rng(seed);
-    std::normal_distribution<T> nd(T{0}, T{1});
-    // Each draw is its own statement: argument evaluation order is unspecified (#437).
+    const auto gauss_pair = [&rng](T& a, T& b) {
+        constexpr T kScale = T{1} / T{4294967296.0};
+        const T u1 = (static_cast<T>(rng()) + T{0.5}) * kScale;  // (0, 1): log is finite
+        const T u2 = (static_cast<T>(rng()) + T{0.5}) * kScale;
+        const T r = sqrt(T{-2} * log(u1));
+        const T phi = T{2} * calib_detail::kPi<T> * u2;
+        a = r * cos(phi);
+        b = r * sin(phi);
+    };
     for (auto& m : w.imu)
         for (std::size_t k = 0; k < 3; ++k) {
-            const T a = nd(rng);
-            const T b = nd(rng);
+            T a, b;
+            gauss_pair(a, b);
             m.angular_velocity[k] += gyro_sigma * a;
             m.linear_acceleration[k] += accel_sigma * b;
         }
     for (auto& f : w.frames)
         for (auto& o : f.obs) {
-            const T a = nd(rng);
-            const T b = nd(rng);
+            T a, b;
+            gauss_pair(a, b);
             o.u += pixel_sigma * a;
             o.v += pixel_sigma * b;
         }

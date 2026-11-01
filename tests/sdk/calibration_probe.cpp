@@ -76,9 +76,9 @@ TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information int
     std::vector<T> nees;
     for (const std::uint32_t seed : {1u, 2u, 3u}) {
         const auto r = ev::matched_noise_control<T>(seed);
-        INFO("seed " << seed << ": pose NEES " << r.nees << " (rp " << r.nees_rp << ", yaw " << r.nees_yaw
-                     << ", pos " << r.nees_pos << "), yaw sigma " << r.yaw_sigma_first << " -> " << r.yaw_sigma_last
-                     << " rad, ATE " << r.ate << " m");
+        INFO("seed " << seed << ": pose NEES " << r.nees << " (rp " << r.nees_rp << ", yaw " << r.nees_yaw << ", pos "
+                     << r.nees_pos << "), yaw sigma " << r.yaw_sigma_first << " -> " << r.yaw_sigma_last << " rad, ATE "
+                     << r.ate << " m");
         REQUIRE(r.frames > 100);
         CHECK(r.ate < 0.5);  // it still tracks: the defect is the covariance
         // The leak signature: an unobservable direction gained information.

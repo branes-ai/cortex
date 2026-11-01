@@ -96,10 +96,11 @@ at 3 s one seed is marginal ([S5](stages/s5-triangulation.mdx)).
 
 The body-frame MSCKF, given the same kind of noise, is **not** consistent (#551).
 With perfect calibration and camera and IMU noise matched to what it assumes, its
-pose NEES is 8–1152 over 10 seeds (median 33, against 6). The world-frame split
-names the cause: yaw is unobservable, yet the filter's yaw σ falls about tenfold,
-from 0.16 rad to 0.007–0.023 rad, while the yaw error grows. That is the #212 yaw
-leak, now reproduced on a world with known truth, and it needs no calibration
+pose NEES is 9–5088 over 10 seeds (median 26, against 6). The world-frame split
+puts most of it in yaw: yaw is unobservable, yet the filter's yaw σ falls about
+tenfold, from 0.16 rad to 0.006–0.020 rad, while the yaw error grows (to 0.22 rad
+with IMU noise alone and exact observations). That is the signature of the #212
+yaw leak, now reproduced on a world with known truth, and it needs no calibration
 error. An earlier control that read "not over-confident" used exact sensors, so it
 could not have shown it ([S10](stages/s10-online-calibration.mdx)). The body-frame
 filter stays the EuRoC accuracy reference until the R-IEKF runs on EuRoC (#365)

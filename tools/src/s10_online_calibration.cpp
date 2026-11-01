@@ -106,11 +106,11 @@ int main(int argc, char** argv) {
             f << "seed,nees,nees_rp,nees_yaw,nees_pos,yaw_sigma_first,yaw_sigma_last,ate\n";
         for (const std::uint32_t seed : {1u, 2u, 3u}) {
             const auto r = ev::matched_noise_control<T>(seed);
-            rows.push_back({"matched-noise pose NEES, seed " + std::to_string(seed),
-                            fmt(r.nees),
-                            "-",
-                            "rp " + fmt(r.nees_rp) + " (2), yaw " + fmt(r.nees_yaw) + " (1), pos " + fmt(r.nees_pos) +
-                                " (3)"});
+            rows.push_back(
+                {"matched-noise pose NEES, seed " + std::to_string(seed),
+                 fmt(r.nees),
+                 "-",
+                 "rp " + fmt(r.nees_rp) + " (2), yaw " + fmt(r.nees_yaw) + " (1), pos " + fmt(r.nees_pos) + " (3)"});
             rows.push_back({"matched-noise yaw sigma, seed " + std::to_string(seed),
                             fmt(r.yaw_sigma_last, 2),
                             "rad",
