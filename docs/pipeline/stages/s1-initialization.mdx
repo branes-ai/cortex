@@ -59,7 +59,7 @@ Because gravity has zero horizontal components, **static accelerometer readings 
 
 If the vehicle starts in motion (e.g., hand-launched or already flying), static gravity-leveling is impossible because world-frame acceleration $\mathbf{a}_{\text{world}} \neq \mathbf{0}$. S1 must perform a **Visual-Inertial Alignment** over a short sliding window (usually 1 to 2 seconds) to find metric scale.
 
-![S1 alignment diagram, showing the matching of unscaled relative visual trajectories (recovered via Structure from Motion) and metric trajectories double-integrated from raw IMU accelerometer readings using a scale factor s.](../../assessments/figures/pipeline/initialization_alignment.svg)
+![S1 alignment diagram, showing the matching of relative visual trajectories, recovered via Structure from Motion up to scale and multiplied by the scale factor s, to metric trajectories double-integrated from raw IMU accelerometer readings.](../../assessments/figures/pipeline/initialization_alignment.svg)
 
 1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle-adjustment to recover a **set of relative camera translations $\mathbf{p}_{\text{ci}}$ up to a scale factor $s$**.
 2.  **IMU Preintegration**: The IMU Simple-integrated velocities and positions are double-integrated over the same intervals to compute relative displacement estimates $\Delta \mathbf{p}_{\text{imu},i}$.

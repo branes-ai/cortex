@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 520" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" role="img" aria-labelledby="title desc">
   <title id="title">VIO coordinate frames</title>
-  <desc id="desc">The three frames of the VIO pipeline. The world frame W is gravity-aligned, with gravity along minus z; its yaw and origin are unobservable. The IMU or body frame I is where the accelerometer and gyroscope measure; its pose in the world, R_wi and p_wi, is the estimated state and changes every frame. The camera frame C has its optical axis along plus z; it is fixed to the IMU by the rigid extrinsics R_ic and p_ic, which are calibrated (EuRoC publishes them as T_BS) and optionally refined online by S10. A world point maps into the camera frame as p_c = R_ic transpose times (R_wi transpose times (p_w minus p_wi) minus p_ic).</desc>
+  <desc id="desc">The three frames of the VIO pipeline. The world frame W is gravity-aligned, with gravity along minus z; its yaw and origin are unobservable. The IMU or body frame I is where the accelerometer and gyroscope measure; its pose in the world, R_wi and p_wi, is the estimated state and changes every frame. The camera frame C has its optical axis along plus z; it is fixed to the IMU by the rigid extrinsics R_ic and p_ic, the camera pose in the IMU frame (R_ic maps camera-frame vectors into the IMU frame; p_ic is the camera origin expressed in the IMU frame), which are calibrated (EuRoC publishes them as T_BS) and optionally refined online by S10. A world point maps into the camera frame as p_c = R_ic transpose times (R_wi transpose times (p_w minus p_wi) minus p_ic).</desc>
 
   <style>
     /* SVGs embedded via &lt;img&gt; cannot inherit the page's text colour, so
@@ -91,10 +91,11 @@
   <text x="680" y="418" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Camera C</text>
   <text x="680" y="435" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">pixels are projections of p_c</text>
 
-  <!-- I -> C : rigid extrinsics -->
+  <!-- I -> C : rigid extrinsics, the camera pose in I (C-in-I convention) -->
   <line x1="420" y1="234" x2="628" y2="296" stroke="#f59e0b" stroke-width="2.4" marker-end="url(#arrow-amber)"/>
-  <text x="650" y="192" text-anchor="middle" font-size="12.5" fill="#f59e0b" font-weight="700">(R_ic, p_ic)</text>
-  <text x="650" y="208" text-anchor="middle" font-size="11" fill="#f59e0b">rigid extrinsics: calibrated</text>
+  <text x="650" y="178" text-anchor="middle" font-size="12.5" fill="#f59e0b" font-weight="700">(R_ic, p_ic)</text>
+  <text x="650" y="194" text-anchor="middle" font-size="11" fill="#f59e0b">the camera pose in I: R_ic maps C → I,</text>
+  <text x="650" y="208" text-anchor="middle" font-size="11" fill="#f59e0b">p_ic is C's origin in I. Rigid, calibrated</text>
   <text x="650" y="222" text-anchor="middle" font-size="11" fill="#f59e0b">(EuRoC's T_BS), refined by S10</text>
 
   <!-- ===== Equations ===== -->
