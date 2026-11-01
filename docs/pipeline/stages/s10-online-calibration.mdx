@@ -117,7 +117,7 @@ separates from roll/pitch, and records the yaw σ at the first and last frame.
 | yaw σ, first → last frame | never falls | 0.16 → 0.006–0.020 rad |
 | ATE | — | 11–126 cm |
 
-Splitting the noise sources (seeds 1–5) isolates yaw:
+Splitting the noise sources (seeds 1–5, `matched_noise_control(seed, 1, 0.25, imu_noise, camera_noise)`) isolates yaw:
 
 | noise | roll/pitch NEES | yaw NEES | position NEES |
 |---|---|---|---|

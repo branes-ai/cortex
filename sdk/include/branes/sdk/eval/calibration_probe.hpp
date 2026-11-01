@@ -286,10 +286,15 @@ template <math::Scalar T>
 /// densities, and the backend assuming exactly those σ's, with perfect
 /// calibration. A consistent filter gives pose NEES ≈ 6 (roll/pitch ≈ 2, yaw ≈ 1,
 /// position ≈ 3) and never lowers its yaw σ, since yaw is unobservable.
-/// Deterministic in `seed`.
+/// Deterministic in `seed`. `imu_noise` / `camera_noise` switch a source off
+/// for the split runs; every sample is still drawn, so the source left on sees
+/// the same noise as in the full run.
 template <math::Scalar T>
-[[nodiscard]] calib_detail::CalibRun<T>
-matched_noise_control(std::uint32_t seed, T pixel_sigma = T{1}, T onset_s = SyntheticConfig<T>{}.onset_s) {
+[[nodiscard]] calib_detail::CalibRun<T> matched_noise_control(std::uint32_t seed,
+                                                              T pixel_sigma = T{1},
+                                                              T onset_s = SyntheticConfig<T>{}.onset_s,
+                                                              bool imu_noise = true,
+                                                              bool camera_noise = true) {
     using std::cos;
     using std::log;
     using std::sin;
@@ -318,15 +323,19 @@ matched_noise_control(std::uint32_t seed, T pixel_sigma = T{1}, T onset_s = Synt
         for (std::size_t k = 0; k < 3; ++k) {
             T a, b;
             gauss_pair(a, b);
-            m.angular_velocity[k] += gyro_sigma * a;
-            m.linear_acceleration[k] += accel_sigma * b;
+            if (imu_noise) {
+                m.angular_velocity[k] += gyro_sigma * a;
+                m.linear_acceleration[k] += accel_sigma * b;
+            }
         }
     for (auto& f : w.frames)
         for (auto& o : f.obs) {
             T a, b;
             gauss_pair(a, b);
-            o.u += pixel_sigma * a;
-            o.v += pixel_sigma * b;
+            if (camera_noise) {
+                o.u += pixel_sigma * a;
+                o.v += pixel_sigma * b;
+            }
         }
     return calib_detail::run_with_calib(w, w.R_imu_cam, w.p_imu_cam, pixel_sigma / w.camera.fx());
 }
