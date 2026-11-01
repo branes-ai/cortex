@@ -1,8 +1,12 @@
-# General sensor definitions.
+# EuRoC MAV cam0 calibration, in the ASL sensor.yaml layout that hello_vio
+# reads. This file is written by cortex, not copied from the dataset: the
+# values are the published calibration, quoted as facts (docs/adr/0001) from
+# M. Burri et al., "The EuRoC micro aerial vehicle datasets", IJRR 35(10),
+# 2016, doi:10.1177/0278364915620033.
 sensor_type: camera
-comment: VI-Sensor cam0 (MT9M034)
+comment: EuRoC MAV VI-Sensor cam0, published calibration
 
-# Sensor extrinsics wrt. the body-frame.
+# Camera -> body (IMU) transform, row-major 4x4.
 T_BS:
   cols: 4
   rows: 4
@@ -11,11 +15,9 @@ T_BS:
         -0.0257744366974, 0.00375618835797, 0.999660727178, 0.00981073058949,
          0.0, 0.0, 0.0, 1.0]
 
-# Camera specific definitions.
 rate_hz: 20
 resolution: [752, 480]
 camera_model: pinhole
-intrinsics: [458.654, 457.296, 367.215, 248.375] #fu, fv, cu, cv
+intrinsics: [458.654, 457.296, 367.215, 248.375]  # fu, fv, cu, cv
 distortion_model: radial-tangential
-distortion_coefficients: [-0.28340811, 0.07395907, 0.00019359, 1.76187114e-05]
-
+distortion_coefficients: [-0.28340811, 0.07395907, 0.00019359, 1.76187114e-05]  # k1, k2, p1, p2
