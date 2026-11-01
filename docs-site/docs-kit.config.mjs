@@ -9,6 +9,7 @@ export default {
     vio: 'Visual-Inertial Odometry (E3)',
     pipeline: 'VIO Pipeline',
     debugging: 'Stage-Bench Debugging (#444)',
+    'first-principles': 'VIO from First Principles',
     benchmarks: 'Benchmarks & Validation',
     algorithms: 'Algorithms & Provenance',
     phases: 'Roadmap & Phases',

@@ -1,0 +1,77 @@
+---
+title: Diagnostic Signatures and Pitfalls
+description: A symptom-to-cause table for VIO failures, each with the measurement that confirms it, and twenty pitfalls distilled from getting cortex's pipeline to work.
+---
+
+import Issue from '@site/components/Issue.astro';
+
+## Symptom → likely cause
+
+Each row is a failure we hit. The middle column is the measurement that tells the cause apart
+from its look-alikes; the [storyline](storyline.mdx) has the full account.
+
+| What you see | Likely cause | How to confirm | Issues |
+|---|---|---|---|
+| ATE in kilometres from the first seconds | Camera↔IMU extrinsics wrong (identity instead of T_BS) | Load the real T_BS; check the reprojection of the first tracks | <Issue id={245} /> |
+| Initial tilt almost exactly 180° (177.7°) | Gravity sign flipped across a module seam | Seed tilt against the accelerometer; a sign-flipped fixture must fail | <Issue id={247} />, <Issue id={262} /> |
+| A random tilt of a few degrees, scale tens of percent off | Under-excitation: the scale isn't observable | Resolved metric motion against the 5 cm gate; scale against ground truth | <Issue id={254} />, <Issue id={501} /> |
+| A moving start diverges where static init succeeds | A degenerate dynamic init wins the race | Force each init path and assert the selected `InitMethod` | <Issue id={244} /> |
+| SfM scale collapses (millimetre-level motion) | Bootstrap on adjacent high-rate frames | Widest-parallax pair against adjacent frames | <Issue id={247} /> |
+| No SfM window ever builds on real data | RANSAC gates tighter than real pixel noise | Sweep noise from 0.5 to 2 px; check the inlier ratio | <Issue id={500} /> |
+| ATE fine, RPE large, NEES ≫ dof, NIS ≈ 1 | Information leaking along an unobservable direction (the yaw gauge) | Per-block NEES (attitude ≫ position); the null-space audit ‖H·N‖ and its growth with σ | <Issue id={212} />, <Issue id={337} /> |
+| Yaw σ falls while the yaw error grows | The same leak, seen directly | World-frame NEES split into roll/pitch, yaw and position; yaw σ first against last frame | <Issue id={551} /> |
+| NIS fixed by inflating R, NEES gets worse | Treating the symptom, not the cause | Judge every fix on NEES, NIS and ATE together | <Issue id={280} /> |
+| A fix passes its unit gauge test but end-to-end NEES worsens | Inconsistent linearization points (partial FEJ) | Check that H, Φ and P share linearization points | <Issue id={339} /> |
+| A new filter passes unit tests but the assembled filter diverges | A sign or retraction mismatch between update and state | Finite-difference check of the joint step over several cycles | <Issue id={366} /> |
+| Divergence in float but not double, after a large information gain | A P-writing stage in a narrow type: Joseph cancellation makes P indefinite | λ_min(P) per frame; run S2/S3/S9/S6e in double, or use the square-root form | <Issue id={532} /> |
+| NaN, or results that differ from run to run | Out-of-bounds read (a square-root factor assumed square) | ASan and UBSan on a real-data replay | <Issue id={533} /> |
+| One compiler passes and another fails, both deterministic | Unspecified evaluation order of side-effecting calls (random draws) | Sequence the draws; diff per-frame traces | <Issue id={437} /> |
+| One platform draws different noise for the same seed | `std::normal_distribution` is implementation-defined (only the engine's sequence is standard) | Build Gaussians from the raw engine output (Box–Muller) | <Issue id={551} /> |
+| Some noise seeds diverge; gate tuning rescues some and breaks others | The gate isn't the cause; check the test world and the harness | Dead-reckon the world's own IMU against its ground truth; sweep 21 seeds or more | <Issue id={537} /> |
+| Roll/pitch over-confident even with noise-free sensors | The world's IMU isn't consistent with its ground truth (a velocity step) | Propagating ground truth with the world's IMU drifts far more than 1e-5 m per frame at one instant | <Issue id={475} /> |
+| Over-confident only on a slow start | Bad triangulation of low-parallax windows | Oracle-landmark substitution; per-track depth error against parallax | <Issue id={548} /> |
+| A "consistent" control with NEES ≪ dof | Noise-free inputs: the control measures nothing | Inject noise matched to the filter's model | <Issue id={551} /> |
+| Position variance under-predicted far from the origin | Process noise not mapped through the [p̂]× lever arm (invariant error) | Monte-Carlo of the propagated error about 20 m from the origin | <Issue id={537} /> |
+| Most new tracks die on their first frame | Detector margin narrower than the KLT pyramid footprint | Fraction of tracks lost on their first frame | <Issue id={474} /> |
+
+## Pitfalls
+
+1. **Synthetic first, but never synthetic only.** The VIO epic closed before any real run. Real
+   data then exposed extrinsics, initialization and numerics bugs that every unit test had passed.
+   Latency doesn't transfer either: 38 ms per frame synthetic, 506 ms real.
+2. **Build fixtures from the producer's convention, not the consumer's.** The gravity-sign bug
+   lived in both the code and its fixtures, so CI stayed green.
+3. **Fixing one fault exposes the next.** Re-measure after every fix; forced dynamic init went
+   through five faults in a row.
+4. **An init path must decline when its inputs are unobservable**, and an observability gate is
+   not a consistency gate.
+5. **ATE hides over-confidence.** Always report NEES and NIS beside ATE and RPE.
+6. **NIS ≈ 1 does not mean consistent.** Gauge leaks and extrinsic errors don't show in the
+   innovations.
+7. **A body-frame EKF leaks yaw.** The leak is in the S2/S3 linearization. A more accurate Φ makes
+   it worse; the cure is a different error state.
+8. **Partial FEJ is worse than none.**
+9. **A fix that cures the symptom can worsen the disease.** Inflating R and gating on parallax both
+   did.
+10. **Unit-proven is not system-proven.** Finite-difference check the assembled step, and validate
+    on real data.
+11. **Stages that write P stay double, or use the square-root form.** A diagonal guard can miss an
+    indefinite P altogether: every variance can stay positive while P has a negative eigenvalue. In
+    the float run it rejected 25,777 updates and the run still diverged.
+12. **Carry the square-root factor, and mind its shape.** It is tall after augmentation; never
+    re-factor P in a narrow type.
+13. **Scale thresholds with ε, never ridges.**
+14. **One seed proves nothing.** Sweep at least 21.
+15. **Test with at least two compilers, and three platforms.** Function arguments are unsequenced,
+    and the standard library's distributions differ.
+16. **Test worlds lie.** Check the world's IMU against its own ground truth before blaming the
+    filter.
+17. **Noise-free controls can't certify consistency.**
+18. **At low parallax, refine the estimate rather than gate tracks out**, and confirm the cause
+    with an oracle substitution.
+19. **Validate every instrument against an independent oracle before trusting it.** An inspector's
+    PD check, flight-data Allan variance, an update-order artifact and a tool that silently wrote
+    nothing all misled us once.
+20. **Measure first, and ship candidates default-off.** A/B test on a slow (V1_01), a medium
+    (MH_05) and an aggressive (V2_03) sequence: slow sequences expose gauge problems, aggressive
+    ones expose R.

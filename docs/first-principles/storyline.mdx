@@ -1,0 +1,298 @@
+---
+title: The Storyline
+description: Six chapters of getting cortex's VIO to work — building from parts, first contact with real data, over-confidence, numerics, tests that lied, and a slow start — each with its symptoms, deciding measurements and fixes.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Issue from '@site/components/Issue.astro';
+
+The chapters are in the order the problems were found. Each one names what the failure looked
+like, the measurement that decided its cause, and the fix. Where a later chapter revised an
+earlier claim, the revision is stated where the claim is.
+
+## Chapter 1. Build it from parts
+
+Epic <Issue id={33} /> built the pipeline bottom-up, each part unit-tested against synthetic
+known answers:
+
+- **Interfaces and backends:** the `VioBackend` interface, the MSCKF backend, a sliding-window
+  skeleton.
+- **Front end:** FAST-9 with non-maximum suppression, pyramidal KLT, images and pyramids
+  ([S4](../pipeline/stages/s4-frontend.mdx)).
+- **Models:** camera models with analytic Jacobians, IMU preintegration, feature representations
+  with the MSCKF null-space types ([S0](../pipeline/stages/s0-sensor-models.mdx)).
+- **Estimator:** static and dynamic IMU initialization, the state and propagator, the camera
+  updater with null-space projection and a Mahalanobis gate, and the `VioEstimator` facade.
+- **Evaluation:** EuRoC replay with ATE/RPE and a latency budget. A square-root covariance
+  backend came later (<Issue id={187} />).
+
+**When the epic closed, nothing had run on real data.** Its EuRoC acceptance tests skip in CI,
+which has no dataset. Every later chapter is about what synthetic unit tests can't see.
+
+- **Pitfall:** FAST-9 finds no corners on the X-junctions of an aligned checkerboard
+  (<Issue id={37} />). Choose test images for the detector you have.
+- **Pitfall:** the preintegrated Δv and Δp are gravity-free, with R_i·Δv = v_j − v_i − g·Δt
+  (<Issue id={40} />). That convention became the seam of the worst bug in Chapter 2.
+
+## Chapter 2. First contact with real data: 26 km of error
+
+**Wrong extrinsics.** The first EuRoC V1_01 run gave an **ATE of 26,574 m** against a 0.5 m gate,
+after a 13-minute run. There were two faults:
+
+- The camera↔IMU extrinsics were left at identity. EuRoC cam0 is rotated about 90° and offset
+  about 7 cm.
+- Initialization fell back to an identity attitude when the start was never static.
+
+The fix loaded the real T_BS, added `try_gravity_align` (roll and pitch from the mean specific
+force), `InitDiagnostics`, a per-frame divergence guard and `--fail-fast`. V1_01 dropped to
+**0.305 m**. The replay tests had the same identity-extrinsic fault: MH_05 was at 21,405 m and
+V2_03 at 6,680 m until it was fixed (MH_05 **0.785 m**, <Issue id={245} />).
+
+**The initialization race.** With real extrinsics, V2_03 still diverged to **12,456 m** with
+`init=dynamic` (<Issue id={244} />). A degenerate dynamic init, whose scale wasn't observable,
+won the race against static init. A scale-observability gate (`min_dynamic_motion` = 5 cm) made
+dynamic init decline; static init then won, and the error fell to **0.293 m**.
+
+**Forced dynamic init: a chain of faults** (<Issue id={247} />). Forcing the dynamic path on
+MH_05 gave **41,910 m**, against 0.79 m with static init.
+
+| Fault | Problem | Fix |
+|---|---|---|
+| F2 | Near-hover windows are rank-deficient, and the scale collapses to about 1e-8 | The observability gate; after it, dynamic init never fired |
+| F4 | Bootstrapping SfM on adjacent 20 Hz frames gave almost no parallax: a best metric motion of **0.14 mm** | Use the widest-parallax pair: 56 mm, still 12.9 km of error |
+| F5a, the root cause | The alignment solve used +g·Δt where the preintegrator uses −g·Δt, so it recovered g = −g_true. The seed was tilted **177.7°** from the accelerometer, injecting about 2 g of phantom acceleration | Fix the sign: tilt 177.7° → **2.33°**, error 48 km → **19.3 m** |
+
+The synthetic fixtures carried the same sign error, so CI stayed green. Scoring ATE only after
+initialization (19.9 m) confirmed the remaining 19 m is real post-init error.
+
+A negative result: seeding roll and pitch from the accelerometer on a moving start made it worse
+(**37.3 m**), because motion contaminates the specific force. It was reverted.
+
+**Still open in initialization:**
+
+- Forced dynamic init on MH_05 is still about 19 m against a 1.5 m gate (<Issue id={254} />). The
+  start moves at about 0.1 m/s, and a 20% scale error over about 100 m explains it. This is an
+  excitation floor, not a defect.
+- A metric lever arm is added to up-to-scale SfM positions (<Issue id={499} />). Even on exact
+  data the scale error is 0.88–5.49%, against 0.017–2.40% with the lever arm zeroed.
+- The RANSAC inlier gates are about 0.9 px (two-view) and 2.3 px (PnP) (<Issue id={500} />). At
+  2 px of noise no window ever builds. On MH_05, 82 of 170 moving attempts fail despite more than
+  100 px of disparity. At rest, about 0.05 px of pseudo-parallax is accepted, because there is no
+  minimum-parallax gate.
+- Alignments with **21–90%** scale error are accepted, and up to 257% with 4 Hz keyframes
+  (<Issue id={501} />). The gate checks observability, not consistency.
+- Dynamic alignment declines in float and posit32, because it solves normal equations with a
+  fixed ridge (<Issue id={468} />).
+- The diagnostics log a 177° tilt but don't refuse the seed (<Issue id={267} />).
+- Fixed: `jacobi_eigh` stopped only at an exactly zero off-diagonal and always ran 100 sweeps
+  (<Issue id={497} />).
+
+The full contract of this stage is on [S1 — Initialization](../pipeline/stages/s1-initialization.mdx).
+
+## Chapter 3. Accurate, but over-confident
+
+With initialization fixed, V1_01 met its ATE gate (0.305 m), but the relative error was about
+**18%** (rotation 3.1°/m) against a 5% target (<Issue id={212} />). Once there were instruments to
+measure it (NEES and NIS, gauge-anchored and per block, <Issue id={264} />), the real problem
+showed: **the filter was over-confident.**
+
+Measured in double (long double gives the same, so precision is not the cause; <Issue id={532} />):
+
+| Sequence | ATE | NEES/dof | NIS |
+|---|---|---|---|
+| V1_01 | 0.289 m | **436** (attitude 993) | 1.5 |
+| MH_05 | 0.755 m | **42.8** | — |
+| V2_03 | 0.269 m | **140** | 14.7 |
+
+Per-block NEES put the problem in **attitude** (V2_03: attitude 169, position 3.5). NIS stayed
+healthy while NEES was in the hundreds: the innovations looked fine while the state covariance was
+wrong. That combination is the signature of information leaking along an unobservable direction.
+
+We built instruments to find the cause:
+
+- **Stage probes**, synthetic and per stage, one per [pipeline stage](../pipeline/overview.mdx).
+- **Real-data stage inspectors**, tapped from a live EuRoC replay (<Issue id={371} />).
+- **An observability null-space audit** (<Issue id={337} />).
+- **A per-stage ground-truth-injection harness** (<Issue id={266} />), later superseded by the
+  probes.
+
+Each candidate cause got a measurement. The method is described on
+[Diagnostic Methodology](../pipeline/diagnostic-methodology.mdx), and the worked chain on
+[Consistency Analysis](../pipeline/consistency-analysis.mdx).
+
+| Candidate | Deciding measurement | Verdict |
+|---|---|---|
+| Q/R mistuned | Best NEES at Q×10. R×4 gives NIS 1.08 but ATE 2.07 m; R×10 gives 278 m. No (Q, R) pair is both consistent and accurate (<Issue id={280} />) | Refuted as the sole cause; tuning only compensates |
+| Gross calibration or time-sync bias | Innovation mean −0.013σ | Refuted |
+| Non-white innovations | After a deterministic update order, MH_05 innovations are white | Partly an artifact |
+| **Yaw null-space leak (body-frame EKF)** | ‖H·N‖ is 2e-16 at a consistent point and **0.147** at σ = 2 cm, growing with σ (0.028 → 0.462); the translation leak is exactly 0 (<Issue id={337} />). On real V2_03 the mean leak is 0.39, nonzero on every update. The S6 update adds none (<Issue id={480} />); S2 leaks 2.4e-6 per 5 ms step | **Confirmed as a mechanism.** It lives in S2/S3 linearization, not S6. Its share of the NEES is not yet attributed |
+| FEJ, measurement-only | Attitude NEES 993 → 1336 (V1_01); MH_05 → 107,544 and 20.9 m (<Issue id={339} />) | **Refuted** |
+| FEJ, full | V1_01 → 2281 m; MH_05 → 11 km | **Refuted** as implemented: partial FEJ mixes a first-estimate H with a current-estimate P |
+| Unmodeled calibration, as an isotropic R term | NIS 14.7 → 1.41, but NEES 140 → **3074** and ATE → 4.74 m | Refuted as the fix: it cures the symptom and worsens the state |
+| Online spatial extrinsics (S10) | V2_03 NEES 140 → 110; NIS unchanged; ATE never better (<Issue id={332} />) | Cleared as the driver |
+| Time offset t_d | not implemented | **Open** |
+| Parallax gate (S5) | V2_03 ATE 0.27 → 1.99 m, NEES 140 → 322 | Refuted for the body-frame filter on EuRoC |
+| Diagonal Q_d (S2) | Drops 0.35% of Q; propagation-only NEES 6.4 against 6 | Cleared for the body-frame filter (but see Chapter 5 for the R-IEKF) |
+| Update algebra (S6) | NIS/dof 1.002 at matched (P, R); null-space residual 2.8e-16 | Cleared |
+| Augmentation and marginalization (S3, S9) | Machine-zero residuals | Cleared |
+| Arithmetic precision | Long double = double | Refuted |
+| χ² gate too loose | 5·dof admits 59% (dof 1) and 70.5% (dof 3) of 2σ outliers, where χ²₀.₉₅ admits 44% and 22.5% (<Issue id={481} />) | **Open** contributor, never tested end to end |
+
+**The structural cure: the R-IEKF** (<Issue id={347} />). A right-invariant error makes the
+four-DoF gauge (translation and yaw) independent of the state, so the update cannot leak
+information along it.
+
+- **Proven at the unit level:** H·N = 0 and Φ·N = N at any state (<Issue id={348} />). On real
+  V2_03 perturbations the yaw leak is **2.3e-16**, against 0.39 for the body-frame filter.
+- **Assembled, it failed at first.** The backend diverged, and with updates it did worse than
+  without them (162.9 m against 14.6 m, <Issue id={365} />). There were four bugs
+  (<Issue id={366} />): the sign of H_φ, a retraction mismatch, a first-order Φ that needed to be
+  second order, and a wrong NEES metric in the test. Only a multi-cycle finite-difference check of
+  the joint step caught them.
+- **Unit-proven is not system-proven.** On real EuRoC the R-IEKF still loses on accuracy: V1_01
+  ATE 1.31 m against 0.29 m, V2_03 1.36 m against 0.27 m (<Issue id={429} />). Its attitude NEES on
+  EuRoC has never been reported.
+
+## Chapter 4. Divide and conquer, and numerics
+
+Some numerical failures (a square-root ATE of 6e+40 m, a non-finite δx) could not be told apart
+from algorithmic ones. That motivated the infrastructure of epic <Issue id={444} />, described in
+its own [section](../debugging/overview.mdx):
+
+- **Stages S0–S10 exposed as transformations**, so the backend is a call sequence.
+- **Stage benches** with known-answer, ground-truth-injected and captured fixtures, checked by an
+  invariant library with tolerances scaled to the arithmetic type.
+- **Stream capture** from real runs with a first-violation trigger, and composition benches.
+
+We then made the pipeline generic over arithmetic types:
+
+- **Generic over types:** `StrictDouble` has explicit-only conversions, so an implicit narrowing
+  is a compile error, and the result must match double bit for bit.
+- **Precision measurement:** a precision mode measures the bits lost per type, and each stage can
+  run in its own type ([Mixed Precision](../debugging/mixed-precision.mdx)).
+
+What we learned:
+
+- **Stages that write P (S2, S3, S9, S6e) must stay double**, unless the covariance is
+  square-root (<Issue id={532} />).
+  - Mechanism: in float, at takeoff (V1_01 frame 105), one update cuts the largest variance from
+    1.49 to 0.135. The Joseph form's cancellation error (about ε·‖P_prior‖) then makes P
+    indefinite (λ_min −4e-5 of the largest), and the run ends at 128,911 m.
+  - A diagonal "undo negative variance" guard rejected 25,777 updates and still ended at 10,147 m:
+    P is indefinite before any diagonal goes negative.
+  - Square-root all-float holds all three sequences (V1_01 0.295, MH_05 0.784, V2_03 0.282 m).
+  - Stages that only read P tolerate float.
+- **Divergence follows conditioning, not the number type.** The S6e update loses log₂κ(S) to
+  log₂κ(S)+3 bits in every type; data-movement stages lose none. posit16 is too narrow:
+  triangulation breaks at 1° of parallax or less.
+- **The square-root factor is tall after augmentation** (<Issue id={533} />, <Issue id={461} />).
+  The update assumed a square factor and read past the end of H·S. That gave NaN on V1_01 in
+  double, at a frame that varied from run to run (heap garbage), while synthetic tests passed bit
+  for bit. After the fix, ASan and UBSan are clean on the real replay. The
+  [worked example](../debugging/worked-example.mdx) tells how it was found.
+- **Never re-factor P into S in a narrow type** (<Issue id={482} />). Clone/pose correlation puts
+  pivots below float resolution: 36 of 51 were zeroed. Carry the factor instead.
+- **Some tolerances should scale with ε and some must not**
+  ([Numerical Thresholds](../debugging/numerical-thresholds.mdx)):
+  - **Scale with ε:** the small-angle hand-off at max(1e-5, ε^(1/3)), and the PSD slack, measured
+    against the largest P_ii rather than per entry.
+  - **Never scale:** regularizing ridges stay at a fixed 1e-9. An ε-scaled ridge biased S1's float
+    scale from 0.88% to 17.2% error, even in exact arithmetic.
+- **Keep timestamps double.** Summing dt in float drifts about 6e-11 s per sample, so reset the
+  filter clock from the sensor time after each propagation.
+
+## Chapter 5. When the test lies
+
+Three times, a "filter defect" turned out to be a defect in the test.
+
+**The compiler was not the cause** (<Issue id={437} />). The R-IEKF end-to-end test passed on GCC
+(3.44 m) and failed on Clang (58.48 m), with each compiler deterministic and the sanitizers clean.
+
+- **Cause:** the test built the gyro and accelerometer samples from random draws inside two
+  arguments of one call. Argument evaluation order is unspecified, so each compiler saw a
+  different noise realization.
+- **Fix:** sequence the draws. Clang CI now runs the whole suite.
+- **The real lesson:** GCC's seed passed by luck. Sweeping 21 seeds showed 5 diverged (21–120 m).
+
+**The world was wrong** (<Issue id={475} />, <Issue id={537} />). The R-IEKF looked inconsistent
+and diverged on 5 of 21 seeds, and changing the χ² gate rescued some seeds while breaking others.
+There were two causes:
+
+- **The world:** the synthetic trajectory left its warm-up with a velocity step of about 1 m/s
+  that no accelerometer sample recorded, while the ground truth reported rest. With **noise-free**
+  sensors, roll/pitch NEES reached about 3000.
+- **The adapter:** setting the state at t = 1.5 s still integrated the warm-up IMU samples from
+  t = 0, a constant offset of about 3 m.
+
+Smoothing the onset and dropping the stale samples fixed both. All 21 seeds then gave 1.8–7.6 cm
+RMS at a normalized NEES of 0.56–1.84. The work also found one real filter gap: the process noise
+wasn't right-invariant. A Monte-Carlo test 20 m from the origin showed the diagonal Q
+under-predicted position variance **135×**.
+
+<Aside type="caution" title="Revisions caused by the velocity step">
+  - A synthetic "body-frame NEES ≈ 43 with perfect calibration", once read as reproducing the
+    MH_05 over-confidence, came from the velocity step. It was retracted.
+  - An explanation of a roll/pitch NEES of about 3400× as "over-fusion" was the velocity step too.
+</Aside>
+
+**A noise-free control proves nothing** (<Issue id={551} />). After the world was fixed, the
+[S10](../pipeline/stages/s10-online-calibration.mdx) control read NEES 0.036, and the docs called
+the body-frame filter "not over-confident". But that control fed **exact** observations. With
+noise matched to what the filter assumes (1 px, the datasheet IMU densities) and perfect
+calibration:
+
+| 10 seeds | consistent | measured |
+|---|---|---|
+| pose NEES | 6 | 9.0–5088, median 26 |
+| roll/pitch NEES | 2 | 2.9–129 (3–10 on 9 seeds) |
+| yaw NEES | 1 | 3.0–4463 (8 of 10 above 6) |
+| position NEES | 3 | 1.0–142 (7.5 or less on 9) |
+| yaw σ, first → last frame | never falls | 0.16 → 0.006–0.020 rad |
+
+Global yaw is unobservable, so its σ can only grow; here it falls about tenfold within seconds.
+With IMU noise alone and exact observations, the yaw error reaches 0.22 rad on one seed, about
+300× what gyro noise integrates to. This is the Chapter 3 yaw leak, reproduced for the first time
+where the truth is known, and it needs no calibration error. The R-IEKF under the same noise gives
+0.55–1.83. The body-frame filter was kept, characterized by a test, as the EuRoC accuracy
+reference until the R-IEKF matches it there.
+
+**Smaller ones:**
+
+- The synthetic camera's tangential distortion p2 is 1000× EuRoC's (<Issue id={467} />). The
+  world is self-consistent, so nothing failed.
+- The S5 bench counts a correct triangulation rejection as a violation, so it becomes the first
+  violation in every capture (<Issue id={487} />).
+- The S6 inspector's "18% non-PSD" was its own positive-definite check, not a PSD check.
+- Innovation non-whiteness came from the update order.
+- Flight-data Allan variance overstates the noise density about 30×.
+- The tools silently wrote nothing when `--out` didn't exist.
+
+## Chapter 6. A slow start
+
+With the world fixed, a slow motion onset (1 s or more) broke the R-IEKF again
+(<Issue id={548} />): 14 of 21 seeds were out of band at 1 s and all 21 at 2 s, with roll/pitch NEES
+up to 624.
+
+- **Cause:** the R-IEKF triangulated with a linear solve only. At the 0.93° parallax of the first
+  window (pixel noise 0.29°), all 234 features came out more than 1 m off (mean 5.6 m).
+- **How it was confirmed:** substituting the true landmarks for the first second's updates
+  brought roll/pitch NEES from 294 to 0.79.
+- **Fix:** Gauss-Newton refinement of the reprojection error, which the body-frame path already
+  had, with a backtracking line search that never accepts a step raising the cost. Onsets up to
+  2 s are now in band on all 21 seeds; at 3 s one seed is marginal. Five iterations weren't enough
+  from a seed that bad; 20 converge.
+- **Why not a gate:** a parallax gate worked only in a narrow threshold window and threw away
+  hundreds of tracks. On EuRoC V2_03 it had already regressed the body-frame filter.
+
+The stage contract is on [S5 — Feature Triangulation](../pipeline/stages/s5-triangulation.mdx).
+
+## What finishes the story
+
+- The R-IEKF's NEES on real EuRoC (<Issue id={365} />) and its accuracy gap (<Issue id={429} />).
+- Attributing the body-frame yaw leak to S2/S3 and sizing its share of the NEES (<Issue id={480} />).
+- A χ²-quantile gate (<Issue id={481} />), and the time-offset state t_d, the one untested
+  over-confidence candidate (<Issue id={332} />).
+- The dynamic-initialization defects of Chapter 2.
+- The FAST/KLT border mismatch (<Issue id={474} />) and real-time latency (<Issue id={213} />).
+- Turning the real-data consistency checks from warnings into asserted bounds once a backend is
+  consistent on EuRoC, and adding the [missing tests](regression-suite.mdx).
