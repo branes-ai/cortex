@@ -55,8 +55,9 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
    did.
 10. **Unit-proven is not system-proven.** Finite-difference check the assembled step, and validate
     on real data.
-11. **Stages that write P stay double, or use the square-root form.** A diagonal guard detects an
-    indefinite P but doesn't recover it.
+11. **Stages that write P stay double, or use the square-root form.** A diagonal guard can miss an
+    indefinite P altogether: every variance can stay positive while P has a negative eigenvalue. In
+    the float run it rejected 25,777 updates and the run still diverged.
 12. **Carry the square-root factor, and mind its shape.** It is tall after augmentation; never
     re-factor P in a narrow type.
 13. **Scale thresholds with ε, never ridges.**

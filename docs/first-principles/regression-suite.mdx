@@ -73,10 +73,10 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 
 | # | Requirement | Pass criterion | Test here | Status |
 |---|---|---|---|---|
-| D1 | Monte-Carlo consistency | 21 seeds or more, 4 in CI. Every seed: RMS below 0.15 m, median below 0.06 m, normalized full NEES in (0.25, 3), roll/pitch below 6, yaw below 3, position below 4 | `invariant_vio_backend.cpp` seed sweep, plus a hidden `[.sweep]` case | locked (R-IEKF) |
-| D2 | Slow-start robustness | The D1 bands at onsets of 1 s and 2 s | "a slow 2 s start stays consistent", plus a hidden slow-onset sweep | locked (R-IEKF) |
+| D1 | Monte-Carlo consistency | 21 seeds or more. Every seed: RMS below 0.15 m, normalized full NEES in (0.25, 3), roll/pitch below 6, yaw below 3, position below 4. Across the seeds: median RMS below 0.06 m | CI: "tracks and stays consistent on every seed" (4 seeds). Manual: the hidden "21-seed sweep" (`[.sweep]`) | partial: 4 seeds locked (R-IEKF), 21 manual |
+| D2 | Slow-start robustness | The D1 bands at onsets of 1 s and 2 s | CI: "a slow 2 s start stays consistent" (2 seeds at 2 s). Manual: the hidden "21-seed sweep at slow onsets" (1 s and 2 s) | partial: 2 s on 2 seeds locked (R-IEKF); 1 s and 21 seeds manual |
 | D3 | A consistency control under noise, never noise-free | Pose NEES about dof under 1 px plus the nominal IMU noise, **for every backend** | R-IEKF: D1. Body-frame: "S10 matched-noise control: the body-frame MSCKF leaks information into yaw" pins the leak (median pose NEES above 12, yaw σ falling) | locked (R-IEKF); characterization (body-frame) <Issue id={551} /> |
-| D4 | Every arithmetic type end to end | float, posit32, long double: P PSD every frame; positions within 1000 ulps of double | "the estimator runs end to end in every arithmetic type" | locked |
+| D4 | Every arithmetic type end to end | float, posit32, long double: P PSD every frame; positions within 1000·max(ε_type, ε_double) metres of the double result | "the estimator runs end to end in every arithmetic type" | locked |
 | D5 | Genericity audit | A strict type with explicit-only conversions matches double bit for bit | `strict_double.cpp` | locked |
 | D6 | Per-stage precision | One stage in float within 1000 float ulps; PSD checked at the narrowest stage's ε | `stage_types.cpp` | locked |
 
@@ -86,7 +86,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 |---|---|---|---|---|
 | E1 | Accuracy with the published calibration | V1_01 ATE below 0.50 m; MH_05 and V2_03 below 1.5 m (now 0.305, 0.785, 0.293 m); ATE scored from init onward with Horn alignment | `vio_euroc.cpp` replay cases | gated |
 | E2 | Divergence guard | A finite trajectory; fail fast at the divergent frame; a forced bad path stays bounded (below 100 m) | "MH_05_difficult forced dynamic VI-init fires + stays bounded" | gated |
-| E3 | Each init path forced | Static, gravity-align and dynamic each forced and asserted; dynamic within the 1.5 m gate (not met: 19.9 m) | as E2 | gated, failing target <Issue id={254} /> |
+| E3 | Each init path forced | Static, gravity-align and dynamic each forced, the selected `InitMethod` asserted; dynamic within the 1.5 m gate (measured 19.9 m) | none: the E2 case prefers dynamic init but allows a fallback and asserts only the bounded trajectory | **missing** <Issue id={254} /> |
 | E4 | **Consistency on real data** | Gauge-anchored per-block NEES and NIS beside ATE on V1_01, MH_05, V2_03; NEES about dof | `vio_euroc.cpp` prints NEES and NIS | **warn** <Issue id={212} />, <Issue id={365} /> |
 | E5 | RPE | Below 5% of distance travelled | reported, not asserted | **warn** <Issue id={212} /> |
 | E6 | Mixed-precision presets on real data | No divergence for any shipped stage-type preset; ATE and NEES per preset | `vio_pipeline` EuRoC runs | manual |
