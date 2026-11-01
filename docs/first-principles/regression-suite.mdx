@@ -1,0 +1,103 @@
+---
+title: The VIO Regression Suite
+description: The functional tests a VIO pipeline must pass to be certified — sensors and test world, each stage, the assembled filter, synthetic and real-data system tests, and engineering hygiene — with pass criteria, the cortex test that implements each, and its status.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Issue from '@site/components/Issue.astro';
+
+This is the checklist a VIO pipeline is certified against. Every row exists because its failure
+happened here; the [storyline](storyline.mdx) tells which. A row's **pass criterion** is
+independent of cortex, so it carries over to another pipeline. The **test here** column names the
+cortex test case that implements it (Catch2 case names, under `tests/`).
+
+**Status:**
+
+- **locked:** asserted in CI.
+- **characterization:** a test pins a known defect, so a fix flips it.
+- **partial / weak:** a test exists but doesn't yet assert the full criterion.
+- **gated:** skipped in CI, which has no EuRoC dataset; run locally.
+- **warn:** runs and reports, doesn't assert.
+- **missing:** no test yet; the issue beside it tracks one.
+
+<Aside type="tip" title="Certifying a new pipeline">
+  Work top to bottom. Section A comes first because a wrong test world invalidates every result
+  below it. Run each stage row (B) in isolation before the assembled filter (C), and the
+  synthetic system tests (D) before real data (E). A pipeline is certified when every row passes
+  its criterion; a row it can't yet pass is recorded as a characterization, with the measured
+  value, never silently skipped.
+</Aside>
+
+## A. Sensors and the test world
+
+| # | Requirement | Pass criterion | Test here | Status |
+|---|---|---|---|---|
+| A1 | The world's IMU integrates to its ground truth | Dead reckoning with the true biases and no noise stays within 5 cm over 12 s; v and a are continuous at the onset | covered only indirectly by the D1 seed sweep | **missing** <Issue id={560} /> |
+| A2 | Gravity-sign contract across modules | Recovered gravity is +g in the preintegrator's convention; the seed tilt is a few degrees, never about 180°; a sign-flipped fixture fails | `stage_bench_s0_s1.cpp` S1 invariants; `sensor_model_probe.cpp` gravity sign | locked |
+| A3 | Camera models | Round trip and Jacobians match finite differences | the camera-model tests | locked |
+| A4 | The synthetic camera matches the real one it imitates | Intrinsics and distortion equal EuRoC cam0's | — | **missing** <Issue id={467} /> |
+| A5 | Input characterization | Static Allan variance matches the configured Q; timestamps are monotonic | `allan_variance.cpp` | partial <Issue id={268} /> |
+
+## B. Each stage
+
+| # | Requirement | Pass criterion | Test here | Status |
+|---|---|---|---|---|
+| B1 | S1: the scale-observability cliff | Declines below 5 cm of resolved motion; scale error below 1% on well-excited windows | "S1 scale-observability gate declines at low excitation (the cliff)" | locked |
+| B2 | S1: init consistency on noisy SfM | An accepted scale is within 5%; otherwise the window is declined | "S1 SfM bench: the 0.1 px window builds … but its scale is off" | characterization <Issue id={501} /> |
+| B3 | S1: SfM under realistic noise | The window builds at 1–2 px and rejects about 0.05 px of pseudo-parallax | "S1 SfM sweep: … 2 px of noise never builds" | characterization <Issue id={500} /> |
+| B4 | S1: known-answer scale with a lever arm | Exact data recovers the scale to rounding (now 0.78% off) | init-window known-answer fixture, 2% tolerance | weak <Issue id={499} /> |
+| B5 | S1: bootstrap pair selection | The window builds at 20 Hz where adjacent pairs fail | "S1 SfM bench: the alternatives on the same windows" | locked |
+| B6 | S2: propagation preserves the gauge | Φ·N = N each step; the invariant Φ doesn't depend on the estimate | "R-IEKF Phase A: the invariant propagation Phi is state-independent"; the S2 higher-order-Φ sweep | locked |
+| B7 | S2: process noise | Predicted covariance matches a Monte-Carlo within 1% per block, 20 m from the origin; cross-correlations within 0.06 | "… predicted covariance matches a Monte-Carlo far from the origin" | locked |
+| B8 | S2: propagation-only NEES at the shipped Q | About dof (6.4 against 6), monotone in the Q scale | the S2 probe | locked |
+| B9 | S3/S9: augmentation and marginalization | Exact block copy and principal submatrix; residual about 0 | the S3 and S9 benches | locked |
+| B10 | S5: triangulation at low parallax | Refinement reduces the error (median 2.76 → 0.76 m at about 1°), never raises the cost, keeps exact features to 1e-9, rejects points behind a camera | `invariant_update.cpp` "invariant triangulation: …" | locked |
+| B11 | S6a: Jacobians | Match finite differences to 1e-6, calibration blocks included | `calib_jacobians.cpp` | locked |
+| B12 | S6b: gauge annihilation | ‖H·N‖ ≤ 1e-15 at a consistent point; yaw leak against σ reported; invariant H·N below 1e-14 under perturbation; translation leak 0 | `observability_probe.cpp`; `observability_inspect.cpp`; "… annihilates the 4-DoF gauge" | locked |
+| B13 | S6: no information along N | The component of Hᵀ S⁻¹ r along N is at roundoff | "S6 update: no information along the unobservable directions, true or estimated" | locked |
+| B14 | S6: update algebra at matched (P, R) | NIS/dof in [0.98, 1.02] over 4000 updates; Nᵀ H_f = 0 to 1e-16; P stays PSD | `update_probe.cpp` | locked |
+| B15 | S6d: gate calibration | Inlier acceptance about 1 − α at every dof | "S6d sweep: … the shipped gate is loose at low dof" | characterization <Issue id={481} /> |
+| B16 | S10: calibration recovery | A wrong extrinsic is recovered with a consistent covariance (NEES 0.49 against a bound of 22.5) | `calib_recovery.cpp` | locked |
+| B17 | Iterative kernels converge | Eigen solvers in fewer than 20 sweeps, relative residual below 1e-14 | `two_view_sfm.cpp` Jacobi cases (the sweep-count pin was lost in the MTL5 port) | partial |
+| B18 | Front end: track survival | Detections lie outside the KLT border band; a low fraction of tracks is lost on its first frame (now about 85%) | bench invariant `tracks.lost_on_first_frame`, report-only | **missing** <Issue id={474} /> |
+
+## C. The assembled filter
+
+| # | Requirement | Pass criterion | Test here | Status |
+|---|---|---|---|---|
+| C1 | Joint step against finite differences | Over several propagate → update → retract cycles | `invariant_joint_step_fd.cpp` | locked |
+| C2 | Square-root and full covariance agree | δx and P agree to 1e-12 on a rectangular factor after augmentation | "the square-root update takes the rectangular factor …" | locked |
+| C3 | Stage-boundary fixtures replay bit for bit | Captured fixtures reproduce; the first violation points at a real fault | `stage_capture.cpp` | locked (the oracle has a false positive, <Issue id={487} />) |
+
+## D. The system, on synthetic data with matched noise
+
+| # | Requirement | Pass criterion | Test here | Status |
+|---|---|---|---|---|
+| D1 | Monte-Carlo consistency | 21 seeds or more, 4 in CI. Every seed: RMS below 0.15 m, median below 0.06 m, normalized full NEES in (0.25, 3), roll/pitch below 6, yaw below 3, position below 4 | `invariant_vio_backend.cpp` seed sweep, plus a hidden `[.sweep]` case | locked (R-IEKF) |
+| D2 | Slow-start robustness | The D1 bands at onsets of 1 s and 2 s | "a slow 2 s start stays consistent", plus a hidden slow-onset sweep | locked (R-IEKF) |
+| D3 | A consistency control under noise, never noise-free | Pose NEES about dof under 1 px plus the nominal IMU noise, **for every backend** | R-IEKF: D1. Body-frame: "S10 matched-noise control: the body-frame MSCKF leaks information into yaw" pins the leak (median pose NEES above 12, yaw σ falling) | locked (R-IEKF); characterization (body-frame) <Issue id={551} /> |
+| D4 | Every arithmetic type end to end | float, posit32, long double: P PSD every frame; positions within 1000 ulps of double | "the estimator runs end to end in every arithmetic type" | locked |
+| D5 | Genericity audit | A strict type with explicit-only conversions matches double bit for bit | `strict_double.cpp` | locked |
+| D6 | Per-stage precision | One stage in float within 1000 float ulps; PSD checked at the narrowest stage's ε | `stage_types.cpp` | locked |
+
+## E. The system, on real data
+
+| # | Requirement | Pass criterion | Test here | Status |
+|---|---|---|---|---|
+| E1 | Accuracy with the published calibration | V1_01 ATE below 0.50 m; MH_05 and V2_03 below 1.5 m (now 0.305, 0.785, 0.293 m); ATE scored from init onward with Horn alignment | `vio_euroc.cpp` replay cases | gated |
+| E2 | Divergence guard | A finite trajectory; fail fast at the divergent frame; a forced bad path stays bounded (below 100 m) | "MH_05_difficult forced dynamic VI-init fires + stays bounded" | gated |
+| E3 | Each init path forced | Static, gravity-align and dynamic each forced and asserted; dynamic within the 1.5 m gate (not met: 19.9 m) | as E2 | gated, failing target <Issue id={254} /> |
+| E4 | **Consistency on real data** | Gauge-anchored per-block NEES and NIS beside ATE on V1_01, MH_05, V2_03; NEES about dof | `vio_euroc.cpp` prints NEES and NIS | **warn** <Issue id={212} />, <Issue id={365} /> |
+| E5 | RPE | Below 5% of distance travelled | reported, not asserted | **warn** <Issue id={212} /> |
+| E6 | Mixed-precision presets on real data | No divergence for any shipped stage-type preset; ATE and NEES per preset | `vio_pipeline` EuRoC runs | manual |
+| E7 | Sanitizers on a real replay | ASan and UBSan clean end to end | run by hand | **missing** in CI <Issue id={561} /> |
+| E8 | Latency | Real-time factor 1.0× or better (now 0.10×, p50 506 ms); synthetic budget 75 ms double, 50 ms float | `vio_latency.cpp` | gated, informational <Issue id={213} /> |
+
+## F. Engineering hygiene
+
+| # | Requirement | Pass criterion | Status |
+|---|---|---|---|
+| F1 | Two or more compilers in CI, whole suite | GCC and Clang per-frame traces bit-identical; MSVC also runs | locked |
+| F2 | Portable test noise | Gaussian draws built from the raw engine output, so every platform sees the same realization for a seed | locked (the S10 controls) |
+| F3 | Refactors preserve bits | `bench_snapshot --compare --rel 0` over every output, worst difference 0; the EuRoC `run.jsonl` byte-identical, or a justified exemption of 1e-12 or less | locked |
+| F4 | Tools fail loudly | A missing output directory is an error, not a silent skip | locked |

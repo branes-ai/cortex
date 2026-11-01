@@ -1,0 +1,85 @@
+---
+title: "VIO from First Principles: Failure Modes and the Regression Suite"
+description: How cortex got its VIO pipeline working — every failure in the order it was found, how each was diagnosed and fixed, the symptom-to-cause signatures, and the regression suite a new pipeline is certified against.
+sidebar:
+  label: "Overview: How to Use This"
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+import Issue from '@site/components/Issue.astro';
+
+This section tells how cortex got its visual-inertial odometry working: every defect,
+investigation and fix along the way, as one story. It is written for an engineer who has to
+**build a VIO pipeline from first principles, or certify a new one**. Most of what went wrong
+here goes wrong in any MSCKF-style pipeline, and a unit-test suite that passes doesn't catch it.
+
+<CardGrid>
+  <Card title="The storyline" icon="open-book">
+    [What broke, in the order we found it](storyline.mdx): what each failure looked like, the
+    measurement that decided its cause, and how it was fixed.
+  </Card>
+  <Card title="Diagnostic signatures" icon="magnifier">
+    [A symptom → cause table and twenty pitfalls](signatures.mdx), so the next person recognizes a
+    failure on sight.
+  </Card>
+  <Card title="The regression suite" icon="approve-check">
+    [Every functional test a VIO pipeline must pass](regression-suite.mdx), with its pass
+    criterion, the test that implements it here, and whether it is locked in CI.
+  </Card>
+</CardGrid>
+
+## The main lesson
+
+Over about six months, **three results that looked solid turned out to be artifacts of the
+test setup**: a compiler "bug" that was an unsequenced random draw, a filter "inconsistency" that
+was a velocity step in the synthetic world, and a "consistent" control that fed the filter exact
+sensors. Each time, the filter was blamed first. The storyline states every revision next to the
+claim it revises, because how a wrong conclusion was reached is as useful as the right one.
+
+The other lessons, in one line each:
+
+- **Synthetic unit tests are necessary and nowhere near sufficient.** When the VIO epic closed,
+  every part was unit-tested and nothing had run on real data. The first real run was off by 26 km.
+- **ATE hides over-confidence.** A filter can be accurate to 30 cm with a covariance a hundred
+  times too small. Report NEES and NIS beside ATE, always.
+- **Measure before fixing; ship candidates default-off.** Several textbook fixes made things worse
+  once they were measured end to end.
+
+## Vocabulary
+
+The stages follow the [canonical pipeline](../pipeline/canonical-pipeline.md), whose contracts are
+described one page per stage in the [VIO Pipeline](../pipeline/overview.mdx) section.
+
+| Stage | Role | Stage | Role |
+|---|---|---|---|
+| S0 | [sensor models](../pipeline/stages/s0-sensor-models.mdx) | S6a | Jacobians |
+| S1 | [initialization](../pipeline/stages/s1-initialization.mdx) | S6b | null-space projection |
+| S2 | [IMU propagation](../pipeline/stages/s2-imu-propagation.mdx) | S6c | compression |
+| S3 | [clone augmentation](../pipeline/stages/s3-augmentation.mdx) | S6d | gating |
+| S4 | [visual front end](../pipeline/stages/s4-frontend.mdx) | S6e | [EKF update](../pipeline/stages/s6-msckf-update.mdx) |
+| S5 | [triangulation](../pipeline/stages/s5-triangulation.mdx) | S7/S8 | SLAM features, zero-velocity update (not implemented) |
+| S9 | [marginalization](../pipeline/stages/s9-marginalization.mdx) | S10 | [online calibration](../pipeline/stages/s10-online-calibration.mdx) |
+
+There are two backends:
+
+- **Body-frame:** `MsckfBackend`, an MSCKF whose error state is expressed in the body frame.
+- **R-IEKF:** `MsckfInvariantBackend` / `InvariantVioBackend`, a right-invariant EKF on SE₂(3).
+
+The metrics (ATE, RPE, NEES, NIS) are defined on [Reading the Metrics](../pipeline/metrics.mdx).
+
+## Where it stands (2026-11-01)
+
+| Area | State |
+|---|---|
+| Body-frame filter | Accurate on EuRoC (ATE 0.27–0.76 m) but over-confident there (NEES/dof 43–436) and on the synthetic world under matched noise (median pose NEES 26 against 6). The mechanism is the yaw gauge leak in S2/S3; its share of the EuRoC NEES isn't attributed yet. It stays the EuRoC accuracy reference. |
+| R-IEKF | Consistent on the synthetic world under noise, including slow starts (21 seeds, full NEES 0.55–1.84). **Less accurate on EuRoC** than the body-frame filter (V1_01 1.31 m against 0.29 m), and its EuRoC NEES verdict is open. Closing that gap is the central open problem. |
+| Initialization | Robust with static init. Dynamic init is limited by excitation and has open SfM defects. |
+| Real time | Real-time factor about 0.10×. |
+
+<Aside type="note" title="Provenance">
+  Every number in this section comes from an issue or a pull request, cited next to it as a
+  link such as <Issue id={212} />. The issues hold the measurements, the probes and the
+  discussion; this section holds the story that connects them. The live status of each open
+  thread is on [Engineering Status](../pipeline/engineering-status.mdx), and the tracking issue
+  for this section is <Issue id={552} />.
+</Aside>
