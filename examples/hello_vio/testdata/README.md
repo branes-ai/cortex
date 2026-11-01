@@ -1,7 +1,9 @@
 # hello_vio test fixtures
 
-Both fixtures use the **real** EuRoC MAV `cam0/sensor.yaml` and
-`imu0/sensor.yaml` (calibration only), in the ASL directory layout.
+Both fixtures use the EuRoC MAV's published cam0 and IMU calibration, in
+`cam0/sensor.yaml` and `imu0/sensor.yaml` files that cortex writes in the ASL
+layout. The dataset's own files are not copied: its terms are non-commercial,
+so only the calibration values are quoted, as facts (docs/adr/0001).
 
 - `mav0/`: no measurements (header-only CSVs). `ctest -R hello_vio.smoke`
   checks the YAML → SDK-struct mapping and the estimator lifecycle.
