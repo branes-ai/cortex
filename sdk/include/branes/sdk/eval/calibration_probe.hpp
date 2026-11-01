@@ -21,10 +21,19 @@
 //   2. End-to-end R-inflation sweep — on the synthetic world with PERFECT
 //      calibration and clean sensors, sweep the measurement noise R and find
 //      the factor (if any) that brings pose NEES to dof, then compare it to the
-//      1° calibration budget. Finding (#537): the backend is NOT over-confident
-//      here (NEES 0.04 at R×1, below dof), so no R-scale is needed. The NEES ≈ 43
-//      once measured here came from the world's warm-up velocity step, not from
-//      the filter; the EuRoC over-confidence (#212) is real-data evidence only.
+//      1° calibration budget. The sensors are EXACT and the assumed R (4.6 px)
+//      is pessimistic, so its NEES 0.04 at R×1 (#537) says only that the world
+//      is self-consistent; it says nothing about consistency under noise (#551).
+//      The NEES ≈ 43 once measured here came from the world's warm-up velocity
+//      step (#475), not from the filter.
+//
+//   3. Matched-noise control (#551) — the same backend with camera and IMU noise
+//      injected at exactly the σ's it assumes, the NEES split into roll/pitch,
+//      yaw and position (world frame). Finding: the body-frame MSCKF is
+//      over-confident here. Yaw is unobservable, yet its σ collapses from the
+//      prior within ~2 s while the yaw error grows: spurious information in a
+//      gauge direction, the #212 leak, which spills into roll/pitch through
+//      their correlation. The R-IEKF on the same kind of noise is consistent.
 //
 // Native units: pixels (induced reprojection error), × (R-inflation factor),
 // NEES (dimensionless, target = dof). Drives the REAL backend on the REAL
@@ -41,6 +50,8 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -113,6 +124,13 @@ struct CalibRun {
     T nees = T{0};
     T ate = T{0};
     std::size_t frames = 0;
+    // The same pose NEES split by direction, with attitude in the WORLD frame so
+    // that yaw (about gravity, unobservable) separates from roll/pitch.
+    T nees_rp = T{0};   ///< roll/pitch, target 2
+    T nees_yaw = T{0};  ///< yaw, target 1
+    T nees_pos = T{0};  ///< position, target 3 (gauge: σ stays near its prior)
+    T yaw_sigma_first = T{0};  ///< world-yaw σ at the first initialized frame (rad)
+    T yaw_sigma_last = T{0};   ///< … at the last frame; a consistent filter never lowers it
 };
 
 template <math::Scalar T>
@@ -135,7 +153,24 @@ run_with_calib(const SyntheticData<T>& w, const SO3<T>& R_ic, const Vec3<T>& p_i
     using std::sqrt;
 
     CalibRun<T> out;
-    T nees_sum = T{0}, sq_sum = T{0};
+    T nees_sum = T{0}, sq_sum = T{0}, rp_sum = T{0}, yaw_sum = T{0}, pos_sum = T{0};
+    // eᵀ P⁻¹ e over the listed components of a 6-vector.
+    const auto nees_of = [](const DynMat<T>& P6, const DynMat<T>& e6, std::span<const std::size_t> c) {
+        const std::size_t n = c.size();
+        DynMat<T> Ps(n, n), es(n, 1);
+        for (std::size_t i = 0; i < n; ++i) {
+            es(i, 0) = e6(c[i], 0);
+            for (std::size_t j = 0; j < n; ++j)
+                Ps(i, j) = P6(c[i], c[j]);
+            Ps(i, i) += T(1e-12);
+        }
+        const DynMat<T> x = msckf::spd_solve(Ps, es);
+        T v = T{0};
+        for (std::size_t i = 0; i < n; ++i)
+            v += es(i, 0) * x(i, 0);
+        return v;
+    };
+    constexpr std::size_t kAll[6] = {0, 1, 2, 3, 4, 5}, kRp[2] = {0, 1}, kYaw[1] = {2}, kP[3] = {3, 4, 5};
     std::size_t imu_idx = 0;
     for (std::size_t fi = 0; fi < w.frames.size(); ++fi) {
         const double t = w.frames[fi].t;
@@ -152,25 +187,37 @@ run_with_calib(const SyntheticData<T>& w, const SO3<T>& R_ic, const Vec3<T>& p_i
         sq_sum += dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2];
 
         // 6-DoF pose error: θ = Log(R_estᵀ R_gt) (right perturbation), p = p_gt − p_est.
+        // Rotated to the world frame (θ_w = R_est·θ, P_w = J P Jᵀ) for the split.
+        const auto Rm = ns.T_world_imu.rotation().matrix();
         const Vec3<T> th = (ns.T_world_imu.rotation().inverse() * w.gt[fi].R).log();
-        DynMat<T> e(6, 1);
+        const DynMat<T> P = st.covariance();
+        DynMat<T> e(6, 1), P6(6, 6), J(6, 6);
         for (std::size_t i = 0; i < 3; ++i) {
             e(i, 0) = th[i];
             e(3 + i, 0) = gp[i] - ep[i];
+            J(3 + i, 3 + i) = T{1};
+            for (std::size_t j = 0; j < 3; ++j)
+                J(i, j) = Rm(i, j);
         }
-        const DynMat<T> P = st.covariance();
-        DynMat<T> P6(6, 6);
         for (std::size_t i = 0; i < 6; ++i)
             for (std::size_t j = 0; j < 6; ++j)
                 P6(i, j) = P(idx[i], idx[j]);
-        for (std::size_t i = 0; i < 6; ++i)
-            P6(i, i) += T(1e-12);
-        const DynMat<T> Pe = msckf::spd_solve(P6, e);
-        T nees = T{0};
-        for (std::size_t i = 0; i < 6; ++i)
-            nees += e(i, 0) * Pe(i, 0);
-        nees_sum += nees;
+        const DynMat<T> ew = msckf::mul(J, e);
+        const DynMat<T> Pw = msckf::mul(msckf::mul(J, P6), msckf::transpose(J));
+        nees_sum += nees_of(Pw, ew, kAll);
+        rp_sum += nees_of(Pw, ew, kRp);
+        yaw_sum += nees_of(Pw, ew, kYaw);
+        pos_sum += nees_of(Pw, ew, kP);
+        out.yaw_sigma_last = sqrt(Pw(2, 2));
+        if (out.frames == 0)
+            out.yaw_sigma_first = out.yaw_sigma_last;
         ++out.frames;
+    }
+    if (out.frames) {
+        const T n = static_cast<T>(out.frames);
+        out.nees_rp = rp_sum / n;
+        out.nees_yaw = yaw_sum / n;
+        out.nees_pos = pos_sum / n;
     }
     out.nees = out.frames ? nees_sum / static_cast<T>(out.frames) : T{0};
     out.ate = out.frames ? sqrt(sq_sum / static_cast<T>(out.frames)) : T{0};
@@ -230,6 +277,45 @@ template <math::Scalar T>
         }
     }
     return out;
+}
+
+// ── S10.3  Matched-noise control (#551) ───────────────────────────────────
+
+/// The control S10.2 is not: the default synthetic world with camera noise of
+/// `pixel_sigma` px on every observation and IMU white noise at `VioConfig`'s
+/// densities, and the backend assuming exactly those σ's, with perfect
+/// calibration. A consistent filter gives pose NEES ≈ 6 (roll/pitch ≈ 2, yaw ≈ 1,
+/// position ≈ 3) and never lowers its yaw σ, since yaw is unobservable.
+/// Deterministic in `seed`.
+template <math::Scalar T>
+[[nodiscard]] calib_detail::CalibRun<T>
+matched_noise_control(std::uint32_t seed, T pixel_sigma = T{1}, T onset_s = SyntheticConfig<T>{}.onset_s) {
+    using std::sqrt;
+    SyntheticConfig<T> scfg;
+    scfg.onset_s = onset_s;
+    auto w = generate_world<T>(scfg);
+    const VioConfig vc;
+    const T dt = T{1} / scfg.imu_rate_hz;
+    const T gyro_sigma = static_cast<T>(vc.gyro_noise_density) / sqrt(dt);
+    const T accel_sigma = static_cast<T>(vc.accel_noise_density) / sqrt(dt);
+    std::mt19937 rng(seed);
+    std::normal_distribution<T> nd(T{0}, T{1});
+    // Each draw is its own statement: argument evaluation order is unspecified (#437).
+    for (auto& m : w.imu)
+        for (std::size_t k = 0; k < 3; ++k) {
+            const T a = nd(rng);
+            const T b = nd(rng);
+            m.angular_velocity[k] += gyro_sigma * a;
+            m.linear_acceleration[k] += accel_sigma * b;
+        }
+    for (auto& f : w.frames)
+        for (auto& o : f.obs) {
+            const T a = nd(rng);
+            const T b = nd(rng);
+            o.u += pixel_sigma * a;
+            o.v += pixel_sigma * b;
+        }
+    return calib_detail::run_with_calib(w, w.R_imu_cam, w.p_imu_cam, pixel_sigma / w.camera.fx());
 }
 
 }  // namespace branes::sdk::eval
