@@ -72,7 +72,7 @@ The metrics (ATE, RPE, NEES, NIS) are defined on [Reading the Metrics](../pipeli
 | Area | State |
 |---|---|
 | Body-frame filter | Accurate on EuRoC (ATE 0.27–0.76 m) but over-confident there (NEES/dof 43–436) and on the synthetic world under matched noise (median pose NEES 26 against 6). The mechanism is the yaw gauge leak in S2/S3; its share of the EuRoC NEES isn't attributed yet. It stays the EuRoC accuracy reference. |
-| R-IEKF | Consistent on the synthetic world under noise: normalized full NEES 0.55–1.84 over 21 seeds at the default onset, and 0.39–1.88 over 21 seeds with a slow 2 s start. **Less accurate on EuRoC** than the body-frame filter (V1_01 1.31 m against 0.29 m), and its EuRoC NEES verdict is open. Closing that gap is the central open problem. |
+| R-IEKF | Consistent on the synthetic world under noise: normalized full NEES 0.56–1.84 over 21 seeds at the default onset (<Issue id={547} />), and 0.39–1.88 over 21 seeds with a slow 2 s start (<Issue id={548} />). **Less accurate on EuRoC** than the body-frame filter (V1_01 1.31 m against 0.29 m, <Issue id={429} />), and its EuRoC NEES verdict is open. Closing that gap is the central open problem. |
 | Initialization | Robust with static init. Dynamic init is limited by excitation and has open SfM defects. |
 | Real time | Real-time factor about 0.10×. |
 
