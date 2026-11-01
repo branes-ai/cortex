@@ -59,12 +59,17 @@ Because gravity has zero horizontal components, **static accelerometer readings 
 
 If the vehicle starts in motion (e.g., hand-launched or already flying), static gravity-leveling is impossible because world-frame acceleration $\mathbf{a}_{\text{world}} \neq \mathbf{0}$. S1 must perform a **Visual-Inertial Alignment** over a short sliding window (usually 1 to 2 seconds) to find metric scale.
 
-1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle-adjustment to recover a **set of relative camera translations $\mathbf{p}_{\text{ci}}$ up to a scale factor $s$**.
-2.  **IMU Preintegration**: The IMU Simple-integrated velocities and positions are double-integrated over the same intervals to compute relative displacement estimates $\Delta \mathbf{p}_{\text{imu},i}$.
-3.  **Linear Scale Alignment**: We set up a linear system matching the visual translations to the double-integrated IMU displacements, solving for the **metric scale $s$, initial velocities $\mathbf{v}_i$, and gravity vector $\mathbf{g}_W$**:
+![S1 alignment diagram, showing the matching of relative visual trajectories, recovered via Structure from Motion up to scale and multiplied by the scale factor s, to metric trajectories double-integrated from raw IMU accelerometer readings.](../../assessments/figures/pipeline/initialization_alignment.svg)
+
+1.  **Structure from Motion (SfM)**: The visual frontend tracks features over multiple frames and runs a bundle-adjustment to recover the **keyframe poses $(\mathbf{R}_i, \mathbf{p}_i)$, with positions known only up to a scale factor $s$**.
+2.  **IMU Preintegration**: The IMU Simple-integrated velocities and positions are double-integrated over the same intervals to compute the metric displacement and velocity change $\Delta \mathbf{p}$ and $\Delta \mathbf{v}$ between consecutive keyframes.
+3.  **Linear Scale Alignment**: We set up a linear system matching the visual translations to the double-integrated IMU displacements, solving for the **metric scale $s$, the per-keyframe velocities $\mathbf{v}_i$, and the gravity vector $\mathbf{g}$**. The scale multiplies the SfM displacement; the IMU terms are already metric. For each consecutive keyframe pair $(i, j)$ separated by $\Delta t$:
 
 $$
-\mathbf{R}_{W}^{c_0} \ccdot \mathbf{p}_{c_i} = s \ccdot \Delta \mathbf{p}_{\text{imu},i} + \mathbf{v}_0 \Delta t_i + \cfrac{1}{2} \mathbf{g}_W \Delta t_i^2
+\begin{aligned}
+s\,(\mathbf{p}_j - \mathbf{p}_i) &= \mathbf{v}_i \Delta t - \tfrac{1}{2} \mathbf{g} \Delta t^2 + \mathbf{R}_i \Delta \mathbf{p} \\
+\mathbf{v}_j - \mathbf{v}_i &= -\mathbf{g} \Delta t + \mathbf{R}_i \Delta \mathbf{v}
+\end{aligned}
 $$
 
 ### The Scale-Observability Cliff
