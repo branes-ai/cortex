@@ -56,6 +56,19 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.5](https://github.com/branes-ai/cortex/compare/v0.83.4...v0.83.5) (2026-11-01)
+
+
+### Build System
+
+* docs-kit v0.6.0 for the docs site ([#558](https://github.com/branes-ai/cortex/issues/558)) ([e237d85](https://github.com/branes-ai/cortex/commit/e237d856169f34faed13059ddbd215e82710b3fa))
+
+
+### Documentation
+
+* **adr:** add the third-party data rule; quote EuRoC's calibration as facts ([#559](https://github.com/branes-ai/cortex/issues/559)) ([8c6f432](https://github.com/branes-ai/cortex/commit/8c6f4324a001d7f854e7366585df484372a59ce5))
+* **vio:** add the vio from first principles section from the [#552](https://github.com/branes-ai/cortex/issues/552) storyline ([#562](https://github.com/branes-ai/cortex/issues/562)) ([7b5632d](https://github.com/branes-ai/cortex/commit/7b5632deb1938a2d5c75b099945c7c0d28dc6efc))
+
 ## [0.83.4](https://github.com/branes-ai/cortex/compare/v0.83.3...v0.83.4) (2026-11-01)
 
 
