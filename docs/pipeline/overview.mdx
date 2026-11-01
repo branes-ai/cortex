@@ -36,6 +36,8 @@ Without the IMU, a monocular camera cannot tell the difference between moving $1
 
 The most common failure mode in VIO engineering is **coordinate frame misalignment**. A VIO pipeline is a "mathematical glass house"—if any of the coordinate relationships are defined inconsistently, the entire estimator collapses quadratically.
 
+![VIO coordinate frames map, showing the spatial transformations from the World frame (gravity-aligned) to the IMU/Body frame, and from the IMU frame to the Camera frame via the rigid extrinsics R_ic and p_ic.](../assessments/figures/pipeline/coordinate_frames.svg)
+
 Cortex enforces a rigid, unified convention across all eleven stages:
 *   **World Frame ($W$)**: The global reference frame. Gravity is aligned with the global z-axis: $\mathbf{g}_W = [0, 0, -9.81]^T$. Yaw (heading) and global position are **unobservable** in this frame.
 *   **IMU Frame ($I$)**: The body frame of the vehicle. Raw acceleration $\mathbf{a}_{\text{imu}}$ and angular rate $\boldsymbol{\omega}_{\text{imu}}$ are sensed relative to this frame.

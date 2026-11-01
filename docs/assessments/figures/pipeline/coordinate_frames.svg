@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 520" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" role="img" aria-labelledby="title desc">
+  <title id="title">VIO coordinate frames</title>
+  <desc id="desc">The three frames of the VIO pipeline. The world frame W is gravity-aligned, with gravity along minus z; its yaw and origin are unobservable. The IMU or body frame I is where the accelerometer and gyroscope measure; its pose in the world, R_wi and p_wi, is the estimated state and changes every frame. The camera frame C has its optical axis along plus z; it is fixed to the IMU by the rigid extrinsics R_ic and p_ic, which are calibrated (EuRoC publishes them as T_BS) and optionally refined online by S10. A world point maps into the camera frame as p_c = R_ic transpose times (R_wi transpose times (p_w minus p_wi) minus p_ic).</desc>
+
+  <style>
+    /* SVGs embedded via &lt;img&gt; cannot inherit the page's text colour, so
+       currentColor would fall back to black and vanish on a dark site theme.
+       Set the colour (which every currentColor fill/stroke inherits) and a
+       self-contained background here, switched by the viewer's colour scheme. */
+    svg { color: #1a1a1a; }
+    .theme-bg { fill: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      svg { color: #e6e6e9; }
+      .theme-bg { fill: #1c1e26; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ef4444"/>
+    </marker>
+  </defs>
+
+  <rect class="theme-bg" x="0" y="0" width="820" height="520"/>
+
+  <!-- ===== Title ===== -->
+  <text x="410" y="30" text-anchor="middle" font-size="17" font-weight="700" fill="currentColor">VIO coordinate frames — world, IMU (body), camera</text>
+  <text x="410" y="50" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.7">R_ab maps vectors from frame b into frame a; p_ab is the origin of b expressed in a</text>
+
+  <!-- ===== World frame W ===== -->
+  <g stroke="currentColor" stroke-width="1.8" fill="none">
+    <line x1="140" y1="330" x2="140" y2="240" marker-end="url(#arrow)"/>
+    <line x1="140" y1="330" x2="222" y2="362" marker-end="url(#arrow)"/>
+    <line x1="140" y1="330" x2="218" y2="300" marker-end="url(#arrow)"/>
+  </g>
+  <circle cx="140" cy="330" r="3.5" fill="currentColor"/>
+  <text x="148" y="246" font-size="12" fill="currentColor">z_W (up)</text>
+  <text x="226" y="370" font-size="12" fill="currentColor">x_W</text>
+  <text x="222" y="300" font-size="12" fill="currentColor">y_W</text>
+  <!-- gravity -->
+  <line x1="72" y1="240" x2="72" y2="320" stroke="#ef4444" stroke-width="2.2" marker-end="url(#arrow-red)"/>
+  <text x="64" y="232" text-anchor="middle" font-size="12" fill="#ef4444" font-weight="600">g_W</text>
+  <text x="72" y="340" text-anchor="middle" font-size="10.5" fill="#ef4444">(0, 0, −9.81)</text>
+  <text x="140" y="400" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">World W</text>
+  <text x="140" y="417" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">gravity-aligned</text>
+  <text x="140" y="432" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">yaw and origin unobservable</text>
+  <text x="140" y="447" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">(the 4-DoF gauge)</text>
+
+  <!-- ===== IMU / body frame I (tilted) ===== -->
+  <rect x="380" y="208" width="64" height="44" rx="6" transform="rotate(-14 412 230)" fill="#3b82f6" fill-opacity="0.10" stroke="#3b82f6" stroke-width="1.6"/>
+  <g stroke="currentColor" stroke-width="1.8" fill="none">
+    <line x1="412" y1="230" x2="392" y2="150" marker-end="url(#arrow)"/>
+    <line x1="412" y1="230" x2="492" y2="214" marker-end="url(#arrow)"/>
+    <line x1="412" y1="230" x2="470" y2="268" marker-end="url(#arrow)"/>
+  </g>
+  <circle cx="412" cy="230" r="3.5" fill="currentColor"/>
+  <text x="372" y="150" font-size="12" fill="currentColor" text-anchor="end">z_I</text>
+  <text x="497" y="214" font-size="12" fill="currentColor">x_I</text>
+  <text x="474" y="280" font-size="12" fill="currentColor">y_I</text>
+  <text x="412" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">IMU / body I</text>
+  <text x="412" y="129" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">a_imu and ω_imu are measured here</text>
+
+  <!-- W -> I : estimated pose -->
+  <path d="M 150 322 C 220 260, 300 230, 400 232" stroke="#3b82f6" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#arrow-blue)"/>
+  <text x="240" y="178" text-anchor="middle" font-size="12.5" fill="#3b82f6" font-weight="700">(R_wi, p_wi)</text>
+  <text x="240" y="194" text-anchor="middle" font-size="11" fill="#3b82f6">the estimated state:</text>
+  <text x="240" y="208" text-anchor="middle" font-size="11" fill="#3b82f6">changes every frame</text>
+
+  <!-- ===== Camera frame C ===== -->
+  <path d="M 650 292 L 690 276 L 690 324 L 650 308 Z" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1.6"/>
+  <rect x="626" y="288" width="24" height="24" rx="3" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1.6"/>
+  <g stroke="currentColor" stroke-width="1.8" fill="none">
+    <line x1="638" y1="300" x2="790" y2="300" marker-end="url(#arrow)"/>
+    <line x1="638" y1="300" x2="638" y2="380" marker-end="url(#arrow)"/>
+    <line x1="638" y1="300" x2="596" y2="336" marker-end="url(#arrow)"/>
+  </g>
+  <circle cx="638" cy="300" r="3.5" fill="currentColor"/>
+  <text x="796" y="304" font-size="12" fill="currentColor" text-anchor="end" dy="-10">z_C</text>
+  <text x="748" y="322" text-anchor="middle" font-size="11" fill="currentColor">optical axis (depth)</text>
+  <text x="646" y="384" font-size="12" fill="currentColor">y_C (image down)</text>
+  <text x="590" y="350" text-anchor="end" font-size="12" fill="currentColor">x_C (image right)</text>
+  <text x="680" y="418" text-anchor="middle" font-size="13" font-weight="700" fill="currentColor">Camera C</text>
+  <text x="680" y="435" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.8">pixels are projections of p_c</text>
+
+  <!-- I -> C : rigid extrinsics -->
+  <line x1="420" y1="234" x2="628" y2="296" stroke="#f59e0b" stroke-width="2.4" marker-end="url(#arrow-amber)"/>
+  <text x="650" y="192" text-anchor="middle" font-size="12.5" fill="#f59e0b" font-weight="700">(R_ic, p_ic)</text>
+  <text x="650" y="208" text-anchor="middle" font-size="11" fill="#f59e0b">rigid extrinsics: calibrated</text>
+  <text x="650" y="222" text-anchor="middle" font-size="11" fill="#f59e0b">(EuRoC's T_BS), refined by S10</text>
+
+  <!-- ===== Equations ===== -->
+  <rect x="40" y="462" width="740" height="46" rx="8" fill="currentColor" fill-opacity="0.05" stroke="currentColor" stroke-opacity="0.35" stroke-width="1"/>
+  <text x="60" y="481" font-size="12" fill="currentColor"><tspan font-weight="700">Camera in world:</tspan>  p_wc = p_wi + R_wi · p_ic</text>
+  <text x="420" y="481" font-size="12" fill="currentColor">R_wc = R_wi · R_ic</text>
+  <text x="60" y="499" font-size="12" fill="currentColor"><tspan font-weight="700">World point in camera:</tspan>  p_c = R_icᵀ · ( R_wiᵀ · (p_w − p_wi) − p_ic )</text>
+</svg>
