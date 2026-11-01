@@ -237,12 +237,15 @@ inline const StageInfo kS10{
       "px, ×",
       "1° extrinsic uncertainty ⇒ ~R×4, matching the empirical #212 fix"},
      {"induced reprojection vs assumed pixel σ", "px", "calib error (~8px @1°) exceeds the filter's assumed ~4.6px"},
-     {"pose NEES with perfect calibration",
+     {"pose NEES with perfect calibration, exact sensors",
       "—",
-      "the control: below dof on the synthetic world (#537), so not structural"},
+      "below dof (#537): the world is self-consistent; uninformative about noise (#551)"},
+     {"matched-noise pose NEES, split rp / yaw / pos",
+      "—",
+      "the consistency control (#551): body-frame over-confident; yaw σ falls (the #212 leak)"},
      {"R-scale that restores NEES≈dof", "×", "0 when none is needed; else the measurement-noise deficit"},
      {"calibration-state NEES (if estimated online)", "—", "the principled fix — OpenVINS/MINS-style online calib"}},
-    {"calib_budget.csv", "calib_r_sweep.csv"},
+    {"calib_budget.csv", "calib_r_sweep.csv", "calib_noise_control.csv"},
     "default: no calibration states, optional extrinsic-rotation term in R (calib_rot_sigma); "
     "optional: camera↔IMU extrinsic states, 6/camera (VioConfig::estimate_extrinsics, #332); "
     "intrinsics and time offset are not estimated",

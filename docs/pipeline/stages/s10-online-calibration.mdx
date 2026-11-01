@@ -1,6 +1,6 @@
 ---
 title: S10 — Online Calibration
-description: Camera–IMU extrinsics, intrinsics, and time offset as filter state — and the measured evidence that treating them as perfectly known is a leading source of the #212 over-confidence.
+description: Camera–IMU extrinsics, intrinsics, and time offset as filter state — what treating them as perfectly known costs, and the matched-noise control that shows the body-frame over-confidence does not need it (#551).
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -10,8 +10,9 @@ The camera and IMU are two rigidly-attached sensors. Fusing them requires knowin
 `T_CI`), how the lens maps rays to pixels (intrinsics + distortion), and how their
 clocks line up (the time offset `t_d`). S10 is about whether the filter treats
 those numbers as *estimated state with uncertainty* — or as *perfectly known
-constants*. The cortex filter does the latter, and this page is the measured case
-that doing so is a leading contributor to the filter being over-confident.
+constants*. The cortex filter does the latter by default. This page measures what
+that costs, and shows with a matched-noise control that the body-frame filter is
+over-confident even when the calibration is perfect.
 
 ## What it does
 
@@ -70,11 +71,11 @@ nearly **double** the assumed noise — for an `R`-inflation of ~**4×**. That n
 is not a coincidence: it's the same `R×4` the EuRoC troubleshooting found restores
 consistency.
 
-### 2. End-to-end R-inflation sweep — the perfect-calibration control
+### 2. End-to-end R-inflation sweep — the exact-sensor control
 
-On the synthetic world with **perfect calibration and clean sensors**, the backend
-is **not** over-confident: pose NEES sits below dof = 6 at `R`×1, and inflating the
-measurement-noise variance `R` only makes it more pessimistic:
+On the synthetic world with **perfect calibration and exact sensors**, pose NEES
+sits below dof = 6 at `R`×1, and inflating the measurement-noise variance `R` only
+makes it more pessimistic:
 
 | `R` scale | pose NEES (target 6) | ATE |
 |---|---|---|
@@ -89,10 +90,71 @@ This sweep once showed **NEES ≈ 43 at R×1** (ATE 0.63 m), almost exactly the 
 MH_05 value, and was read as the clean setup reproducing the real over-confidence.
 It was a synthetic artifact: the world left its warm-up with a ≈1 m/s velocity
 step that no accelerometer sample recorded (#475, fixed in #537). With the world
-corrected, the perfect-calibration control is not over-confident, so the EuRoC
-over-confidence (#212) needs something the clean world lacks: unmodeled
-calibration uncertainty (the budget above), process noise, low parallax, or the
-real-data clone drift that drives the yaw leak.
+corrected, NEES falls below dof.
+
+That low NEES says the world and the plumbing are self-consistent, and nothing
+more. The observations and the IMU are exact, while the filter assumes 4.6 px of
+pixel noise, so it is pessimistic by construction. An earlier version of this page
+read it as "the clean control is not over-confident", and concluded that the EuRoC
+over-confidence needs something the clean world lacks. What the clean world lacks
+is noise ([#551](https://github.com/branes-ai/cortex/issues/551)).
+
+### 3. Matched-noise control — the body-frame yaw leak (#551)
+
+`matched_noise_control(seed)` runs the same backend on the default synthetic world
+with **perfect calibration** and noise at exactly the σ's the filter assumes: 1 px
+on every observation (`camera_noise_normalized = 1/f`), and white IMU noise at
+`VioConfig`'s `gyro_noise_density` and `accel_noise_density`. It splits the pose
+NEES by direction, with attitude in the world frame so that yaw (about gravity)
+separates from roll/pitch, and records the yaw σ at the first and last frame.
+
+| seeds 1–10 | consistent | measured |
+|---|---|---|
+| pose NEES (6-DoF) | 6 | 9.0–5088, median 26 |
+| roll/pitch NEES | 2 | 2.9–129 (3–10 on 9 seeds) |
+| yaw NEES | 1 | 3.0–4463 (8 of 10 seeds above 6) |
+| position NEES | 3 | 1.0–142 (≤ 7.5 on 9 seeds) |
+| yaw σ, first → last frame | never falls | 0.16 → 0.006–0.020 rad |
+| ATE | — | 11–126 cm |
+
+Splitting the noise sources (seeds 1–5, `matched_noise_control(seed, 1, 0.25, imu_noise, camera_noise)`) isolates yaw:
+
+| noise | roll/pitch NEES | yaw NEES | position NEES |
+|---|---|---|---|
+| IMU only (exact camera) | 3.7–6.4 | **50–75** | 1.8–2.4 |
+| camera only | 3.5–6.7 | 3.0–74 | 1.1–3.1 |
+| both | 4.1–5.6 | 3.0–90 | 1.0–3.7 |
+
+**The body-frame MSCKF is over-confident under matched noise, with perfect
+calibration, and yaw carries most of it.** Global yaw is unobservable in VIO, so
+its σ can only grow, yet on every seed it falls about tenfold within the first few
+seconds. With IMU noise alone and exact observations, seed 3's yaw error grows to
+0.22 rad, about 300× what matched gyro noise integrates to over 14 s (≈ 6·10⁻⁴
+rad), so the updates themselves pull yaw. That is the signature of the
+observability leak of #212, reproduced here on a world with known truth for the
+first time. The magnitude is larger than the textbook linearization effect, so a
+body-frame Jacobian defect that adds to it is not ruled out. Roll/pitch are mildly
+over-confident as well (3–7 against 2). A 2° parallax gate does not help (pose
+NEES 66–91 on seeds 1, 3, 5).
+
+The R-IEKF on the same kind of noise is consistent (full NEES 0.55–1.83 over 21
+seeds, [#548](https://github.com/branes-ai/cortex/issues/548)), which is what it was
+built for ([#347](https://github.com/branes-ai/cortex/issues/347)). FEJ, the
+classical body-frame fix, was refuted earlier
+([#280](https://github.com/branes-ai/cortex/issues/280)). The body-frame filter stays
+the EuRoC accuracy reference until the R-IEKF runs on EuRoC
+([#365](https://github.com/branes-ai/cortex/issues/365)) and matches its ATE
+([#429](https://github.com/branes-ai/cortex/issues/429)).
+
+For this stage the control settles one thing: **calibration uncertainty is not
+needed to explain over-confidence**. A filter with perfect calibration is already
+over-confident under noise. The budget above remains a real, additional term on
+real data. The test `S10 matched-noise control: the body-frame MSCKF leaks
+information into yaw` (`tests/sdk/calibration_probe.cpp`) pins the signature on
+three seeds: yaw σ ends below a third of its first value, and the median pose NEES
+is above 12. A fix flips both checks. The noise is drawn by Box–Muller from raw
+`mt19937` output, because `std::normal_distribution` is implementation-defined and
+MSVC would otherwise draw a different realization for the same seed.
 
 ## Run the probe
 
@@ -109,12 +171,13 @@ cmake --build build -j$(nproc) --target s10_online_calibration
 
 ```text
 R-inflation @ 1deg ext, slow          4.1  x   induced 8.1px vs assumed 4.6px
-pose NEES with perfect calibration    0.036    below dof: the clean control is not over-confident
+matched-noise pose NEES, seed 3       103      rp 4.06 (2), yaw 89.8 (1), pos 3.66 (3)
+matched-noise yaw sigma, seed 3       0.019 rad  from 0.16 rad: unobservable, must not fall
 ```
 
 | Tool | Location | Purpose |
 |---|---|---|
-| Calibration probe | `tools/src/s10_online_calibration.cpp` + `eval/calibration_probe.hpp` | `noise_budget(...)` (pixels → `R` inflation) and `r_inflation_sweep()` (the NEES sweep) |
+| Calibration probe | `tools/src/s10_online_calibration.cpp` + `eval/calibration_probe.hpp` | `noise_budget(...)` (pixels → `R` inflation), `r_inflation_sweep()` (the exact-sensor NEES sweep) and `matched_noise_control(seed)` (the consistency control) |
 | Jacobian test | `tests/sdk/calib_jacobians.cpp` | finite-difference check of the online-calibration Jacobians |
 | Recovery test | `tests/sdk/calib_recovery.cpp` | online calibration drives a deliberately wrong extrinsic back to truth |
 
@@ -165,13 +228,12 @@ true error grows past 2 m. An ellipsoid the ground-truth marker escapes from *is
 the missing calibration uncertainty.
 
 <Aside type="caution" title="Status">
-  **Leading contributor — measured, not the whole story.** The analytic budget and
-  the end-to-end sweep agree that calibration uncertainty cleanly accounts for the
-  **`R×4` component** of the #212 over-confidence (1° extrinsic ≈ 8 px ≈ R×4, both
-  analytically and in magnitude). But R-*only* inflation needs ~**×32** to fully
-  restore NEES — more than ×4 — because the empirical MH_05 fix paired R×4 with
-  Q×10, so `R` alone has to do both jobs. **Calibration is one contributor; the
-  rest is process noise (Q) and the S5 no-parallax-gate effect.** The principled
+  **A contributor on real data, not the cause.** The analytic budget says
+  calibration uncertainty accounts for an **`R×4` component** on real data (1°
+  extrinsic ≈ 8 px ≈ R×4). But the matched-noise control shows the body-frame
+  filter over-confident with **perfect** calibration: the cause it exposes is the
+  yaw observability leak (#212, #551), which the R-IEKF (#347) removes by
+  construction. The principled
   fix is to **model** the uncertainty — estimate `T_CI`/`t_d` online
   (OpenVINS/MINS-style) or add a calibration term to `R` — not a blunt global
   `R`-scale. Tracked, with the full decomposition, on
