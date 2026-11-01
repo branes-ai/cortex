@@ -46,8 +46,8 @@ The pose stays at the origin while the estimator initializes (gravity
 direction, biases from a stationary window), then the trajectory starts
 moving. Timestamps are EuRoC's, in seconds.
 
-CI runs `hello_vio` on every build against `testdata/mav0/`: the real EuRoC
-`sensor.yaml` files with no frames (`ctest -R hello_vio.smoke`). That keeps
+CI runs `hello_vio` on every build against `testdata/mav0/`: EuRoC's published
+calibration in `sensor.yaml` files, and no frames (`ctest -R hello_vio.smoke`). That keeps
 the configuration path and the estimator lifecycle tested without a dataset
 download.
 

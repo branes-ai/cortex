@@ -4,7 +4,7 @@
 5 frames at 20 Hz of a smooth 160x120 texture shifting 1 px/frame, and 41
 static IMU samples at 200 Hz (gravity on +x as at a level EuRoC start, no
 rotation). Deterministic; stdlib only (zlib-written PNGs). The sensor.yaml
-files are copied from ../mav0 (the real EuRoC calibration).
+files are copied from ../mav0 (EuRoC's published calibration).
 
 Usage: python3 gen_frames_fixture.py   (run from this directory)
 """

@@ -11,7 +11,7 @@ ambiguous, the ADRs say what was intended.
 
 | ADR | Decision | Status |
 |---|---|---|
-| [0001](0001-third-party-license-compatibility.md) | Third-party license compatibility (MIT core; permissive deps only) | Accepted |
+| [0001](0001-third-party-license-compatibility.md) | Third-party license compatibility (MIT core; permissive deps only) | Accepted (amended) |
 | [0002](0002-no-gpl-clean-room-policy.md) | No GPL code for any purpose; clean-room from papers | Accepted (amended) |
 | [0003](0003-hybrid-sdk-header-only-operators-compiled-glue.md) | Hybrid SDK: header-only templated operators, compiled glue | Accepted |
 | [0004](0004-rm-allocates-dfa-compiler-schedules.md) | The Resource Manager allocates; the DFA compiler schedules | Accepted |

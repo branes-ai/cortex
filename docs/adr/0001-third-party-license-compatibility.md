@@ -1,6 +1,6 @@
 # ADR 0001 — Third-party license compatibility
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-01: third-party data and published facts)
 **Date:** 2026-05-21
 **Issue:** #12
 **Related:** [ADR-0002](0002-no-gpl-clean-room-policy.md), [ADR-0011](0011-dependencies-via-fetchcontent.md)
@@ -24,12 +24,17 @@
 
 No GPL / LGPL / AGPL / MPL / SSPL dependencies are accepted in this stack. The broader no-GPL policy (which also rules out GPL code as a reference or test oracle) is [ADR-0002](0002-no-gpl-clean-room-policy.md), from bootstrap plan judgment call #3.
 
+**Data is someone's work too.** Synthetic worlds, trajectories and fixtures made by cortex are its own. A third-party dataset or set of pretrained weights may be committed or fetched only under a license recorded here; data without one, or under a non-commercial or share-alike license (CC BY-NC, CC BY-SA, …), stays outside the repo. A dataset's published facts are not its data: calibration parameters, sensor specifications and results printed in a paper may be written into the repo's own files, with a citation to their source. A file copied from a dataset is the dataset's, and follows the rule above.
+
+EuRoC MAV, the dataset the VIO accuracy gates run on, is "In Copyright - Non-Commercial Use Permitted" ([ETH Research Collection](https://doi.org/10.3929/ethz-b-000690084)). cortex never commits or fetches its sequences: the tests and scripts read a copy the developer supplies (`CORTEX_EUROC_*`, `CORTEX_EUROC_ROOT`). Its cam0 and IMU calibration is quoted as published facts, from Burri et al., "The EuRoC micro aerial vehicle datasets" (IJRR, 2016), in cortex-written `sensor.yaml` files (`examples/hello_vio/testdata/`) and in the tests.
+
 ## Decisions
 
 1. **Keep cortex MIT-licensed.** No re-license needed; all chosen deps are compatible with MIT relicensing of the combined work.
 2. **Preserve a `THIRD_PARTY_LICENSES/` directory in release artifacts** (OCI container, Yocto image, source tarballs). The contents are populated automatically by a packaging step that copies each dep's `LICENSE` (and `NOTICE` where present) out of the FetchContent source dirs. Concrete implementation lands with issue #96 (Docker) and #98 (Yocto).
 3. **Apache-2.0 NOTICE handling.** Zenoh's `NOTICE` file must be copied verbatim into `THIRD_PARTY_LICENSES/zenoh/NOTICE`. If we ever modify Zenoh sources (e.g. for a custom transport), Apache-2.0 §4(b) requires us to add an attribution line — track that in a follow-up if/when we vendor a patched Zenoh.
-4. **No CLA requirement on external contributions** for now. Revisit if cortex becomes the target of patches from contributors whose employers require explicit copyright assignment.
+4. **Third-party data and weights** are committed or fetched only under a license recorded here; the rest stays outside the repo. Published facts (calibrations, specifications, a paper's results) may be quoted, with a citation.
+5. **No CLA requirement on external contributions** for now. Revisit if cortex becomes the target of patches from contributors whose employers require explicit copyright assignment.
 
 ## Reviewers
 
