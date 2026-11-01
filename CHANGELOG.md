@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.4](https://github.com/branes-ai/cortex/compare/v0.83.3...v0.83.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **sdk:** add a matched-noise s10 control; it exposes the body-frame yaw leak ([#555](https://github.com/branes-ai/cortex/issues/555)) ([0c29330](https://github.com/branes-ai/cortex/commit/0c29330adbccb921959d6431b3c12c201fd15885))
+
+
+### Documentation
+
+* **adr:** align the no-GPL policy with the other repos' ADRs ([#556](https://github.com/branes-ai/cortex/issues/556)) ([8072d08](https://github.com/branes-ai/cortex/commit/8072d081be0240be06accc4f4f39f17eec03defe))
+
 ## [0.83.3](https://github.com/branes-ai/cortex/compare/v0.83.2...v0.83.3) (2026-10-31)
 
 
