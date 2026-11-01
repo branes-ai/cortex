@@ -13,6 +13,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 namespace {
 namespace ev = branes::sdk::eval;
 using T = double;
@@ -41,11 +45,15 @@ TEST_CASE("S10 calibration noise budget: ~1deg extrinsic uncertainty ~ the empir
             ev::noise_budget<T>(0.0, 10.0, 0.0, 0.0, 10.0).ext_trans_px);
 }
 
-TEST_CASE("S10 end-to-end: with perfect calibration the backend is not over-confident", "[sdk][s10][calibration]") {
+TEST_CASE("S10 end-to-end: with perfect calibration and exact sensors the world is self-consistent",
+          "[sdk][s10][calibration]") {
     const auto sw = ev::r_inflation_sweep<T>();
     REQUIRE(sw.curve.size() >= 5);
-    // With PERFECT calibration and clean sensors the pose NEES is below the
-    // 6-DoF target (0.04 measured) and the pose tracks to centimetres.
+    // With PERFECT calibration and EXACT sensors the pose NEES is below the
+    // 6-DoF target (0.04 measured) and the pose tracks to centimetres. The
+    // assumed R (4.6 px) is pessimistic against zero noise, so this checks the
+    // world and the plumbing, not consistency under noise: that is the
+    // matched-noise control below (#551).
     REQUIRE(sw.curve.front().r_scale == 1.0);
     REQUIRE(sw.curve.front().nees < 6.0);
     REQUIRE(sw.curve.front().ate < 0.05);
@@ -57,4 +65,28 @@ TEST_CASE("S10 end-to-end: with perfect calibration the backend is not over-conf
     // The 1° calibration budget is a real fraction of that deficit (the R×4 part).
     REQUIRE(sw.budget_r_inflation_1deg > 3.0);
     REQUIRE(sw.budget_r_inflation_1deg < 6.0);
+}
+
+// #551: with camera and IMU noise matched to what the filter assumes, the
+// body-frame MSCKF is over-confident, and the cause is the yaw observability
+// leak (#212): yaw is unobservable, yet its σ collapses from the prior while the
+// error it should cover grows. This pins the defect as a characterization; a
+// fix (or the R-IEKF taking over as the reference, #347) flips both checks.
+TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information into yaw", "[sdk][s10][calibration]") {
+    std::vector<T> nees;
+    for (const std::uint32_t seed : {1u, 2u, 3u}) {
+        const auto r = ev::matched_noise_control<T>(seed);
+        INFO("seed " << seed << ": pose NEES " << r.nees << " (rp " << r.nees_rp << ", yaw " << r.nees_yaw << ", pos "
+                     << r.nees_pos << "), yaw sigma " << r.yaw_sigma_first << " -> " << r.yaw_sigma_last << " rad, ATE "
+                     << r.ate << " m");
+        REQUIRE(r.frames > 100);
+        CHECK(r.ate < 0.5);  // it still tracks: the defect is the covariance
+        // The leak signature: an unobservable direction gained information.
+        CHECK(r.yaw_sigma_last < r.yaw_sigma_first / 3);
+        // Position is gauge too, but its σ stays at the prior and is honest.
+        CHECK(r.nees_pos < 6.0);
+        nees.push_back(r.nees);
+    }
+    std::sort(nees.begin(), nees.end());
+    CHECK(nees[nees.size() / 2] > 12.0);  // median 6-DoF pose NEES; consistent ≈ 6
 }
