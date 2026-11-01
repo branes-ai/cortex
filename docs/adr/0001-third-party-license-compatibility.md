@@ -22,7 +22,7 @@
 | Zenoh-cpp / -c    | Apache-2.0 **or** EPL-2.0 (dual)| Yes (Apache-2.0 branch)     | **Preserve upstream `NOTICE` file** in distribution (Apache-2.0 §4 requirement). |
 | `cxx` (Rust crate)| MIT **or** Apache-2.0 (dual)    | Yes                         | Bundle MIT notice with the Rust component. |
 
-No GPL / LGPL / MPL / SSPL dependencies are accepted in this stack. The broader no-GPL-contact policy (which also rules out GPL code as a reference or test oracle) is [ADR-0002](0002-no-gpl-clean-room-policy.md), from bootstrap plan judgment call #3.
+No GPL / LGPL / AGPL / MPL / SSPL dependencies are accepted in this stack. The broader no-GPL policy (which also rules out GPL code as a reference or test oracle) is [ADR-0002](0002-no-gpl-clean-room-policy.md), from bootstrap plan judgment call #3.
 
 ## Decisions
 
@@ -33,4 +33,4 @@ No GPL / LGPL / MPL / SSPL dependencies are accepted in this stack. The broader 
 
 ## Reviewers
 
-When adding a new third-party dependency, the PR must update this table and the `THIRD_PARTY_LICENSES/` plan. Strong-copyleft licenses (GPL family, AGPL, SSPL) are rejected outright by the no-GPL policy.
+When adding a new third-party dependency, the PR must update this table and the `THIRD_PARTY_LICENSES/` plan. GPL, LGPL, AGPL, MPL and SSPL are rejected outright by the no-GPL policy ([ADR-0002](0002-no-gpl-clean-room-policy.md)). The table covers what cortex ships, the code that builds it and the tests, not the docs site's toolchain.
