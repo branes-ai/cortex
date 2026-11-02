@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.7](https://github.com/branes-ai/cortex/compare/v0.83.6...v0.83.7) (2026-11-02)
+
+
+### Tests
+
+* **sim:** assert the synthetic world's imu integrates to its ground truth ([#567](https://github.com/branes-ai/cortex/issues/567)) ([fd7d28a](https://github.com/branes-ai/cortex/commit/fd7d28a4c5d84eb907da60e0579e5f6526110012)), closes [#560](https://github.com/branes-ai/cortex/issues/560)
+
 ## [0.83.6](https://github.com/branes-ai/cortex/compare/v0.83.5...v0.83.6) (2026-11-02)
 
 
