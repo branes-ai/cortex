@@ -56,6 +56,18 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.8](https://github.com/branes-ai/cortex/compare/v0.83.7...v0.83.8) (2026-11-02)
+
+
+### Bug Fixes
+
+* **sdk,eval:** give the synthetic world the euroc cam0 p2, not 1000x it ([#571](https://github.com/branes-ai/cortex/issues/571)) ([62eb3f2](https://github.com/branes-ai/cortex/commit/62eb3f21cce96a9b222e74a0d3f7f19c347fb06a))
+
+
+### Build System
+
+* **deps:** keep fetchcontent updates connected so pin bumps reach existing build dirs ([#569](https://github.com/branes-ai/cortex/issues/569)) ([9972329](https://github.com/branes-ai/cortex/commit/997232941be65e921894cff08d4edffc8b815811))
+
 ## [0.83.7](https://github.com/branes-ai/cortex/compare/v0.83.6...v0.83.7) (2026-11-02)
 
 
