@@ -255,3 +255,26 @@ TEST_CASE("A1: an unrecorded velocity step (#475) fails the dead-reckoning check
     CHECK(dr.max_pos_err > 1.0);
     CHECK(dr.max_dv_residual > 10 * dr.one_sample_dv);
 }
+
+// ── A4 (#467): the synthetic camera is the camera it imitates ────────────────
+//
+// The world is documented as using EuRoC cam0, and every synthetic result is
+// read as "on the EuRoC camera". Its p2 was 1000x the published value and
+// nothing failed, because the world is self-consistent: it projects with the
+// same camera the backend is handed. Hold each parameter to the published
+// calibration (examples/hello_vio/testdata/mav0/cam0/sensor.yaml) exactly: each
+// is a ratio of exactly representable integers, so IEEE division rounds it to
+// the same double as the decimal literal.
+TEST_CASE("A4: the synthetic world's camera is EuRoC cam0", "[sdk][synthetic][A4]") {
+    const auto cam = ev::generate_world<T>(ev::SyntheticConfig<T>{}).camera;
+    CHECK(cam.fx() == 458.654);
+    CHECK(cam.fy() == 457.296);
+    CHECK(cam.cx() == 367.215);
+    CHECK(cam.cy() == 248.375);
+    const auto& d = cam.radtan();
+    CHECK(d.k1 == -0.28340811);
+    CHECK(d.k2 == 0.07395907);
+    CHECK(d.p1 == 0.00019359);
+    CHECK(d.p2 == 1.76187114e-05);
+    CHECK(d.k3 == 0.0);
+}

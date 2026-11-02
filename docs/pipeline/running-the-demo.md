@@ -136,22 +136,25 @@ Flags (`vio_pipeline --help` lists them all):
 The sweep injects increasing sensor noise (a multiplier on the filter's *assumed*
 noise) and records the trajectory error (ATE, RMS position vs ground truth) and
 the consistency (NIS, normalized innovation; **1 = the filter's uncertainty
-matches reality**). Representative synthetic result (gentle "ground" motion,
-measured in June 2026; [Engineering Status](engineering-status.mdx) has the
-backend's current state):
+matches reality**). Synthetic result with the default world and the body-frame
+backend, measured 2026-11-02 on the corrected camera of #467
+([Engineering Status](engineering-status.mdx) has the backend's current state):
 
 | noise × | ATE (m) | NIS | interpretation |
 |---:|---:|---:|---|
-| 0 | 0.42 | 0.02 | sensors perfect → filter **over-conservative** (NIS ≪ 1) |
-| 1 | 0.51 | **1.6** | **injected noise = the filter's model → NIS ≈ 1 (consistent)** |
-| 2 | 1.1 | 6.2 | filter now **over-confident** (NIS ≫ 1) |
-| 4 | 156 | 24 | **lost lock — divergence** |
-| 8 | 76 | 88 | diverged |
+| 0 | 0.093 | 0.0003 | sensors perfect → filter **over-conservative** (NIS ≪ 1) |
+| 0.5 | 0.30 | 0.38 | still over-conservative |
+| 1 | 0.32 | **1.5** | **injected noise = the filter's model → NIS ≈ 1 (consistent)** |
+| 2 | 22 | 7.8 | filter **over-confident** (NIS ≫ 1) and **lost lock** |
+| 4 | 110 | 22 | diverged |
+| 8 | 241 | 89 | diverged |
 
 **Conclusions:**
 
-1. **The filter rejects noise up to ~2× its assumed level, then loses lock.**
-   That cliff (here between 2× and 4×) is the operating envelope. Run your real
+1. **The filter holds the trajectory up to its assumed noise level, then loses
+   lock.** That cliff (here between 1× and 2×) is the operating envelope. Before
+   #467 corrected the synthetic camera's distortion the cliff sat between 2× and 4×
+   (ATE 1.3 m at 2×); the correct camera leaves the body-frame filter less margin. Run your real
    noise characterization (Allan variance for the IMU; pixel-σ for the camera) and
    make sure your actual noise sits well inside it.
 2. **NIS crosses 1 exactly where the injected noise matches the model.** Below it
@@ -165,12 +168,12 @@ backend's current state):
 
 ---
 
-## Is an ATE of 0.4 m good or bad?
+## Is an ATE of 0.3 m good or bad?
 
 **It depends entirely on the platform and the task — there is no single answer.**
 But here is the honest read of *this* number:
 
-- It is on a **small synthetic loop (~1.6 m across, ~12 s)**, so 0.4 m is ~25% of
+- It is on a **small synthetic loop (~1.6 m across, ~12 s)**, so 0.3 m is ~20% of
   the trajectory extent — **mediocre as a benchmark**. Good research VIO lands
   sub-0.3 m on EuRoC; this same backend gets ~0.29–0.79 m on real EuRoC sequences.
 - The number reflects the backend's **known consistency problems** (the #212
@@ -178,7 +181,7 @@ But here is the honest read of *this* number:
   a fundamental limit. It *works*, but it is not yet field-grade.
 - Crucially, **the more telling metrics than a single ATE are (a) the drift rate**
   (% of distance, or RPE) for long missions, and **(b) consistency** (is the
-  reported covariance honest). A 0.4 m error the filter *knows about* (large,
+  reported covariance honest). A 0.3 m error the filter *knows about* (large,
   honest covariance) is far safer than a 0.1 m error it is over-confident about.
 
 ### What accuracy do different robot form factors need?
@@ -198,13 +201,13 @@ position error below **~⅓ of (gap − vehicle size)** for a safety margin.
 | **Outdoor UAV (GPS-fused)** | 5–20 m/s | bridge GPS dropouts | metres over open field; < 0.3–0.5 m for precision landing | depends on dropout length | drift during a long GPS gap; landing uses a fiducial |
 | **Legged / humanoid** | walk/run | global pose (+ proprioception for footholds) | < 0.1–0.3 m with periodic relocalization | > ~0.3 m without relocalization | mis-step / wrong foothold target |
 
-So, **is 0.4 m good?**
+So, **is 0.3 m good?**
 
 - For a **confined-space drone** (VIO in the loop): **bad** — you need < 0.1–0.2 m;
-  0.4 m risks collisions.
+  0.3 m risks collisions.
 - For a **warehouse AMR mid-aisle**: **borderline** — fine in wide aisles, risky in
   narrow ones; final docking is rescued by fiducials.
-- For an **AR headset**: the absolute 0.4 m might be tolerable *if smooth*, but the
+- For an **AR headset**: the absolute 0.3 m might be tolerable *if smooth*, but the
   jitter/consistency is what makes or breaks it.
 - For a **GPS-fused outdoor platform**: **fine** as a short-term bridge.
 
@@ -213,7 +216,7 @@ So, **is 0.4 m good?**
 Three independent failure conditions, any of which ends a mission:
 
 1. **Absolute error exceeds the clearance margin** — error > ~⅓·(gap − vehicle
-   size) for an in-the-loop platform ⇒ collision risk. (A 0.4 m drone in a 0.8 m
+   size) for an in-the-loop platform ⇒ collision risk. (A 0.3 m drone in a 0.8 m
    gap is already past this.)
 2. **Drift outpaces correction** — for fused/long-range platforms, when the VIO
    drift rate exceeds what loop closure / GPS / maps can pull back between fixes.

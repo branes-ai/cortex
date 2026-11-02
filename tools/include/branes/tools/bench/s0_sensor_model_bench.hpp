@@ -271,15 +271,6 @@ struct S0SensorModelBench {
         return f;
     }
 
-    /// The synthetic world's camera (sdk/eval/synthetic_world.hpp). It matches
-    /// EuRoC cam0 except p2, which is 1.76187114e-2 there vs 1.76187114e-5 in the
-    /// EuRoC calibration; the ground-truth fixture caught the difference.
-    [[nodiscard]] static Intrinsics<double> synthetic_world_camera() {
-        auto c = euroc();
-        c.p2 = 176187114.0 / 10000000000.0;
-        return c;
-    }
-
     /// The synthetic world's frame `frame`: its exact pixel observations, with
     /// truth = each landmark's camera-frame (x/z, y/z) from the true pose.
     [[nodiscard]] static Fixture ground_truth(std::size_t frame = 40) {
@@ -287,7 +278,7 @@ struct S0SensorModelBench {
         const auto& fr = world.frames.at(frame);
         const auto& gt = world.gt.at(frame);
         Input<double> in;
-        in.intr = synthetic_world_camera();
+        in.intr = euroc();
         json truth = json::array();
         for (const auto& o : fr.obs) {
             in.pixels.push_back({o.u, o.v});
@@ -311,7 +302,7 @@ struct S0SensorModelBench {
     [[nodiscard]] static Fixture captured(std::size_t frame = 80) {
         const auto world = sdk::eval::generate_world<double>(sdk::eval::SyntheticConfig<double>{});
         Input<double> in;
-        in.intr = synthetic_world_camera();
+        in.intr = euroc();
         for (const auto& o : world.frames.at(frame).obs)
             in.pixels.push_back({o.u, o.v});
         return capture(std::string(kStage),

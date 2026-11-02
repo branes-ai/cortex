@@ -481,6 +481,7 @@
   "window": 11
  },
  "kind": "captured",
+ "platform": "glibc",
  "schema": "branes.vio.fixture/1",
  "seed": 0,
  "source": "s4_frontend_bench: noisy (4 grey levels) translating sequence",

@@ -275,9 +275,10 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     Recorder rec(opt, intrinsics());
     auto be = make_backend();
     be.set_stage_tap(&rec);
-    // 2 px of pixel noise: the first S5 violation then lands at frame 26. At
-    // 0.5 px the clean world first violates at frame 69, past kFrames.
-    constexpr double kPx = 2.0;
+    // 3 px of pixel noise: the first S5 violation then lands at frame 24 (as it
+    // does at 2.5 and 4 px). At 2 px it lands at frame 70 and at 0.5 px at frame
+    // 76, past kFrames (measured with the EuRoC cam0 p2 of #467).
+    constexpr double kPx = 3.0;
     run(be, kFrames, kPx);
     rec.finish();
     REQUIRE(rec.stats().first_violation_frame.has_value());
