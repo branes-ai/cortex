@@ -36,11 +36,13 @@ Without the IMU, a monocular camera cannot tell the difference between moving $1
 
 The most common failure mode in VIO engineering is **coordinate frame misalignment**. A VIO pipeline is a "mathematical glass house"—if any of the coordinate relationships are defined inconsistently, the entire estimator collapses quadratically.
 
+![VIO coordinate frames map, showing the spatial transformations from the World frame (gravity-aligned) to the IMU/Body frame, and the rigid extrinsics that place the Camera frame in the IMU frame: R_ic maps camera-frame vectors into the IMU frame, and p_ic is the camera origin expressed in the IMU frame.](../assessments/figures/pipeline/coordinate_frames.svg)
+
 Cortex enforces a rigid, unified convention across all eleven stages:
 *   **World Frame ($W$)**: The global reference frame. Gravity is aligned with the global z-axis: $\mathbf{g}_W = [0, 0, -9.81]^T$. Yaw (heading) and global position are **unobservable** in this frame.
 *   **IMU Frame ($I$)**: The body frame of the vehicle. Raw acceleration $\mathbf{a}_{\text{imu}}$ and angular rate $\boldsymbol{\omega}_{\text{imu}}$ are sensed relative to this frame.
 *   **Camera Frame ($C$)**: The camera coordinate system. The optical axis points along the positive z-axis ($+z$ is forward/depth).
-*   **Extrinsics ($\mathbf{R}_{\text{ic}}$, $\mathbf{p}_{\text{ic}}$)**: The rigid 6-DoF transform mapping the IMU body center to the Camera origin (IMU-to-Camera extrinsics):
+*   **Extrinsics ($\mathbf{R}_{\text{ic}}$, $\mathbf{p}_{\text{ic}}$)**: The rigid 6-DoF camera pose in the IMU frame (C → I): $\mathbf{R}_{\text{ic}}$ maps camera-frame vectors into the IMU frame, and $\mathbf{p}_{\text{ic}}$ is the camera origin expressed in IMU coordinates. The camera position in the world is then:
 
 $$
 \mathbf{p}_{\text{cam}} = \mathbf{p}_{\text{imu}} + \mathbf{R}_{\text{wi}} \mathbf{p}_{\text{ic}}
