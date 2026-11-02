@@ -32,7 +32,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 
 | # | Requirement | Pass criterion | Test here | Status |
 |---|---|---|---|---|
-| A1 | The world's IMU integrates to its ground truth | Dead reckoning with the true biases and no noise stays within 5 cm over 12 s; v and a are continuous at the onset | covered only indirectly by the D1 seed sweep | **missing** <Issue id={560} /> |
+| A1 | The world's IMU integrates to its ground truth | Dead reckoning with the true biases and no noise stays within 5 cm over 12 s; v and a are continuous at the onset | `synthetic_world.cpp` "A1: ..." cases (dead reckoning at onsets 0.25, 1 and 2 s; 200 vs 800 Hz onset continuity; a #475 step fixture fails) | locked |
 | A2 | Gravity-sign contract across modules | Recovered gravity is +g in the preintegrator's convention; the seed tilt is a few degrees, never about 180°; a sign-flipped fixture fails | `stage_bench_s0_s1.cpp` S1 invariants; `sensor_model_probe.cpp` gravity sign | locked |
 | A3 | Camera models | Round trip and Jacobians match finite differences | the camera-model tests | locked |
 | A4 | The synthetic camera matches the real one it imitates | Intrinsics and distortion equal EuRoC cam0's | — | **missing** <Issue id={467} /> |
