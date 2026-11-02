@@ -9,9 +9,15 @@
 
 include(FetchContent)
 
-# Don't re-run `git fetch` on every build. Devs/CI bump tags here
-# explicitly when they want new code.
-set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE)
+# Keep the update step connected. Every pin below is a tag or a commit hash,
+# and for those CMake's git update step returns without contacting the remote
+# when the pinned ref is already checked out, so a routine configure stays
+# offline. It fetches only when a pin here changes. Disconnected mode broke
+# exactly that case: an existing build dir could not fetch the bumped tag and
+# configure failed with "Requested git ref ... is not present locally". FORCE
+# so build dirs that cached the old forced ON pick this up on their next
+# configure.
+set(FETCHCONTENT_UPDATES_DISCONNECTED OFF CACHE BOOL "" FORCE)
 
 # ── stillwater-sc/mtl5 + stillwater-sc/universal ────────────────────
 # Both are header-only Stillwater sister projects, integrated with the
