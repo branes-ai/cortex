@@ -19,7 +19,7 @@ If S1 fails, it introduces two severe failure modes: returning a *confidently wr
 When the vehicle starts stationary on the ground, S1 detects a quiet window by checking that the standard deviation of gyroscope and accelerometer readings is below a strict threshold. It then averages the raw readings over $M$ samples:
 
 $$
-$\mathbf{a}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{a}}_i, \qquad \mathbf{w}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{w}}_i$
+\mathbf{a}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{a}}_i, \qquad \mathbf{w}_{\text{avg}} = \cfrac{1}{M} \sum_{i=1}^M \tilde{\mathbf{w}}_i
 $$
 
 ### A. Gyroscope Bias Seeding
@@ -38,10 +38,10 @@ $$
 \mathbf{z}_I = \cfrac{\mathbf{a}_{\text{avg}}}{\|\mathbf{a}_{\text{avg}}\|}
 $$
 
-To build a full orthogonal rotation matrix $\mathbf{R}_{I}^{W}$ that maps gravity $\mathbf{g}_W = [0, 0, -g]^T$ to $\mathbf{a}_{	ext{avg}}$ (or conversely, aligns $\mathbf{z}_I$ with gravity), we use Gram-Schmidt orthonormalization:
+To build a full orthogonal rotation matrix $\mathbf{R}_{I}^{W}$ that maps gravity $\mathbf{g}_W = [0, 0, -g]^T$ to $\mathbf{a}_{\text{avg}}$ (or conversely, aligns $\mathbf{z}_I$ with gravity), we use Gram-Schmidt orthonormalization:
 
 1.  **Temporary Horizontal Axis**: Assume an arbitrary temporary horizontal x-axis: $\mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$.
-2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: $\mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{%%text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where $\times$ is the cross-product).
+2.  **Orthogonal Y Axis**: Compute the orthogonal y-axis via the cross product: $\mathbf{y}_I = \cfrac{\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}}{\|\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}\|}$ (where $\times$ is the cross-product).
 3.  **True Orthogonal X Axis**: Compute the true orthogonal x-axis: $\mathbf{x}_I = \mathbf{y}_I \times \mathbf{z}_I$.
 4.  **Assemble Rotation**: The initial rotation matrix is then:
 
