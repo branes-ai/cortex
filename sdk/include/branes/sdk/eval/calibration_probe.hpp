@@ -131,6 +131,7 @@ struct CalibRun {
     T nees_pos = T{0};         ///< position, target 3 (gauge: σ stays near its prior)
     T yaw_sigma_first = T{0};  ///< world-yaw σ at the first initialized frame (rad)
     T yaw_sigma_last = T{0};   ///< … at the last frame; a consistent filter never lowers it
+    T yaw_err_last = T{0};     ///< |world-yaw error| at the last frame (rad), the error yaw σ should cover
 };
 
 template <math::Scalar T>
@@ -209,6 +210,7 @@ run_with_calib(const SyntheticData<T>& w, const SO3<T>& R_ic, const Vec3<T>& p_i
         yaw_sum += nees_of(Pw, ew, kYaw);
         pos_sum += nees_of(Pw, ew, kP);
         out.yaw_sigma_last = sqrt(Pw(2, 2));
+        out.yaw_err_last = ew(2, 0) < T{0} ? -ew(2, 0) : ew(2, 0);
         if (out.frames == 0)
             out.yaw_sigma_first = out.yaw_sigma_last;
         ++out.frames;

@@ -131,9 +131,11 @@ an order of magnitude further off than posit32. That is exactly the kind of per-
 The S0 and S1 benches (#454) turned up three things on their first run, none of which an end-to-end
 metric had shown:
 
-- **The synthetic world's camera isn't quite EuRoC cam0.** Its tangential coefficient p2 is 1000×
-  the EuRoC value (1.76e-2 vs 1.76e-5). The ground-truth fixture caught it as a 0.1 disagreement in
-  normalized coordinates. The world is self-consistent, so nothing downstream failed.
+- **The synthetic world's camera wasn't quite EuRoC cam0.** Its tangential coefficient p2 was
+  1000× the EuRoC value (1.76e-2 vs 1.76e-5). The ground-truth fixture caught it as a 0.1
+  disagreement in normalized coordinates. The world is self-consistent, so nothing downstream
+  failed. Fixed in #467, which re-baselined the synthetic fixtures; the S0 bench now uses the EuRoC
+  intrinsics directly.
 - **The S1 seeding stage didn't compile for posits:** an implicit `T` → `double` narrowing, now
   explicit.
 - **The dynamic visual-inertial alignment is precision-fragile.** It declines entirely in `float` and

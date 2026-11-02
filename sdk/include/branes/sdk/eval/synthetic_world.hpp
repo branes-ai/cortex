@@ -109,7 +109,10 @@ namespace sw_detail {
 template <math::Scalar T>
 using Vec3 = math::lie::detail::Vec<T, 3>;
 
-// EuRoC cam0 intrinsics — the canonical VIO camera.
+// EuRoC cam0 intrinsics — the canonical VIO camera. Values are the published
+// calibration (examples/hello_vio/testdata/mav0/cam0/sensor.yaml): fu, fv, cu,
+// cv, then radtan k1, k2, p1, p2. p2 is 1.76187114e-5; it was 1000× that until
+// #467, and a test in tests/sdk/synthetic_world.cpp now holds every value.
 template <math::Scalar T>
 [[nodiscard]] math::cameras::PinholeRadtanCamera<T> euroc_camera() {
     return {T{458654} / T{1000},
@@ -119,7 +122,7 @@ template <math::Scalar T>
             T{-28340811} / T{100000000},
             T{7395907} / T{100000000},
             T{19359} / T{100000000},
-            T{176187114} / T{10000000000}};
+            T{176187114} / T{10000000000000}};
 }
 constexpr double kImgW = 752, kImgH = 480;
 }  // namespace sw_detail
