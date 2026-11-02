@@ -35,7 +35,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 | A1 | The world's IMU integrates to its ground truth | Dead reckoning with the true biases and no noise stays within 5 cm over 12 s; v and a are continuous at the onset | `synthetic_world.cpp` "A1: ..." cases (dead reckoning at onsets 0.25, 1 and 2 s; 200 vs 800 Hz onset continuity; a #475 step fixture fails) | locked |
 | A2 | Gravity-sign contract across modules | Recovered gravity is +g in the preintegrator's convention; the seed tilt is a few degrees, never about 180°; a sign-flipped fixture fails | `stage_bench_s0_s1.cpp` S1 invariants; `sensor_model_probe.cpp` gravity sign | locked |
 | A3 | Camera models | Round trip and Jacobians match finite differences | the camera-model tests | locked |
-| A4 | The synthetic camera matches the real one it imitates | Intrinsics and distortion equal EuRoC cam0's | — | **missing** <Issue id={467} /> |
+| A4 | The synthetic camera matches the real one it imitates | Intrinsics and distortion equal EuRoC cam0's | `synthetic_world.cpp` "A4: the synthetic world's camera is EuRoC cam0" (every parameter, exactly) | locked |
 | A5 | Input characterization | Static Allan variance matches the configured Q; timestamps are monotonic | `allan_variance.cpp` | partial <Issue id={268} /> |
 
 ## B. Each stage
@@ -75,7 +75,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 |---|---|---|---|---|
 | D1 | Monte-Carlo consistency | 21 seeds or more. Every seed: RMS below 0.15 m, normalized full NEES in (0.25, 3), roll/pitch below 6, yaw below 3, position below 4. Across the seeds: median RMS below 0.06 m | CI: "tracks and stays consistent on every seed" (4 seeds). Manual: the hidden "21-seed sweep" (`[.sweep]`) | partial: 4 seeds locked (R-IEKF), 21 manual |
 | D2 | Slow-start robustness | The D1 bands at onsets of 1 s and 2 s | CI: "a slow 2 s start stays consistent" (2 seeds at 2 s). Manual: the hidden "21-seed sweep at slow onsets" (1 s and 2 s) | partial: 2 s on 2 seeds locked (R-IEKF); 1 s and 21 seeds manual |
-| D3 | A consistency control under noise, never noise-free | Pose NEES about dof under 1 px plus the nominal IMU noise, **for every backend** | R-IEKF: D1. Body-frame: "S10 matched-noise control: the body-frame MSCKF leaks information into yaw" pins the leak (median pose NEES above 12, yaw σ falling) | locked (R-IEKF); characterization (body-frame) <Issue id={551} /> |
+| D3 | A consistency control under noise, never noise-free | Pose NEES about dof under 1 px plus the nominal IMU noise, **for every backend** | R-IEKF: D1. Body-frame: "S10 matched-noise control: the body-frame MSCKF leaks information into yaw" pins the leak (median pose NEES above 9, yaw σ falling) | locked (R-IEKF); characterization (body-frame) <Issue id={551} /> |
 | D4 | Every arithmetic type end to end | float, posit32, long double: P PSD every frame; positions within 1000·max(ε_type, ε_double) metres of the double result | "the estimator runs end to end in every arithmetic type" | locked |
 | D5 | Genericity audit | A strict type with explicit-only conversions matches double bit for bit | `strict_double.cpp` | locked |
 | D6 | Per-stage precision | One stage in float within 1000 float ulps; PSD checked at the narrowest stage's ε | `stage_types.cpp` | locked |

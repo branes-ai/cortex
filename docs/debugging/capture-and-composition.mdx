@@ -138,9 +138,10 @@ turned up two things the stage benches' own fixtures had not:
   with |H|·|P|·|H|ᵀ instead; a real update showed 3.8e-18. The bench now scales the tolerance by the
   products' magnitude.
 
-S0 capture also runs into the synthetic camera's p₂, which is 1000× EuRoC's
-([#467](https://github.com/branes-ai/cortex/issues/467)). The recorder therefore takes the
-backend's camera through `intrinsics_of`, never a copy of EuRoC's values.
+S0 capture once ran into the synthetic camera's p₂, which was 1000× EuRoC's until
+[#467](https://github.com/branes-ai/cortex/issues/467) fixed it. The recorder takes the
+backend's camera through `intrinsics_of`, never a copy of EuRoC's values, so a capture always
+records the camera the run actually used.
 
 ## The loop is checked as a loop (#447)
 
