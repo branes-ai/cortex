@@ -109,11 +109,18 @@ struct Args {
     double gate_alpha = VioConfig{}.gate_alpha;  ///< MSCKF S6d chi-square gate significance (#481)
     bool gate_per_dof = false;                   ///< MSCKF S6d: the pre-#481 5-per-dof gate
     bool gate_flag = false;                      ///< --gate-alpha or --gate-per-dof was given
+    bool detect_trackable_only = false;          ///< S4: skip the KLT border band when detecting (#474)
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
 
 /// The estimator configuration the flags select (defaults otherwise).
+branes::sdk::FrontendParams frontend_of(const Args& a) {
+    branes::sdk::FrontendParams fe;
+    fe.detect_trackable_only = a.detect_trackable_only;
+    return fe;
+}
+
 VioConfig config_of(const Args& a) {
     VioConfig cfg;
     cfg.gate_alpha = a.gate_alpha;
@@ -211,7 +218,9 @@ Args parse(int argc, char** argv) {
             a.gate_flag = true;
             if (!(a.gate_alpha > 0.0 && 1.0 - a.gate_alpha < 1.0 && 1.0 - a.gate_alpha > 0.0))
                 throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
-        } else if (v == "--gate-per-dof") {
+        } else if (v == "--detect-trackable-only")
+            a.detect_trackable_only = true;
+        else if (v == "--gate-per-dof") {
             a.gate_per_dof = true;
             a.gate_flag = true;
         } else if (v == "--live-assert") {
@@ -730,7 +739,7 @@ bool run_euroc(const Args& args,
     cal.extrinsics.R_imu_cam = cam0.R_imu_cam;
     cal.extrinsics.p_imu_cam = cam0.p_imu_cam;
 
-    Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}));
+    Estimator est(Backend(std::vector<typename Backend::CameraCalibration>{cal}), frontend_of(args));
     est.configure(cfg);
     est.activate();
     est.backend().set_stage_tap(tap);
@@ -824,7 +833,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     }
 
     const auto cam0 = euroc_cam0();
-    Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam));
+    Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam), frontend_of(args));
     est.configure(cfg);
     est.activate();
 
@@ -915,7 +924,9 @@ int main(int argc, char** argv) {
                "                             with --capture-stages S1_initialization, captures every attempt\n"
                "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
                "                             significance A (default 0.05)\n"
-               "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n";
+               "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
+               "  --detect-trackable-only    EuRoC front end: skip FAST corners in the KLT border band\n"
+               "                             (#474; off by default)\n";
         return 0;
     }
     if (args.invariant && args.stage_types != "double") {

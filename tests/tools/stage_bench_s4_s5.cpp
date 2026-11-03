@@ -60,9 +60,13 @@ TEST_CASE("S4 bench: an unchanged image is a fixed point; a clean translation tr
     REQUIRE(value_of(ka, "known_answer.residual") == 0.0);
     const auto gt = require_pass<S4>({"gt", S4::ground_truth()}, bn::kShipped, {"double"});
     REQUIRE(value_of(gt, "truth.endpoint_error") < 0.05);
-    // Border churn is real and reported: most new detections in a 160x120 frame
-    // sit where the coarsest KLT level cannot track them.
+    // Border churn (#474): by default FAST seeds corners where the coarsest KLT
+    // level cannot place a template, and over half the new tracks in a 160x120
+    // frame die on their first frame. Skipping that band removes the churn.
     REQUIRE(value_of(gt, "tracks.lost_on_first_frame") > 50.0);
+    const auto gt_trackable = require_pass<S4>({"gt", S4::ground_truth()}, "trackable_detect", {"double"});
+    REQUIRE(value_of(gt_trackable, "tracks.lost_on_first_frame") == 0.0);
+    REQUIRE(value_of(gt_trackable, "truth.endpoint_error") < 0.05);
 }
 
 TEST_CASE("S4 bench: the image codec is lossless", "[tools][bench][s4]") {
