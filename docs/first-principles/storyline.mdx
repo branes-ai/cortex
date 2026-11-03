@@ -136,7 +136,7 @@ Each candidate cause got a measurement. The method is described on
 | Update algebra (S6) | NIS/dof 1.002 at matched (P, R); null-space residual 2.8e-16 | Cleared |
 | Augmentation and marginalization (S3, S9) | Machine-zero residuals | Cleared |
 | Arithmetic precision | Long double = double | Refuted |
-| χ² gate too loose | 5·dof admitted 59% (dof 1) and 70.5% (dof 3) of 2σ outliers; the χ²₀.₉₅ quantile admits 46% and 22.5%. End to end it lowers EuRoC ATE (V1_01 0.29 → 0.22 m, MH_05 0.75 → 0.73 m, V2_03 0.27 → 0.18 m) and leaves NIS unchanged (1.5, 2.2, 14.7) (<Issue id={481} />) | **Fixed** (the shipped gate); an accuracy lever, not the over-confidence driver |
+| χ² gate too loose | 5·dof admitted 59% (dof 1) and 70.5% (dof 3) of 2σ outliers; the χ²₀.₉₅ quantile admits 46% and 22.5%. End to end it lowers EuRoC ATE (V1_01 0.29 → 0.22 m, MH_05 0.75 → 0.73 m, V2_03 0.27 → 0.18 m) and leaves NIS unchanged (1.5, 2.2, 14.7) (finding <Issue id={481} />; measured in <Issue id={572} />) | **Fixed** (the shipped gate); an accuracy lever, not the over-confidence driver |
 
 **The structural cure: the R-IEKF** (<Issue id={347} />). A right-invariant error makes the
 four-DoF gauge (translation and yaw) independent of the state, so the update cannot leak
@@ -250,7 +250,7 @@ calibration:
 | yaw σ, first → last frame | never falls | 0.16 → 0.010–0.025 rad |
 
 These numbers are from after the synthetic camera was corrected (<Issue id={467} />, below) and
-the χ² gate became a quantile (<Issue id={481} />). It first read 9.0–5088, median 26, then
+the χ² gate became a quantile (<Issue id={481} />, measured in <Issue id={572} />). It first read 9.0–5088, median 26, then
 11.5–288, median 47; each change moved the magnitudes but not the signature.
 
 Global yaw is unobservable, so its σ can only grow; here it falls about tenfold within seconds.
