@@ -57,7 +57,7 @@ struct S6UpdateRecord {
     bool valid = false;             ///< NIS well-conditioned (S invertible)
     bool accepted = false;          ///< update applied (covariance changed)
     bool gated = false;             ///< valid NIS but rejected ⇒ χ²-gated out
-    double chi2_threshold = 0.0;    ///< chi2_per_dof · dof — the gate line
+    double chi2_threshold = 0.0;    ///< the S6d gate line for this dof (CameraUpdater::gate_threshold)
     double cov_trace_before = 0.0;  ///< tr(P) before the update
     double cov_trace_after = 0.0;   ///< tr(P) after (== before if rejected)
     double cov_trace_ratio = 1.0;   ///< after / before (<1 ⇒ uncertainty shrank)
@@ -145,7 +145,7 @@ public:
         r.valid = nis.valid;
         r.accepted = accepted;
         r.gated = nis.valid && !accepted;  // well-conditioned but rejected ⇒ χ²-gated
-        r.chi2_threshold = opts_.chi2_per_dof * static_cast<double>(nis.dof);
+        r.chi2_threshold = upd_.gate_threshold(nis.dof);
 
         r.cov_trace_before = trace(cov_before);
         const DynMat cov_after = state_after.covariance();

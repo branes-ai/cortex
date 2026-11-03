@@ -214,8 +214,9 @@ failure points at one sub-step. The S6 benches (#457) found:
   That rules out this mechanism inside S6; it doesn't rule out other sources of the #212
   over-confidence. The yaw leak the S2 bench measures in propagation is an identified one, and
   [#480](https://github.com/branes-ai/cortex/issues/480) attributes the leak stage by stage.
-- **The shipped χ² gate is loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
-  5-per-dof gate admits 59–70% of measurements biased by 2σ, against 22–44% for a 95% χ² gate
+- **The χ² gate was loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
+  5-per-dof gate admitted 59–70% of measurements biased by 2σ. The shipped gate is now the 95% χ²
+  quantile, which admits 46% and 22.5% of them and 95–97.5% of inliers at every dof
   ([#481](https://github.com/branes-ai/cortex/issues/481)).
 - **A square-root filter must carry its factor.** The clone blocks are almost perfectly correlated
   with the IMU pose, so their Schur-complement pivots are below float's (and posit32's) resolution of
@@ -329,7 +330,7 @@ backend calls it.
 | `s6a_jacobians_bench` | #457 | `shipped` | observations × depth → H_f, H_x finite-difference error, max \|H_f\| |
 | `s6b_nullspace_projection_bench` | #457 | `shipped` (Householder), `givens` | observations × depth → NᵀN − I, Nᵀ H_f, H₀·N per method |
 | `s6c_compression_bench` | #457 | `shipped` (identity), `qr` | features stacked → rows in/out, normal-equation error |
-| `s6d_gating_bench` | #457 | `shipped` (5 per dof), `chi2_95`, `gate_off` | dof × outlier size → inlier NIS/dof, acceptance per gate |
+| `s6d_gating_bench` | #457, #481 | `shipped` (χ²₀.₉₅ quantile), `chi2_99`, `per_dof` (5 per dof, the gate before #481), `gate_off` | dof × outlier size → inlier NIS/dof, acceptance per gate |
 | `s6e_ekf_update_bench` | #457 | `shipped` (Joseph), `sqrt_array` | pixel noise × calibration σ → trace ratio, information along N, ‖δx‖, NIS/dof |
 | `s9_marginalization_bench` | #453 (worked example), #458 | `shipped`, `direct_gather`, `policy_oldest`, `policy_second_newest` | clones × conditioning → residual, λ_min |
 | `s10_online_calibration_bench` | #458 | `shipped` (extrinsic estimated), `fixed`, `folded_into_r` | extrinsic rotation error × prior → remaining error, NIS/dof per treatment |

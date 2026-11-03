@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -190,4 +191,37 @@ TEST_CASE("S5 parallax gate rejects low-parallax triangulations", "[sdk][msckf][
         gated.min_parallax_deg = 1.0;
         REQUIRE(ms::CameraUpdater<T>(cams, gated).triangulate(s, tr.observations, pf));
     }
+}
+
+TEST_CASE("S6d gate line: the chi-square quantile by default, 5 per dof on request", "[sdk][msckf][camera][gate]") {
+    // #481: the shipped gate is the chi-square quantile at alpha = 0.05, so a
+    // consistent inlier passes with probability 0.95 whatever its dof. The old
+    // line, 5 per dof, sat far above the quantile at low and at high dof.
+    const std::vector<ms::CameraExtrinsics<T>> cams(1);
+    using Opts = ms::CameraUpdaterOptions<T>;
+    const ms::CameraUpdater<T> shipped(cams, Opts{});
+    REQUIRE(shipped.options().gate_rule == ms::GateRule::chi2_quantile);
+    REQUIRE(std::abs(shipped.gate_threshold(1) - 3.841459) < 1e-5);
+    REQUIRE(std::abs(shipped.gate_threshold(3) - 7.814728) < 1e-5);
+    REQUIRE(std::abs(shipped.gate_threshold(21) - 32.670573) < 1e-5);
+
+    Opts strict;
+    strict.gate_alpha = 0.01;
+    REQUIRE(std::abs(ms::CameraUpdater<T>(cams, strict).gate_threshold(3) - 11.344867) < 1e-5);
+
+    Opts legacy;
+    legacy.gate_rule = ms::GateRule::per_dof;
+    const ms::CameraUpdater<T> per_dof(cams, legacy);
+    REQUIRE(per_dof.gate_threshold(1) == 5.0);
+    REQUIRE(per_dof.gate_threshold(21) == 105.0);
+
+    Opts off;
+    off.enable_gating = false;
+    REQUIRE(ms::CameraUpdater<T>(cams, off).gate_threshold(3) == 0.0);
+
+    Opts bad;
+    bad.gate_alpha = 0.0;
+    REQUIRE_THROWS_AS(ms::CameraUpdater<T>(cams, bad), std::invalid_argument);
+    bad.gate_alpha = 1.0;
+    REQUIRE_THROWS_AS(ms::CameraUpdater<T>(cams, bad), std::invalid_argument);
 }

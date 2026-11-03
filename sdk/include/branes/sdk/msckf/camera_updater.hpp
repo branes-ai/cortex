@@ -24,6 +24,7 @@
 #ifndef BRANES_SDK_MSCKF_CAMERA_UPDATER_HPP
 #define BRANES_SDK_MSCKF_CAMERA_UPDATER_HPP
 
+#include <branes/math/stats.hpp>
 #include <branes/sdk/features/msckf_nullspace.hpp>
 #include <branes/sdk/msckf/state_helper.hpp>
 
@@ -84,12 +85,28 @@ struct NisSample {
     T innov_sum = T{0};
 };
 
+/// The S6d Mahalanobis gate's acceptance line for a k-row projected residual.
+enum class GateRule {
+    /// γ ≤ χ²₁₋α(k): the χ² quantile at significance `gate_alpha`. A consistent
+    /// inlier passes with probability 1 − α at every k (#481).
+    chi2_quantile,
+    /// γ ≤ `chi2_per_dof` · k: the original fixed per-dof line. Far above the
+    /// quantile at low k (5 vs 3.84 at k = 1, 15 vs 7.81 at k = 3), so it admits
+    /// most 2σ-biased short tracks; and far above it at high k (105 vs 32.7 at
+    /// k = 21). Kept for comparison runs.
+    per_dof,
+};
+
 template <math::Scalar T>
 struct CameraUpdaterOptions {
     T normalized_sigma = T{1} / T{100};  ///< measurement σ in normalized image coords
-    /// Reject the track if the gated Mahalanobis distance exceeds
-    /// `chi2_per_dof · (#projected rows)`. A loose default; the daemon can
-    /// substitute a proper χ² quantile per residual dimension.
+    /// S6d gate: reject the track if its Mahalanobis distance γ = rᵀS⁻¹r is
+    /// above the line `gate_rule` picks for its k projected rows.
+    GateRule gate_rule = GateRule::chi2_quantile;
+    /// Significance of the χ²-quantile gate: the fraction of consistent inliers
+    /// it rejects. Used by `GateRule::chi2_quantile` only.
+    double gate_alpha = 0.05;
+    /// Per-dof gate line, used by `GateRule::per_dof` only.
     T chi2_per_dof = T{5};
     bool enable_gating = true;
     std::size_t max_triangulation_iters = 5;  ///< Gauss-Newton refinement steps
@@ -163,8 +180,11 @@ public:
         // or admit everything.
         if (!(opts_.normalized_sigma > T{0}))
             throw std::invalid_argument("CameraUpdater: normalized_sigma must be positive");
-        if (opts_.enable_gating && !(opts_.chi2_per_dof > T{0}))
+        if (opts_.enable_gating && opts_.gate_rule == GateRule::per_dof && !(opts_.chi2_per_dof > T{0}))
             throw std::invalid_argument("CameraUpdater: chi2_per_dof must be positive when gating");
+        if (opts_.enable_gating && opts_.gate_rule == GateRule::chi2_quantile &&
+            !(opts_.gate_alpha > 0.0 && opts_.gate_alpha < 1.0))
+            throw std::invalid_argument("CameraUpdater: gate_alpha must be in (0,1) when gating");
         if (opts_.calib_rot_sigma < T{0})
             throw std::invalid_argument("CameraUpdater: calib_rot_sigma must be non-negative");
     }
@@ -309,8 +329,19 @@ public:
                 out.nis = NisSample<T>{gamma, k, nis_valid, isum / meas_sigma};
             }
         }
-        out.accepted = !(opts_.enable_gating && (!nis_valid || gamma > opts_.chi2_per_dof * static_cast<T>(k)));
+        out.accepted = !(opts_.enable_gating && (!nis_valid || gamma > gate_threshold(k)));
         return out;
+    }
+
+    /// The S6d gate line for a k-row projected residual: γ is accepted iff
+    /// γ ≤ gate_threshold(k). Zero when gating is off or k = 0. A configuration
+    /// constant, computed in double (math/stats.hpp) and cast to T.
+    [[nodiscard]] T gate_threshold(std::size_t k) const {
+        if (!opts_.enable_gating || k == 0)
+            return T{0};
+        if (opts_.gate_rule == GateRule::per_dof)
+            return opts_.chi2_per_dof * static_cast<T>(k);
+        return static_cast<T>(math::chi_square_quantile(1.0 - opts_.gate_alpha, k));
     }
 
     /// S6e: the EKF update with R = measurement_variance()·I; the covariance

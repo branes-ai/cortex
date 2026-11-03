@@ -128,6 +128,8 @@ public:
         typename msckf::CameraUpdater<T>::Options uopts;
         uopts.normalized_sigma = static_cast<T>(config.camera_noise_normalized);
         uopts.min_parallax_deg = static_cast<T>(config.min_parallax_deg);
+        uopts.gate_alpha = config.gate_alpha;
+        uopts.gate_rule = config.gate_per_dof ? msckf::GateRule::per_dof : msckf::GateRule::chi2_quantile;
         // S10 calibration-uncertainty term: deg → rad, folded into R by the updater.
         constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
         uopts.calib_rot_sigma = static_cast<T>(config.calib_ext_rot_sigma_deg * kDegToRad);

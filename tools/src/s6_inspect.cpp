@@ -230,8 +230,8 @@ int main(int argc, char** argv) {
     cfg.min_parallax_deg = args.min_parallax;
 
     // The inspector mirrors the backend's updater options so the gate threshold and
-    // residual triangulation match the real path exactly (chi2_per_dof defaults to
-    // the backend's; gating on).
+    // residual triangulation match the real path exactly (the gate rule and α
+    // default to the backend's; gating on).
     constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
     ms::CameraUpdaterOptions<T> uopts;
     uopts.normalized_sigma = args.camera_noise;

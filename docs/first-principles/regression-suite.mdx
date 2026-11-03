@@ -56,7 +56,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 | B12 | S6b: gauge annihilation | ‖H·N‖ ≤ 1e-15 at a consistent point; yaw leak against σ reported; invariant H·N below 1e-14 under perturbation; translation leak 0 | `observability_probe.cpp`; `observability_inspect.cpp`; "… annihilates the 4-DoF gauge" | locked |
 | B13 | S6: no information along N | The component of Hᵀ S⁻¹ r along N is at roundoff | "S6 update: no information along the unobservable directions, true or estimated" | locked |
 | B14 | S6: update algebra at matched (P, R) | NIS/dof in [0.98, 1.02] over 4000 updates; Nᵀ H_f = 0 to 1e-16; P stays PSD | `update_probe.cpp` | locked |
-| B15 | S6d: gate calibration | Inlier acceptance about 1 − α at every dof | "S6d sweep: … the shipped gate is loose at low dof" | characterization <Issue id={481} /> |
+| B15 | S6d: gate calibration | Inlier acceptance about 1 − α at every dof | "S6d sweep: the shipped gate admits 1 - alpha of inliers at every dof" (0.95 ± 0.05 at dof 1, 3, 9, 21); `math/stats.cpp` χ² quantiles against the table | locked (<Issue id={481} />) |
 | B16 | S10: calibration recovery | A wrong extrinsic is recovered with a consistent covariance (NEES 0.49 against a bound of 22.5) | `calib_recovery.cpp` | locked |
 | B17 | Iterative kernels converge | Eigen solvers in fewer than 20 sweeps, relative residual below 1e-14 | `two_view_sfm.cpp` Jacobi cases (the sweep-count pin was lost in the MTL5 port) | partial |
 | B18 | Front end: track survival | Detections lie outside the KLT border band; a low fraction of tracks is lost on its first frame (now about 85%) | bench invariant `tracks.lost_on_first_frame`, report-only | **missing** <Issue id={474} /> |

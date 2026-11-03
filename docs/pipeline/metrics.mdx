@@ -104,7 +104,10 @@ applying a measurement, the filter checks its NIS against a χ² threshold and
 rejects a wild outlier (a mistracked feature). That is a single-sample *gate*; the
 consistency test is a *run average*. Both compute the same `νᵀ S⁻¹ ν`, and #264
 logs the gate's value so the consistency test can run on it. The shipped gate
-accepts γ ≤ 5 per dof, which is loose at low dof
+accepts γ ≤ χ²₀.₉₅(dof), the 95% quantile for the residual's dimension, so a
+consistent inlier passes 95% of the time whatever its dof. It replaced a fixed
+γ ≤ 5 per dof, which sat far above the quantile at low dof (5 against 3.84 at
+1 dof) and admitted most 2σ-biased short tracks
 ([#481](https://github.com/branes-ai/cortex/issues/481)).
 
 ### Innovation whiteness
