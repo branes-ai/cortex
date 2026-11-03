@@ -77,6 +77,31 @@ TEST_CASE("KLT reports OutOfBounds when the window leaves the frame", "[cv][klt]
     REQUIRE(tracked[0].status == cv::TrackStatus::OutOfBounds);
 }
 
+TEST_CASE("klt_trackable marks exactly the points the tracker does not reject at the border", "[cv][klt]") {
+    // #474: a detector seeds only points klt_trackable accepts, so it must agree
+    // with the tracker's own OutOfBounds test on every level.
+    constexpr int W = 160, H = 120;
+    const auto a = render(W, H, 0.0, 0.0);
+    const cv::Pyramid<float> p(a.view(), 3, 2.0);
+    const cv::KltParams prm{};
+    int first = -1, last = -1;
+    for (int x = 0; x < W; ++x) {
+        std::vector<cv::KeyPoint> pts = {{static_cast<float>(x), 60.0f, 0}};
+        const auto tracked = cv::track_klt_pyramidal(p, p, pts, prm);
+        const bool trackable = cv::klt_trackable(p, x, 60.0, prm);
+        REQUIRE(trackable == (tracked[0].status != cv::TrackStatus::OutOfBounds));
+        if (trackable) {
+            if (first < 0)
+                first = x;
+            last = x;
+        }
+    }
+    // The band is (hw + 1) * 2^(levels - 1) = 24 px at the defaults.
+    REQUIRE(first == (prm.window_half + 1) * 4);
+    REQUIRE(last >= W - 1 - (prm.window_half + 1) * 4 - 4);
+    REQUIRE(last <= W - 1 - (prm.window_half + 1) * 4);
+}
+
 TEST_CASE("KLT zero displacement is recovered as ~zero flow", "[cv][klt]") {
     constexpr int W = 160, H = 160;
     const auto a = render(W, H, 0.0, 0.0);

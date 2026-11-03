@@ -54,6 +54,15 @@ struct FrontendParams {
     /// **Default 0 (disabled)**: enabling it (e.g. ~1 px) doubles the KLT cost and
     /// should be validated end-to-end before being turned on.
     double fb_max_residual = 0.0;
+    /// S4 detection margin (#474): seed only corners the KLT can place a template
+    /// for on every pyramid level (`cv::klt_trackable`). FAST finds corners up to
+    /// 3 px from the edge, but the coarsest level needs about (hw + 1)·2^(levels−1)
+    /// px (≈24 at the defaults), so without this most new tracks in that band die
+    /// on their first tracked frame (81% on EuRoC V1_01; 2.9% with it).
+    /// **Default false**: turning it on costs about 10% EuRoC ATE on V1_01 and
+    /// V2_03 (a tie on MH_05) with the body-frame filter, for reasons still open
+    /// (#574), so it stays opt-in until that is understood.
+    bool detect_trackable_only = false;
     cv::KltParams klt{};
 };
 
@@ -95,9 +104,10 @@ struct TrackResult {
 
 namespace detail {
 // Add the strongest FAST corners that are far enough from every existing
-// track, up to the target count.
-inline std::size_t detect_new(FrontendState& st, cv::Image<const Pixel> level0, const FrontendParams& fe) {
-    auto kps = cv::detect_fast(level0, fe.fast_threshold);
+// track, up to the target count. With `detect_trackable_only`, a corner the KLT
+// could not place a template for on every pyramid level is skipped (#474).
+inline std::size_t detect_new(FrontendState& st, const cv::Pyramid<Pixel>& pyr, const FrontendParams& fe) {
+    auto kps = cv::detect_fast(pyr.level(0), fe.fast_threshold);
     std::sort(
         kps.begin(), kps.end(), [](const cv::KeyPoint& a, const cv::KeyPoint& b) { return a.response > b.response; });
     const double min_d2 = fe.min_feature_distance * fe.min_feature_distance;
@@ -105,6 +115,8 @@ inline std::size_t detect_new(FrontendState& st, cv::Image<const Pixel> level0, 
     for (const auto& kp : kps) {
         if (st.tracks.size() >= fe.target_features)
             break;
+        if (fe.detect_trackable_only && !cv::klt_trackable(pyr, kp.x, kp.y, fe.klt))
+            continue;
         bool too_close = false;
         for (const auto& t : st.tracks) {
             const double dx = static_cast<double>(kp.x) - t.x;
@@ -180,7 +192,7 @@ TrackResult<T> track(FrontendState& st, cv::Image<const Pixel> image, const Fron
     }
 
     if (st.tracks.size() < fe.target_features)
-        out.diag.detected = detail::detect_new(st, next.level(0), fe);
+        out.diag.detected = detail::detect_new(st, next, fe);
 
     out.observations.reserve(st.tracks.size());
     for (const auto& t : st.tracks) {

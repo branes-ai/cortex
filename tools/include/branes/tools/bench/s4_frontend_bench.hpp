@@ -13,8 +13,9 @@
 //   • the KLT forward–backward residual (re-measured here, independently of the
 //     optional gate) is bounded — enforced when the gate is on, reported when
 //     it is off (the shipped default keeps drifted tracks by design);
-//   • reported: the share of new detections lost on their first tracked frame
-//     (KLT's coarsest-level border vs FAST's detection border);
+//   • the share of new detections lost on their first tracked frame: at most 5%,
+//     enforced when detection skips the KLT border band (#474); reported when
+//     it does not (the shipped default, where FAST detects up to the edge);
 //   • through the backend hand-off, no track is longer than the clone window.
 //
 // The front end is not generic in T (KLT is double/float internally): the bench
@@ -29,7 +30,8 @@
 //   captured       a noisy translating sequence through the shipped front end
 //
 // Variants: "shipped" (the params as given: forward-backward gate off),
-// "fb_gate_1px" (the gate at 1 px), "klt_window_7" (a 15×15 KLT window).
+// "fb_gate_1px" (the gate at 1 px), "klt_window_7" (a 15×15 KLT window),
+// "trackable_detect" (detection skips the KLT border band, #474).
 //
 // Sweep: image noise × shift magnitude → survival, end-point RMS, FB median.
 //
@@ -86,7 +88,8 @@ struct S4FrontendBench {
     [[nodiscard]] static std::vector<Variant> variants() {
         return {{"shipped", "stages::s4_frontend::track with the params as given (FB gate off)"},
                 {"fb_gate_1px", "the forward-backward gate at 1 px"},
-                {"klt_window_7", "a 15x15 KLT window (half 7)"}};
+                {"klt_window_7", "a 15x15 KLT window (half 7)"},
+                {"trackable_detect", "detection skips the KLT border band (#474)"}};
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
@@ -96,18 +99,21 @@ struct S4FrontendBench {
         for (const auto& f : in.frames)
             frames.push_back(pack(f.view()));
         const auto& p = in.params;
-        return json{{"frames", frames},
-                    {"window", in.window},
-                    {"params",
-                     {{"pyramid_levels", p.pyramid_levels},
-                      {"fast_threshold", p.fast_threshold},
-                      {"target_features", p.target_features},
-                      {"min_feature_distance", p.min_feature_distance},
-                      {"fb_max_residual", p.fb_max_residual},
-                      {"klt_window_half", p.klt.window_half},
-                      {"klt_max_iters", p.klt.max_iters},
-                      {"klt_residual_eps", p.klt.residual_eps},
-                      {"klt_min_eigenvalue", p.klt.min_eigenvalue}}}};
+        json j{{"frames", frames},
+               {"window", in.window},
+               {"params",
+                {{"pyramid_levels", p.pyramid_levels},
+                 {"fast_threshold", p.fast_threshold},
+                 {"target_features", p.target_features},
+                 {"min_feature_distance", p.min_feature_distance},
+                 {"fb_max_residual", p.fb_max_residual},
+                 {"klt_window_half", p.klt.window_half},
+                 {"klt_max_iters", p.klt.max_iters},
+                 {"klt_residual_eps", p.klt.residual_eps},
+                 {"klt_min_eigenvalue", p.klt.min_eigenvalue}}}};
+        if (p.detect_trackable_only)  // written only when on, so older fixtures stay byte-identical
+            j["params"]["detect_trackable_only"] = true;
+        return j;
     }
     template <class T>
     [[nodiscard]] static Input<T> decode_input(const json& j) {
@@ -125,6 +131,7 @@ struct S4FrontendBench {
         in.params.klt.max_iters = p.at("klt_max_iters").get<int>();
         in.params.klt.residual_eps = p.at("klt_residual_eps").get<double>();
         in.params.klt.min_eigenvalue = p.at("klt_min_eigenvalue").get<double>();
+        in.params.detect_trackable_only = p.value("detect_trackable_only", false);
         return in;
     }
     template <class T>
@@ -173,6 +180,8 @@ struct S4FrontendBench {
             params.fb_max_residual = 1.0;
         else if (variant == "klt_window_7")
             params.klt.window_half = 7;
+        else if (variant == "trackable_detect")
+            params.detect_trackable_only = true;
         sdk::msckf::stages::s4_frontend::FrontendState st;
         Output<T> out;
         out.fb_gate = params.fb_max_residual;
@@ -249,7 +258,8 @@ struct S4FrontendBench {
 
         // Track churn: tracks lost on their first tracked frame. KLT drops a
         // feature whose window does not fit at the coarsest pyramid level, while
-        // FAST detects up to the image edge — so border detections die at once.
+        // FAST detects up to the image edge, so by default over half the new
+        // tracks die at once (#474). Enforced when detection skips that band.
         r.push_back(churn_report(out));
 
         // Backend hand-off: ingest per frame (clone time = frame index), purge the
@@ -474,12 +484,17 @@ private:
                 died_young += alive ? 0 : 1;
             }
         }
+        constexpr double kMaxChurnPct = 5.0;
         auto r = inv::check_scalar(born ? 100.0 * double(died_young) / double(born) : 0.0,
-                                   0.0,
-                                   inv::Bound::Report,
+                                   kMaxChurnPct,
+                                   out.effective.detect_trackable_only ? inv::Bound::Upper : inv::Bound::Report,
                                    kInvStage,
                                    "tracks.lost_on_first_frame",
                                    "%");
+        // Nothing born means nothing measured: an enforced 0% from a detector that
+        // found no trackable corner would pass vacuously, so it fails instead.
+        if (r.bound == inv::Bound::Upper && born == 0)
+            r.pass = false;
         return r;
     }
 
