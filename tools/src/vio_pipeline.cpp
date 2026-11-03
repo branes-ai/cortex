@@ -204,7 +204,9 @@ Args parse(int argc, char** argv) {
             a.capture.first_violation = true;
         else if (v == "--prefer-dynamic")
             a.prefer_dynamic = true;
-        else if (v == "--gate-alpha" && next_is_value()) {
+        else if (v == "--gate-alpha") {
+            if (!next_is_value())
+                throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
             a.gate_alpha = std::stod(argv[++i]);
             a.gate_flag = true;
             if (!(a.gate_alpha > 0.0 && 1.0 - a.gate_alpha < 1.0 && 1.0 - a.gate_alpha > 0.0))
