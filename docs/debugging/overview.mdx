@@ -124,7 +124,8 @@ number fails. Epic #444 replaces it as the debugging instrument.
 | 4 | [#457](https://github.com/branes-ai/cortex/issues/457) | Stage benches: S6a–S6e (the MSCKF update) | **done**: [PR #479](https://github.com/branes-ai/cortex/pull/479) |
 | 4 | [#458](https://github.com/branes-ai/cortex/issues/458) | Stage benches: S9 policies, S10 (online calibration) | **done**: [PR #484](https://github.com/branes-ai/cortex/pull/484) |
 | — | [#471](https://github.com/branes-ai/cortex/issues/471), [#472](https://github.com/branes-ai/cortex/issues/472) | Follow-ups: S2 invariant-propagator and higher-order Φ variants; S1 SfM front-end variants | planned |
-| — | [#474](https://github.com/branes-ai/cortex/issues/474), [#475](https://github.com/branes-ai/cortex/issues/475) | Found by the S4–S5 benches: KLT border churn; the synthetic world's velocity step | open |
+| — | [#474](https://github.com/branes-ai/cortex/issues/474), [#574](https://github.com/branes-ai/cortex/issues/574) | Found by the S4 bench: KLT border churn. The detection margin that removes it is opt-in, off by default for its EuRoC ATE cost; #574 finds why and flips the default | partial |
+| — | [#475](https://github.com/branes-ai/cortex/issues/475) | Found by the S4–S5 benches: the synthetic world's velocity step | fixed |
 | — | [#480](https://github.com/branes-ai/cortex/issues/480), [#482](https://github.com/branes-ai/cortex/issues/482) | Found by the S6 benches: attribute the #212 leak to S2/S3; square-root variants must carry their factor | open |
 | — | [#481](https://github.com/branes-ai/cortex/issues/481) | Found by the S6d bench: the loose low-dof χ² gate, now the χ²₀.₉₅ quantile | fixed |
 | 5 | [#446](https://github.com/branes-ai/cortex/issues/446) | Stream capture: real runs become bench fixtures | **done**: [PR #486](https://github.com/branes-ai/cortex/pull/486) |

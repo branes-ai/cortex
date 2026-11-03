@@ -300,6 +300,8 @@ The stage contract is on [S5 — Feature Triangulation](../pipeline/stages/s5-tr
 - Attributing the body-frame yaw leak to S2/S3 and sizing its share of the NEES (<Issue id={480} />).
 - The time-offset state t_d, the one untested over-confidence candidate (<Issue id={332} />).
 - The dynamic-initialization defects of Chapter 2.
-- The FAST/KLT border mismatch (<Issue id={474} />) and real-time latency (<Issue id={213} />).
+- Real-time latency (<Issue id={213} />).
+- Why a front end without border churn costs about 10% EuRoC ATE (<Issue id={574} />): the
+  detection margin that fixes it ships off until that is understood.
 - Turning the real-data consistency checks from warnings into asserted bounds once a backend is
   consistent on EuRoC, and adding the [missing tests](regression-suite.mdx).

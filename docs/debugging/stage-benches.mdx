@@ -168,10 +168,16 @@ Two later variants (#471) answer that half:
 
 The S4 and S5 benches (#456) found four more:
 
-- **Border churn in the front end.** KLT drops features whose window doesn't fit at the coarsest
-  pyramid level, a ≈24 px border band at the defaults, but FAST detects up to the edge. On the bench's
-  frames about 85% of new detections die on their first tracked frame and are re-detected under new
-  ids ([#474](https://github.com/branes-ai/cortex/issues/474)).
+- **Border churn in the front end (opt-in fix).** KLT drops features whose window doesn't fit at
+  the coarsest pyramid level, a ≈24 px border band at the defaults, but FAST detects up to the edge.
+  On the bench's frames over half of the new detections die on their first tracked frame and are
+  re-detected under new ids; on EuRoC V1_01, 81%. `FrontendParams::detect_trackable_only` seeds only
+  points `cv::klt_trackable` accepts (the tracker's own window test on every level): the churn falls
+  to 0 on every fixture (the `trackable_detect` variant, which enforces at most 5%) and to 2.9% on
+  V1_01. It is off by default because it costs about 10% EuRoC ATE on V1_01 and V2_03 with the
+  body-frame filter, a tie on MH_05, measured over several `target_features` settings to rule out
+  noise; the mechanism is open ([#474](https://github.com/branes-ai/cortex/issues/474),
+  [#574](https://github.com/branes-ai/cortex/issues/574)).
 - **The forward-backward gate is off by default**, so drifted tracks reach the backend. The bench
   measures them, and its `fb_gate_1px` variant enforces the contract.
 - **The camera updater didn't compile for posits:** qualified `std::acos`/`std::sqrt` calls, now ADL.

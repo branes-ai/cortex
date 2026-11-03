@@ -75,7 +75,31 @@ template <PixelType T>
     return cx - margin >= 0.0 && cy - margin >= 0.0 && cx + margin <= w - 1.0 && cy + margin <= h - 1.0;
 }
 
+/// The template margin the tracker needs at every level: the gradient pass
+/// samples sx±1 / sy±1 around a (2·hw+1)² window.
+[[nodiscard]] inline double template_margin(const KltParams& params) {
+    return params.window_half + 1.0;
+}
+
 }  // namespace detail
+
+/// True if `track_klt_pyramidal` can place the template for a point at (x, y)
+/// (finest-level pixels) on every level of `pyr`, i.e. it will not report the
+/// point OutOfBounds before tracking it. A detector uses this to avoid seeding
+/// features in the border band the coarsest level cannot track (#474): about
+/// (hw + 1)·2^(levels−1) px, ≈24 px at the defaults.
+template <PixelType T>
+[[nodiscard]] bool klt_trackable(const Pyramid<T>& pyr, double x, double y, const KltParams& params = {}) {
+    const double margin = detail::template_margin(params);
+    for (int l = 0; l < pyr.num_levels(); ++l) {
+        const double scale = std::pow(pyr.scale_factor(), l);
+        const auto lvl = pyr.level(l);
+        if (!detail::window_in_bounds(
+                static_cast<int>(lvl.width()), static_cast<int>(lvl.height()), x / scale, y / scale, margin))
+            return false;
+    }
+    return true;
+}
 
 /// Track `points` from the `prev` pyramid into the `next` pyramid.
 /// Returns one KltResult per input point, in order.
@@ -116,7 +140,7 @@ template <PixelType T>
             // The template-gradient pass samples sx±1 / sy±1, so the
             // template needs an hw+1 margin; if it doesn't fit, the point
             // is too close to the edge to track here.
-            if (!detail::window_in_bounds(tw, th, cx, cy, hw + 1.0)) {
+            if (!detail::window_in_bounds(tw, th, cx, cy, detail::template_margin(params))) {
                 status = TrackStatus::OutOfBounds;
                 break;
             }
