@@ -50,6 +50,14 @@ struct VioConfig {
     /// = disabled; ~2–5° trades feature coverage for depth quality and must be
     /// validated end-to-end before being turned on (docs/pipeline/canonical-pipeline.md).
     double min_parallax_deg = 0.0;
+    /// S6d χ² gate significance: a feature track is rejected when its
+    /// Mahalanobis distance is above the χ²₁₋α quantile for its residual
+    /// dimension, so a consistent inlier passes with probability 1 − α (#481).
+    double gate_alpha = 0.05;
+    /// Use the original fixed gate, γ ≤ 5 per residual dimension, instead of the
+    /// χ² quantile. For comparison runs only: it admits most 2σ-biased short
+    /// tracks (#481).
+    bool gate_per_dof = false;
     /// S10 calibration-uncertainty term: a camera↔IMU **extrinsic-rotation** σ (in
     /// degrees) folded into the visual measurement noise `R`, so the filter stops
     /// treating the calibration as perfectly known (the #212 over-confidence; the

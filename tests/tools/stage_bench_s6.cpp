@@ -118,15 +118,22 @@ TEST_CASE("S6c: QR compresses a stacked system to n + 1 rows", "[tools][bench][s
     REQUIRE(id.rows_out == id.rows_in);
 }
 
-TEST_CASE("S6d sweep: inliers are chi-square consistent; the shipped gate is loose at low dof", "[tools][bench][s6]") {
-    // Columns: 0 NIS/dof mean, 1 shipped accept rate, 2 chi2_95 accept rate, 3-4 band.
-    const auto in = S6d::sweep_point<double>({{"dof", 9.0}, {"outlier_sigma", 0.0}});
-    REQUIRE(in[0] > in[3]);
-    REQUIRE(in[0] < in[4]);
-    REQUIRE(std::abs(in[2] - 0.95) < 0.05);
+TEST_CASE("S6d sweep: the shipped gate admits 1 - alpha of inliers at every dof", "[tools][bench][s6]") {
+    // Columns: 0 NIS/dof mean, 1 shipped accept rate, 2 per-dof (5) accept rate, 3-4 band.
+    // 200 draws: the binomial sigma at 0.95 is 0.015, so 0.05 is a 3-sigma bound.
+    for (const double dof : {1.0, 3.0, 9.0, 21.0}) {
+        CAPTURE(dof);
+        const auto in = S6d::sweep_point<double>({{"dof", dof}, {"outlier_sigma", 0.0}});
+        REQUIRE(in[0] > in[3]);  // inliers are chi-square consistent
+        REQUIRE(in[0] < in[4]);
+        REQUIRE(std::abs(in[1] - 0.95) < 0.05);
+    }
+}
+
+TEST_CASE("S6d sweep: the per-dof gate before #481 admitted most 2-sigma short tracks", "[tools][bench][s6]") {
     const auto out = S6d::sweep_point<double>({{"dof", 3.0}, {"outlier_sigma", 2.0}});
-    REQUIRE(out[1] > 0.5);           // 5 per dof admits most 2-sigma-biased measurements
-    REQUIRE(out[2] < out[1] - 0.3);  // a 95% chi-square gate admits far fewer
+    REQUIRE(out[2] > 0.5);           // 5 per dof admits most 2-sigma-biased measurements
+    REQUIRE(out[1] < out[2] - 0.3);  // the chi-square quantile gate admits far fewer
 }
 
 TEST_CASE("S6e: a square-root filter that carries its factor matches Joseph in posit32", "[tools][bench][s6]") {

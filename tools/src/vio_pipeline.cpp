@@ -105,10 +105,21 @@ struct Args {
     // Live-assertion mode (#447): every boundary checked against its bench; the
     // first violation is reported (and captured, with --capture).
     bool live_assert = false;
-    bool prefer_dynamic = false;  ///< EuRoC: dynamic VI init only (VioConfig::prefer_dynamic_init)
+    bool prefer_dynamic = false;                 ///< EuRoC: dynamic VI init only (VioConfig::prefer_dynamic_init)
+    double gate_alpha = VioConfig{}.gate_alpha;  ///< MSCKF S6d chi-square gate significance (#481)
+    bool gate_per_dof = false;                   ///< MSCKF S6d: the pre-#481 5-per-dof gate
+    bool gate_flag = false;                      ///< --gate-alpha or --gate-per-dof was given
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
+
+/// The estimator configuration the flags select (defaults otherwise).
+VioConfig config_of(const Args& a) {
+    VioConfig cfg;
+    cfg.gate_alpha = a.gate_alpha;
+    cfg.gate_per_dof = a.gate_per_dof;
+    return cfg;
+}
 
 /// A frame number: decimal digits only (std::stoull would accept "-1" and "13x").
 std::uint64_t parse_frame(std::string_view s) {
@@ -193,7 +204,17 @@ Args parse(int argc, char** argv) {
             a.capture.first_violation = true;
         else if (v == "--prefer-dynamic")
             a.prefer_dynamic = true;
-        else if (v == "--live-assert") {
+        else if (v == "--gate-alpha") {
+            if (!next_is_value())
+                throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
+            a.gate_alpha = std::stod(argv[++i]);
+            a.gate_flag = true;
+            if (!(a.gate_alpha > 0.0 && 1.0 - a.gate_alpha < 1.0 && 1.0 - a.gate_alpha > 0.0))
+                throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
+        } else if (v == "--gate-per-dof") {
+            a.gate_per_dof = true;
+            a.gate_flag = true;
+        } else if (v == "--live-assert") {
             a.live_assert = true;
             a.capture.first_violation = true;
         } else if (v == "--capture-loop" && next_is_value()) {
@@ -891,11 +912,19 @@ int main(int argc, char** argv) {
                "  --capture-loop A:B         capture the filter loop over frames A..B (DIR/C_filter_loop/loop.json)\n"
                "  --live-assert              check every boundary against its bench; report the first violation\n"
                "  --prefer-dynamic           EuRoC: initialize by dynamic VI alignment only (no static init);\n"
-               "                             with --capture-stages S1_initialization, captures every attempt\n";
+               "                             with --capture-stages S1_initialization, captures every attempt\n"
+               "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
+               "                             significance A (default 0.05)\n"
+               "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n";
         return 0;
     }
     if (args.invariant && args.stage_types != "double") {
         std::cerr << "vio_pipeline: --stage-types selects MSCKF stage types; it does not apply to --invariant\n";
+        return 2;
+    }
+    if (args.invariant && args.gate_flag) {
+        std::cerr << "vio_pipeline: --gate-alpha and --gate-per-dof select the MSCKF gate; they do not "
+                     "apply to --invariant\n";
         return 2;
     }
     if (args.invariant && args.sqrt_covariance) {
@@ -945,7 +974,7 @@ int main(int argc, char** argv) {
         const auto taps = args.invariant ? std::make_unique<RunTaps>()
                                          : make_taps(args, "EuRoC " + args.dataset, euroc_cam0().intrinsics);
         const auto& rec = taps->recorder;
-        VioConfig cfg;
+        VioConfig cfg = config_of(args);
         cfg.prefer_dynamic_init = args.prefer_dynamic;
         const bool ok = args.invariant
                             ? run_euroc_invariant(args, cfg, r, &stream)
@@ -976,7 +1005,7 @@ int main(int argc, char** argv) {
     }
 
     const ev::SyntheticData<T> world = ev::generate_world<T>(robot_preset(args.robot));
-    const VioConfig cfg;
+    const VioConfig cfg = config_of(args);
     std::cout << "synthetic world: " << world.imu.size() << " IMU, " << world.frames.size()
               << " frames, robot=" << args.robot;
     if (!args.invariant)

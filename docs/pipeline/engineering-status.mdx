@@ -96,10 +96,10 @@ at 3 s one seed is marginal ([S5](stages/s5-triangulation.mdx)).
 
 The body-frame MSCKF, given the same kind of noise, is **not** consistent (#551).
 With perfect calibration and camera and IMU noise matched to what it assumes, its
-pose NEES is 11.5–288 over 10 seeds (median 47, against 6; measured on the
-synthetic camera as corrected in #467). The world-frame split puts most of it in
-yaw: yaw is unobservable, yet the filter's yaw σ falls about tenfold, from 0.16 rad
-to 0.012–0.023 rad, while the yaw error grows (to 0.23 rad with IMU noise alone and
+pose NEES is 10.6–112 over 10 seeds (median 34, against 6; measured on the
+synthetic camera as corrected in #467, with the χ²-quantile gate of #481). The
+world-frame split puts most of it in yaw: yaw is unobservable, yet the filter's yaw
+σ falls about tenfold, from 0.16 rad to 0.010–0.025 rad, while the yaw error grows (to 0.23 rad with IMU noise alone and
 exact observations). That is the signature of the #212
 yaw leak, now reproduced on a world with known truth, and it needs no calibration
 error. An earlier control that read "not over-confident" used exact sensors, so it
@@ -112,6 +112,7 @@ and matches its ATE (#429).
 | Area | Issue |
 |---|---|
 | Over-confidence (the umbrella) | <Issue id={212} />, <Issue id={551} /> |
+| S6d χ² gate (now the χ²₀.₉₅ quantile) | <Issue id={481} /> |
 | Consistency instrument (NEES/NIS) | <Issue id={264} /> |
 | Diagnostic-instrumentation epic | <Issue id={261} /> |
 | Real-data stage inspectors (epic — complete) | <Issue id={371} /> |

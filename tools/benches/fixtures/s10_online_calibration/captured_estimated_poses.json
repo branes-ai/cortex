@@ -3328,6 +3328,8 @@
    "calib_rot_sigma": 0.0,
    "chi2_per_dof": 5.0,
    "enable_gating": true,
+   "gate_alpha": 0.05,
+   "gate_rule": "chi2_quantile",
    "max_triangulation_iters": 5,
    "min_parallax_deg": 0.0,
    "normalized_sigma": 0.01
