@@ -126,6 +126,8 @@ template <math::Scalar U, math::Scalar T>
 [[nodiscard]] CameraUpdaterOptions<U> rebind(const CameraUpdaterOptions<T>& o) {
     CameraUpdaterOptions<U> out;
     out.normalized_sigma = scalar_cast<U>(o.normalized_sigma);
+    out.gate_rule = o.gate_rule;
+    out.gate_alpha = o.gate_alpha;
     out.chi2_per_dof = scalar_cast<U>(o.chi2_per_dof);
     out.enable_gating = o.enable_gating;
     out.max_triangulation_iters = o.max_triangulation_iters;

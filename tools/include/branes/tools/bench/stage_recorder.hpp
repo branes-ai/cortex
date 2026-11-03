@@ -382,8 +382,7 @@ public:
                     outcome = gate.accepted ? Outcome::Applied : Outcome::Gated;
                     // S6d: the run's own decision and NIS.
                     const std::size_t k = comp.compressed.H.rows;
-                    const double thr =
-                        opts.enable_gating ? static_cast<double>(opts.chi2_per_dof) * static_cast<double>(k) : 0.0;
+                    const double thr = static_cast<double>(upd.gate_threshold(k));
                     add<S6dGatingBench>(
                         g,
                         tag,

@@ -15,22 +15,24 @@
 // Fixtures:
 //   known_answer   P = 0.01·I₁₅, H selecting δp_x and δp_y, r = (0.2, 0.2),
 //                  σ = 0.01: S = 0.0101·I₂, γ = 0.08/0.0101 ≈ 7.92 on 2 dof,
-//                  accepted by the shipped gate (5 per dof = 10)
+//                  rejected by the shipped gate (χ²₀.₉₅(2) = 5.99); the
+//                  pre-#481 gate (5 per dof = 10) accepted it
 //   ground_truth   the synthetic-world track at the true state, exact
 //                  observations: γ ≈ 0
 //   captured       the same at the S2/S3 estimated state — recorded
 //
-// Variants: "shipped" (γ ≤ 5·dof), "chi2_95" (γ ≤ the 95% χ²(dof) quantile,
-// Wilson–Hilferty), "gate_off".
+// Variants: "shipped" (γ ≤ χ²₁₋α(dof), α = 0.05 by default), "chi2_99"
+// (α = 0.01), "per_dof" (γ ≤ 5·dof, the gate before #481), "gate_off".
 //
 // Sweep: dof × outlier size → the mean γ/dof of inliers and the acceptance rates
-// of inliers and outliers under the shipped and the χ²₉₅ gates.
+// of inliers and outliers under the shipped and the per-dof gates.
 //
 // Header-only, C++20.
 
 #ifndef BRANES_TOOLS_BENCH_S6D_GATING_BENCH_HPP
 #define BRANES_TOOLS_BENCH_S6D_GATING_BENCH_HPP
 
+#include <branes/math/stats.hpp>
 #include <branes/sdk/eval/consistency.hpp>
 #include <branes/sdk/eval/invariants.hpp>
 #include <branes/tools/bench/s6_scene.hpp>
@@ -64,16 +66,10 @@ struct S6dGatingBench {
     };
 
     [[nodiscard]] static std::vector<Variant> variants() {
-        return {{"shipped", "accept if NIS <= 5 per dof"},
-                {"chi2_95", "accept if NIS <= the 95% chi-square(dof) quantile (Wilson-Hilferty)"},
+        return {{"shipped", "the run's own gate (default: NIS <= the chi-square(dof) quantile at alpha 0.05)"},
+                {"chi2_99", "accept if NIS <= the 99% chi-square(dof) quantile"},
+                {"per_dof", "accept if NIS <= 5 per dof (the gate before #481)"},
                 {"gate_off", "accept every measurement (NIS still computed)"}};
-    }
-
-    /// The 95% χ²(k) quantile, Wilson–Hilferty: k·(1 − 2/(9k) + z₉₅·√(2/(9k)))³.
-    [[nodiscard]] static double chi2_95(std::size_t k) {
-        const double kk = static_cast<double>(k), a = 2.0 / (9.0 * kk);
-        const double c = 1.0 - a + 1.6448536269514722 * std::sqrt(a);
-        return kk * c * c * c;
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
@@ -117,11 +113,16 @@ struct S6dGatingBench {
         const std::size_t k = in.projected.H.rows;
         if (variant == "gate_off")
             opts.enable_gating = false;
-        else if (variant == "chi2_95" && k > 0)
-            opts.chi2_per_dof = T(chi2_95(k) / static_cast<double>(k));
+        else if (variant == "chi2_99") {
+            opts.gate_rule = sdk::msckf::GateRule::chi2_quantile;
+            opts.gate_alpha = 0.01;
+        } else if (variant == "per_dof") {
+            opts.gate_rule = sdk::msckf::GateRule::per_dof;
+            opts.chi2_per_dof = T{5};
+        }
         const sdk::msckf::CameraUpdater<T> upd(std::vector<sdk::msckf::CameraExtrinsics<T>>{{}}, opts);
         const auto g = sdk::msckf::stages::s6d_gating::apply(in.state, upd, in.projected);
-        const double thr = opts.enable_gating ? static_cast<double>(opts.chi2_per_dof) * static_cast<double>(k) : 0.0;
+        const double thr = static_cast<double>(upd.gate_threshold(k));
         return Output<T>{g.accepted ? 1 : 0, g.nis.value, g.nis.dof, g.nis.valid ? 1 : 0, thr};
     }
 
@@ -221,9 +222,10 @@ struct S6dGatingBench {
         f.kind = FixtureKind::KnownAnswer;
         f.variant = "shipped";
         f.source = "s6d_gating_bench: P = 0.01 I, H selects dp_x, dp_y, r = (0.2, 0.2), sigma = 0.01";
-        f.description = "expected: NIS = 0.08 / 0.0101 on 2 dof, accepted by 5 per dof";
+        f.description =
+            "expected: NIS = 0.08 / 0.0101 on 2 dof, rejected by chi2_0.95(2) = 5.99 (5 per dof accepted it)";
         f.input = encode_input(in);
-        f.expected = encode_output(Output<double>{1, 0.08 / 0.0101, 2, 1, 10.0});
+        f.expected = encode_output(Output<double>{0, 0.08 / 0.0101, 2, 1, math::chi_square_quantile(0.95, 2)});
         return f;
     }
 
@@ -295,7 +297,7 @@ struct S6dGatingBench {
         return sw;
     }
     [[nodiscard]] static std::vector<std::string> sweep_columns() {
-        return {"nis_per_dof_mean", "accept_rate_shipped", "accept_rate_chi2_95", "chi2_band_lower", "chi2_band_upper"};
+        return {"nis_per_dof_mean", "accept_rate_shipped", "accept_rate_per_dof", "chi2_band_lower", "chi2_band_upper"};
     }
     /// 200 draws r = L·z (S = L·Lᵀ, z standard normal) plus `outlier_sigma`·√S_ii
     /// on every component, against a random 15-state H with P = 0.01·I.
@@ -318,7 +320,7 @@ struct S6dGatingBench {
         if (!sdk::msckf::cholesky(S, L))
             throw std::logic_error("s6d bench sweep: S is not SPD");
         const int draws = 200;
-        double nis_sum = 0.0, acc_ship = 0.0, acc_chi = 0.0;
+        double nis_sum = 0.0, acc_ship = 0.0, acc_dof = 0.0;
         sdk::eval::ConsistencyAccumulator acc;
         for (int d = 0; d < draws; ++d) {
             in.projected.r.assign(k, 0.0);
@@ -330,14 +332,14 @@ struct S6dGatingBench {
             }
             const auto inT = decode_input<T>(encode_input(in));
             const auto ship = run<T>(inT, "shipped");
-            const auto chi = run<T>(inT, "chi2_95");
+            const auto dof = run<T>(inT, "per_dof");
             nis_sum += static_cast<double>(ship.nis) / static_cast<double>(k);
             acc.add(static_cast<double>(ship.nis), static_cast<int>(k));
             acc_ship += ship.accepted;
-            acc_chi += chi.accepted;
+            acc_dof += dof.accepted;
         }
         const auto rep = acc.report(0.05);
-        return {nis_sum / draws, acc_ship / draws, acc_chi / draws, rep.lower, rep.upper};
+        return {nis_sum / draws, acc_ship / draws, acc_dof / draws, rep.lower, rep.upper};
     }
 
     /// max over (i, j) of (|H|·|P|·|H|ᵀ)ᵢⱼ, in double: the magnitude the terms

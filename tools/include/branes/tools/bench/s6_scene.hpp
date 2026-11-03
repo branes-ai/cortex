@@ -84,6 +84,8 @@ template <class T>
 template <class T>
 [[nodiscard]] json encode_options(const Options<T>& o) {
     return json{{"normalized_sigma", pack(o.normalized_sigma)},
+                {"gate_rule", o.gate_rule == sdk::msckf::GateRule::per_dof ? "per_dof" : "chi2_quantile"},
+                {"gate_alpha", pack_num(o.gate_alpha)},
                 {"chi2_per_dof", pack(o.chi2_per_dof)},
                 {"enable_gating", o.enable_gating},
                 {"max_triangulation_iters", o.max_triangulation_iters},
@@ -94,6 +96,14 @@ template <class T>
 [[nodiscard]] Options<T> decode_options(const json& j) {
     Options<T> o;
     o.normalized_sigma = unpack_scalar<T>(j.at("normalized_sigma"));
+    // A capture without a gate rule predates #481, when every gate was per-dof:
+    // replay it with the rule it was recorded under.
+    const std::string rule = j.contains("gate_rule") ? j.at("gate_rule").get<std::string>() : "per_dof";
+    if (rule != "per_dof" && rule != "chi2_quantile")
+        throw std::invalid_argument("s6 options: unknown gate_rule '" + rule + "'");
+    o.gate_rule = rule == "per_dof" ? sdk::msckf::GateRule::per_dof : sdk::msckf::GateRule::chi2_quantile;
+    if (j.contains("gate_alpha"))
+        o.gate_alpha = unpack_num(j.at("gate_alpha"));
     o.chi2_per_dof = unpack_scalar<T>(j.at("chi2_per_dof"));
     o.enable_gating = j.at("enable_gating").get<bool>();
     o.max_triangulation_iters = j.at("max_triangulation_iters").get<std::size_t>();

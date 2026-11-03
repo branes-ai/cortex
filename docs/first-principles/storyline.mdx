@@ -136,7 +136,7 @@ Each candidate cause got a measurement. The method is described on
 | Update algebra (S6) | NIS/dof 1.002 at matched (P, R); null-space residual 2.8e-16 | Cleared |
 | Augmentation and marginalization (S3, S9) | Machine-zero residuals | Cleared |
 | Arithmetic precision | Long double = double | Refuted |
-| χ² gate too loose | 5·dof admits 59% (dof 1) and 70.5% (dof 3) of 2σ outliers, where χ²₀.₉₅ admits 44% and 22.5% (<Issue id={481} />) | **Open** contributor, never tested end to end |
+| χ² gate too loose | 5·dof admitted 59% (dof 1) and 70.5% (dof 3) of 2σ outliers; the χ²₀.₉₅ quantile admits 46% and 22.5%. End to end it lowers EuRoC ATE (V1_01 0.29 → 0.22 m, MH_05 0.75 → 0.73 m, V2_03 0.27 → 0.18 m) and leaves NIS unchanged (1.5, 2.2, 14.7) (finding <Issue id={481} />; measured in <Issue id={572} />) | **Fixed** (the shipped gate); an accuracy lever, not the over-confidence driver |
 
 **The structural cure: the R-IEKF** (<Issue id={347} />). A right-invariant error makes the
 four-DoF gauge (translation and yaw) independent of the state, so the update cannot leak
@@ -150,7 +150,7 @@ information along it.
   second order, and a wrong NEES metric in the test. Only a multi-cycle finite-difference check of
   the joint step caught them.
 - **Unit-proven is not system-proven.** On real EuRoC the R-IEKF still loses on accuracy: V1_01
-  ATE 1.31 m against 0.29 m, V2_03 1.36 m against 0.27 m (<Issue id={429} />). Its attitude NEES on
+  ATE 1.31 m against 0.22 m, V2_03 1.36 m against 0.18 m (R-IEKF figures from <Issue id={429} />; body-frame figures under the χ² gate from <Issue id={572} />). Its attitude NEES on
   EuRoC has never been reported.
 
 ## Chapter 4. Divide and conquer, and numerics
@@ -243,14 +243,15 @@ calibration:
 
 | 10 seeds | consistent | measured |
 |---|---|---|
-| pose NEES | 6 | 11.5–288, median 47 |
-| roll/pitch NEES | 2 | 3.2–18.7 (3.2–7.4 on 8 seeds) |
-| yaw NEES | 1 | 1.3–265 (7 of 10 above 6) |
-| position NEES | 3 | 1.3–4.6 |
-| yaw σ, first → last frame | never falls | 0.16 → 0.012–0.023 rad |
+| pose NEES | 6 | 10.6–112, median 34 |
+| roll/pitch NEES | 2 | 3.9–33.5, median 11.5 |
+| yaw NEES | 1 | 0.3–100 (7 of 10 above 6) |
+| position NEES | 3 | 1.4–12.8, median 2.0 |
+| yaw σ, first → last frame | never falls | 0.16 → 0.010–0.025 rad |
 
-These numbers are from after the synthetic camera was corrected (<Issue id={467} />, below). It
-first read 9.0–5088, median 26; the correction moved the magnitudes but not the signature.
+These numbers are from after the synthetic camera was corrected (<Issue id={467} />, below) and
+the χ² gate became a quantile (<Issue id={481} />, measured in <Issue id={572} />). It first read 9.0–5088, median 26, then
+11.5–288, median 47; each change moved the magnitudes but not the signature.
 
 Global yaw is unobservable, so its σ can only grow; here it falls about tenfold within seconds.
 With IMU noise alone and exact observations, the yaw error reaches 0.23 rad on one seed, about
@@ -297,8 +298,7 @@ The stage contract is on [S5 — Feature Triangulation](../pipeline/stages/s5-tr
 
 - The R-IEKF's NEES on real EuRoC (<Issue id={365} />) and its accuracy gap (<Issue id={429} />).
 - Attributing the body-frame yaw leak to S2/S3 and sizing its share of the NEES (<Issue id={480} />).
-- A χ²-quantile gate (<Issue id={481} />), and the time-offset state t_d, the one untested
-  over-confidence candidate (<Issue id={332} />).
+- The time-offset state t_d, the one untested over-confidence candidate (<Issue id={332} />).
 - The dynamic-initialization defects of Chapter 2.
 - The FAST/KLT border mismatch (<Issue id={474} />) and real-time latency (<Issue id={213} />).
 - Turning the real-data consistency checks from warnings into asserted bounds once a backend is

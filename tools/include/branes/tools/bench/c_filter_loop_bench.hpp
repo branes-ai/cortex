@@ -361,9 +361,7 @@ struct CFilterLoopBench {
                                  }});
                             const auto gate = st::s6d_gating::apply(before, upd, comp.compressed);
                             const std::size_t rows = comp.compressed.H.rows;
-                            const double thr = opts.enable_gating
-                                                   ? static_cast<double>(opts.chi2_per_dof) * static_cast<double>(rows)
-                                                   : 0.0;
+                            const double thr = static_cast<double>(upd.gate_threshold(rows));
                             out.checks.push_back({k, [before, opts, compressed = comp.compressed, gate, thr] {
                                                       using B = S6dGatingBench;
                                                       const typename B::template Input<T> bi{before, opts, compressed};
