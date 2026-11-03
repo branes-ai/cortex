@@ -56,6 +56,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.9](https://github.com/branes-ai/cortex/compare/v0.83.8...v0.83.9) (2026-11-03)
+
+
+### Bug Fixes
+
+* **msckf:** gate camera updates on the chi-square quantile, not 5 per dof ([#572](https://github.com/branes-ai/cortex/issues/572)) ([f6f58c4](https://github.com/branes-ai/cortex/commit/f6f58c4ab8db0f0279ac2db8008c284c27ae3fd9))
+* **s4:** let detection skip the klt border band, opt-in for its euroc ate cost ([#575](https://github.com/branes-ai/cortex/issues/575)) ([0d0df6d](https://github.com/branes-ai/cortex/commit/0d0df6ddf75f208777515cf088ccb6d4ad815a17))
+
 ## [0.83.8](https://github.com/branes-ai/cortex/compare/v0.83.7...v0.83.8) (2026-11-02)
 
 
