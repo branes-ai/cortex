@@ -69,6 +69,21 @@ TEST_CASE("S4 bench: an unchanged image is a fixed point; a clean translation tr
     REQUIRE(value_of(gt_trackable, "truth.endpoint_error") < 0.05);
 }
 
+TEST_CASE("S4 bench: the enforced churn check fails when nothing was detected", "[tools][bench][s4]") {
+    // A margin that rejects every corner must not pass the 5% bound with a vacuous 0%.
+    auto f = S4::ground_truth();
+    f.input["params"]["fast_threshold"] = 1e9;
+    const auto run = bn::run_fixture<S4>({"none", f}, "trackable_detect", bn::bench_types<S4>(), {"double"});
+    REQUIRE(run.types.size() == 1);
+    bool found = false;
+    for (const auto& r : run.types.front().report.results())
+        if (r.name == "tracks.lost_on_first_frame") {
+            found = true;
+            REQUIRE_FALSE(r.pass);
+        }
+    REQUIRE(found);
+}
+
 TEST_CASE("S4 bench: the image codec is lossless", "[tools][bench][s4]") {
     const auto img = S4::render(37, 23, 1.0, 2.0, 9.0, 7u);
     const auto back = bn::unpack_image(bn::pack(img.view()));

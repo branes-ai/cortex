@@ -491,6 +491,10 @@ private:
                                    kInvStage,
                                    "tracks.lost_on_first_frame",
                                    "%");
+        // Nothing born means nothing measured: an enforced 0% from a detector that
+        // found no trackable corner would pass vacuously, so it fails instead.
+        if (r.bound == inv::Bound::Upper && born == 0)
+            r.pass = false;
         return r;
     }
 
