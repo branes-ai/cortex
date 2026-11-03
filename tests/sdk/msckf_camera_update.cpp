@@ -224,4 +224,6 @@ TEST_CASE("S6d gate line: the chi-square quantile by default, 5 per dof on reque
     REQUIRE_THROWS_AS(ms::CameraUpdater<T>(cams, bad), std::invalid_argument);
     bad.gate_alpha = 1.0;
     REQUIRE_THROWS_AS(ms::CameraUpdater<T>(cams, bad), std::invalid_argument);
+    bad.gate_alpha = 1e-17;  // 1 - alpha rounds to 1: refused at construction, not mid-run
+    REQUIRE_THROWS_AS(ms::CameraUpdater<T>(cams, bad), std::invalid_argument);
 }

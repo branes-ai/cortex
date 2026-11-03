@@ -182,8 +182,10 @@ public:
             throw std::invalid_argument("CameraUpdater: normalized_sigma must be positive");
         if (opts_.enable_gating && opts_.gate_rule == GateRule::per_dof && !(opts_.chi2_per_dof > T{0}))
             throw std::invalid_argument("CameraUpdater: chi2_per_dof must be positive when gating");
+        // Checked on 1 - alpha, the probability the quantile takes: an alpha below 2^-53
+        // rounds it to exactly 1, which would throw mid-run instead of here.
         if (opts_.enable_gating && opts_.gate_rule == GateRule::chi2_quantile &&
-            !(opts_.gate_alpha > 0.0 && opts_.gate_alpha < 1.0))
+            !(opts_.gate_alpha > 0.0 && 1.0 - opts_.gate_alpha < 1.0 && 1.0 - opts_.gate_alpha > 0.0))
             throw std::invalid_argument("CameraUpdater: gate_alpha must be in (0,1) when gating");
         if (opts_.calib_rot_sigma < T{0})
             throw std::invalid_argument("CameraUpdater: calib_rot_sigma must be non-negative");

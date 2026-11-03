@@ -108,6 +108,7 @@ struct Args {
     bool prefer_dynamic = false;                 ///< EuRoC: dynamic VI init only (VioConfig::prefer_dynamic_init)
     double gate_alpha = VioConfig{}.gate_alpha;  ///< MSCKF S6d chi-square gate significance (#481)
     bool gate_per_dof = false;                   ///< MSCKF S6d: the pre-#481 5-per-dof gate
+    bool gate_flag = false;                      ///< --gate-alpha or --gate-per-dof was given
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
@@ -205,11 +206,13 @@ Args parse(int argc, char** argv) {
             a.prefer_dynamic = true;
         else if (v == "--gate-alpha" && next_is_value()) {
             a.gate_alpha = std::stod(argv[++i]);
-            if (!(a.gate_alpha > 0.0 && a.gate_alpha < 1.0))
+            a.gate_flag = true;
+            if (!(a.gate_alpha > 0.0 && 1.0 - a.gate_alpha < 1.0 && 1.0 - a.gate_alpha > 0.0))
                 throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
-        } else if (v == "--gate-per-dof")
+        } else if (v == "--gate-per-dof") {
             a.gate_per_dof = true;
-        else if (v == "--live-assert") {
+            a.gate_flag = true;
+        } else if (v == "--live-assert") {
             a.live_assert = true;
             a.capture.first_violation = true;
         } else if (v == "--capture-loop" && next_is_value()) {
@@ -915,6 +918,11 @@ int main(int argc, char** argv) {
     }
     if (args.invariant && args.stage_types != "double") {
         std::cerr << "vio_pipeline: --stage-types selects MSCKF stage types; it does not apply to --invariant\n";
+        return 2;
+    }
+    if (args.invariant && args.gate_flag) {
+        std::cerr << "vio_pipeline: --gate-alpha and --gate-per-dof select the MSCKF gate; they do not "
+                     "apply to --invariant\n";
         return 2;
     }
     if (args.invariant && args.sqrt_covariance) {
