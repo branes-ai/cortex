@@ -246,9 +246,58 @@ writes `NAME_report.json` and per-window `NAME_windows.csv`. It reports:
 That is the #212 finding, now per sequence and per block. Across all 79 866 updates on three
 sequences, **no camera update adds information along the unobservable directions**: the largest
 share is 1e-31, rounding. That confirms [#480](https://github.com/branes-ai/cortex/issues/480) on
-real data: the update is not where the filter learns what it cannot observe. The composition bench
-reports S2's `observability.yaw_leak` (Φ against the yaw direction) at up to about 2e-6 per IMU
-step, on synthetic and EuRoC loops alike. Over a run that is the remaining candidate, along with the IMU noise model.
+real data: no single update is where the filter learns what it cannot observe. The composition
+bench reports S2's `observability.yaw_leak` (Φ against the yaw direction) at up to about 2e-6 per
+IMU step, on synthetic and EuRoC loops alike. The ledger below shows that this is a small part of
+the leak. Most of it comes from updates moving the linearization point.
+
+### The observability ledger: which stage leaks
+
+A per-update audit checks H·N(x̂) at the state the update sees. A filter can pass it on every
+update and still gain information about yaw. Every Jacobian annihilates the basis at its own
+linearization point, but the stages don't share one linearization point. `vio_pipeline
+--observability-ledger` (tools/include/branes/tools/observability_ledger.hpp, [#480](https://github.com/branes-ai/cortex/issues/480))
+measures what that costs. It carries the 4-D unobservable basis through the run the way the filter's
+linear system carries it:
+
+- S2 multiplies it by the propagator's own Φ.
+- S3 copies the IMU pose rows into the new clone.
+- S9 drops the clone's rows.
+- An S6 update leaves it alone.
+
+In that system, the camera's Fisher information about the starting unobservable directions is
+Σ Tᵀ Hᵀ R⁻¹ H T over applied updates, and a consistent filter keeps it at 0.
+
+The carried basis T drifts away from N(x̂) only through each stage's defect, carried forward by the
+later stages:
+
+- **S2:** Φ N(x̂⁻) − N(x̂⁺).
+- **S3:** the clone copy against the new basis, exactly zero.
+- **S6:** N(x̂⁻) − N(x̂⁺), the update moving the mean.
+- **S9:** zero.
+- **Untapped:** any change no tap reported.
+
+So R^-½ H T splits exactly by stage, and the shares add up to the total. A self-check holds
+T = N(x̂) + Σ D to roundoff.
+
+| | V1_01 | MH_05 | V2_03 |
+|---|---|---|---|
+| S6 applied updates | 34 788 | 27 513 | 14 799 |
+| closure, T against N(x̂) + Σ D | 1.2e-10 | 4.3e-11 | 1.2e-10 |
+| share of the spurious yaw information: S6 moving the mean | **99.4%** | **99.1%** | **94.7%** |
+| … S2's first-order Φ | 0.6% | 0.9% | 5.3% |
+| … S3, S9, S6's own projection, untapped | 0 | 0 | 0 |
+| information along global translation | 1e-22 | 7e-23 | 5e-23 |
+| filter yaw σ, start → minimum | 0.1 → 0.027 rad | 0.1 → 0.024 rad | 0.1 → 0.019 rad |
+
+The ledger ignores process noise, which only forgets information, so its totals are upper bounds
+(3.4e9 rad⁻² on V1_01). The shares are the finding. Translation never leaks, because its basis
+doesn't depend on the state. Yaw leaks through the update: an update corrects the mean, the next
+Jacobians are linearized at the corrected mean, and the basis they annihilate has moved from the one
+the earlier Jacobians carried. S2's share grows with rotation rate, as a first-order Φ should, and
+stays a minor term. This is the mechanism that first-estimates Jacobians and the R-IEKF each target.
+The run is unchanged by the tap: ATE is bit-identical to an untapped run. With `--out`, the ledger
+also writes `observability_ledger.csv`, the running totals and per-stage yaw shares at every frame.
 
 ### What the composition bench found
 

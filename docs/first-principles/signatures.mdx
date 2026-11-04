@@ -48,8 +48,10 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
 5. **ATE hides over-confidence.** Always report NEES and NIS beside ATE and RPE.
 6. **NIS ≈ 1 does not mean consistent.** Gauge leaks and extrinsic errors don't show in the
    innovations.
-7. **A body-frame EKF leaks yaw.** The leak is in the S2/S3 linearization. A more accurate Φ makes
-   it worse; the cure is a different error state.
+7. **A body-frame EKF leaks yaw.** The leak comes from the update moving the linearization point
+   under a basis the filter's Jacobians keep (95–99% on EuRoC); S2's first-order Φ adds the rest, and
+   S3 and S9 add none (<Issue id={480} />). A more accurate Φ makes it worse; the cure is a different
+   error state.
 8. **Partial FEJ is worse than none.**
 9. **A fix that cures the symptom can worsen the disease.** Inflating R and gating on parallax both
    did.

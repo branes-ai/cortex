@@ -135,6 +135,7 @@ Each candidate cause got a measurement. The method is described on
 | Diagonal Q_d (S2) | Drops 0.35% of Q; propagation-only NEES 6.4 against 6 | Cleared for the body-frame filter (but see Chapter 5 for the R-IEKF) |
 | Update algebra (S6) | NIS/dof 1.002 at matched (P, R); null-space residual 2.8e-16 | Cleared |
 | Augmentation and marginalization (S3, S9) | Machine-zero residuals | Cleared |
+| Linearization points drifting apart across stages | Observability ledger: the update moving the mean carries 95–99% of the spurious yaw information on EuRoC, S2's Φ 1–5%, S3 and S9 none; no position leak (<Issue id={480} />) | **Confirmed** for the body-frame filter; the R-IEKF removes it by construction |
 | Arithmetic precision | Long double = double | Refuted |
 | χ² gate too loose | 5·dof admitted 59% (dof 1) and 70.5% (dof 3) of 2σ outliers; the χ²₀.₉₅ quantile admits 46% and 22.5%. End to end it lowers EuRoC ATE (V1_01 0.29 → 0.22 m, MH_05 0.75 → 0.73 m, V2_03 0.27 → 0.18 m) and leaves NIS unchanged (1.5, 2.2, 14.7) (finding <Issue id={481} />; measured in <Issue id={572} />) | **Fixed** (the shipped gate); an accuracy lever, not the over-confidence driver |
 
@@ -260,6 +261,31 @@ where the truth is known, and it needs no calibration error. The R-IEKF under th
 0.55–1.83. The body-frame filter was kept, characterized by a test, as the EuRoC accuracy
 reference until the R-IEKF matches it there.
 
+**Where the leak comes from** (<Issue id={480} />). The S6 benches had shown that one update can't
+add information along the unobservable directions: it evaluates every Jacobian at one estimate, so
+H·N(x̂) = 0. The issue suspected the stages around it, S2's Φ and S3's clones. An observability
+ledger settled it. It carries the unobservable basis through the run with the filter's own
+Jacobians, and splits the basis's drift away from N(x̂) into the defect each stage introduces. Every
+camera update's information along the carried basis is then booked to the stage whose defect put it
+there.
+
+| | V1_01 | MH_05 | V2_03 | synthetic, 1× noise |
+|---|---|---|---|---|
+| S6: the update moves the mean | 99.4% | 99.1% | 94.7% | 99.9% |
+| S2: first-order Φ | 0.6% | 0.9% | 5.3% | 0.1% |
+| S3, S9, untapped changes | 0 | 0 | 0 | 0 |
+| information along global translation | 0 (1e-22) | 0 | 0 | 0 |
+| filter yaw σ, start → minimum | 0.1 → 0.027 rad | 0.1 → 0.024 | 0.1 → 0.019 | 0.1 → 0.043 |
+
+So the cause is the textbook EKF inconsistency. An update corrects the mean, the next Jacobians are
+evaluated at the corrected mean, and the basis they annihilate is no longer the one the earlier
+Jacobians carried. S2's share grows with rotation rate (V2_03), as a first-order Φ should; it isn't
+the driver. Three remedies act on that mechanism:
+
+- First-estimates Jacobians, which were tried and refuted on ATE (<Issue id={280} />, <Issue id={339} />).
+- Projecting each H off the carried basis, the observability-constrained EKF, which hasn't been tried.
+- An error state whose basis doesn't depend on the estimate: the R-IEKF, the chosen path (<Issue id={365} />).
+
 **Smaller ones:**
 
 - The synthetic camera's tangential distortion p2 was 1000× EuRoC's (<Issue id={467} />): a
@@ -297,7 +323,6 @@ The stage contract is on [S5 — Feature Triangulation](../pipeline/stages/s5-tr
 ## What finishes the story
 
 - The R-IEKF's NEES on real EuRoC (<Issue id={365} />) and its accuracy gap (<Issue id={429} />).
-- Attributing the body-frame yaw leak to S2/S3 and sizing its share of the NEES (<Issue id={480} />).
 - The time-offset state t_d, the one untested over-confidence candidate (<Issue id={332} />).
 - The dynamic-initialization defects of Chapter 2.
 - Real-time latency (<Issue id={213} />).
