@@ -67,6 +67,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <ios>
 #include <limits>
 #include <ostream>
 #include <string>
@@ -351,6 +352,7 @@ public:
     void write_csv(std::ostream& os) const {
         const auto flags = os.flags();
         const auto prec = os.precision(std::numeric_limits<double>::max_digits10);
+        os << std::defaultfloat;  // a caller's std::fixed would round 1e-22 totals to 0
         os << "t,info_yaw,info_pos";
         for (std::size_t s = 0; s < kLeakSources; ++s)
             os << ",share_yaw_" << leak_source_name(static_cast<LeakSource>(s));

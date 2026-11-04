@@ -132,14 +132,21 @@ TEST_CASE("Observability ledger: the CSV tells EuRoC frame times apart", "[tools
     ledger.on_frame(1403636579.763555);  // Unix-epoch seconds, 50 ms apart
     ledger.on_frame(1403636579.813555);
     std::ostringstream os;
+    os << std::fixed;  // a caller's fixed notation must not round small totals away
     ledger.write_csv(os);
-    REQUIRE(os.precision() == 6);  // the caller's precision is restored
+    REQUIRE(os.precision() == 6);  // the caller's precision and flags are restored
+    REQUIRE((os.flags() & std::ios_base::floatfield) == std::ios_base::fixed);
     std::istringstream is(os.str());
     std::string header, r1, r2;
     std::getline(is, header);
     std::getline(is, r1);
     std::getline(is, r2);
     REQUIRE(r1.substr(0, r1.find(',')) != r2.substr(0, r2.find(',')));
+    // Written in default notation, 17 significant digits: fixed would print 17 decimals.
+    std::ostringstream ref;
+    ref.precision(17);
+    ref << 1403636579.813555;
+    REQUIRE(r2.substr(0, r2.find(',')) == ref.str());
 }
 
 TEST_CASE("Observability ledger: on the synthetic world the leak is yaw, from S6 moving the mean",
