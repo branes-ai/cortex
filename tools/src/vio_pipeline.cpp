@@ -44,6 +44,7 @@
 #include <branes/tools/bench/stage_recorder.hpp>
 #include <branes/tools/euroc_cam0.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
+#include <branes/tools/observability_ledger.hpp>
 #include <branes/tools/stage_type_presets.hpp>
 
 #include <cmath>
@@ -110,6 +111,7 @@ struct Args {
     bool gate_per_dof = false;                   ///< MSCKF S6d: the pre-#481 5-per-dof gate
     bool gate_flag = false;                      ///< --gate-alpha or --gate-per-dof was given
     bool detect_trackable_only = false;          ///< S4: skip the KLT border band when detecting (#474)
+    bool observability_ledger = false;           ///< per-stage spurious yaw/position information (#480)
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
 };
@@ -223,6 +225,8 @@ Args parse(int argc, char** argv) {
         else if (v == "--gate-per-dof") {
             a.gate_per_dof = true;
             a.gate_flag = true;
+        } else if (v == "--observability-ledger") {
+            a.observability_ledger = true;
         } else if (v == "--live-assert") {
             a.live_assert = true;
             a.capture.first_violation = true;
@@ -268,6 +272,7 @@ make_recorder(const Args& args, std::string source, const branes::math::cameras:
 struct RunTaps {
     std::unique_ptr<Recorder> recorder;
     std::unique_ptr<branes::tools::bench::LoopTape<T>> loop;
+    std::unique_ptr<branes::tools::ObservabilityLedger<T>> ledger;
     branes::tools::bench::StageTapFanout<T> fanout;
     std::string source;
 
@@ -314,9 +319,27 @@ make_taps(const Args& args, std::string source, const branes::math::cameras::Pin
     if (args.capture_loop)
         t->loop =
             std::make_unique<branes::tools::bench::LoopTape<T>>(args.capture_loop->first, args.capture_loop->second);
+    if (args.observability_ledger)
+        t->ledger = std::make_unique<branes::tools::ObservabilityLedger<T>>();
     t->fanout.add(t->recorder.get());
     t->fanout.add(t->loop.get());
+    t->fanout.add(t->ledger.get());
     return t;
+}
+
+/// Print the observability ledger (--observability-ledger) and, with --out, its per-frame CSV.
+void report_ledger(const RunTaps& taps, const Args& args) {
+    if (!taps.ledger)
+        return;
+    taps.ledger->report(std::cout);
+    if (args.out.empty())
+        return;
+    std::ofstream csv(args.out + "/observability_ledger.csv");
+    if (!csv) {
+        std::cerr << "vio_pipeline: cannot write " << args.out << "/observability_ledger.csv\n";
+        return;
+    }
+    taps.ledger->write_csv(csv);
 }
 
 void report_capture(const Recorder* rec, const std::string& dir, bool live) {
@@ -926,7 +949,10 @@ int main(int argc, char** argv) {
                "                             significance A (default 0.05)\n"
                "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
                "  --detect-trackable-only    EuRoC front end: skip FAST corners in the KLT border band\n"
-               "                             (#474; off by default)\n";
+               "                             (#474; off by default)\n"
+               "  --observability-ledger     MSCKF: attribute the spurious yaw / global-position information\n"
+               "                             to the stage that introduced it (#480); with --out, also\n"
+               "                             writes observability_ledger.csv\n";
         return 0;
     }
     if (args.invariant && args.stage_types != "double") {
@@ -953,6 +979,12 @@ int main(int argc, char** argv) {
     if ((!args.capture_dir.empty() || args.live_assert) && args.stage_types != "double") {
         std::cerr << "vio_pipeline: --capture and --live-assert replay stages in double; they need --stage-types "
                      "double\n";
+        return 2;
+    }
+    if (args.observability_ledger &&
+        (args.invariant || args.sweep || args.sqrt_covariance || args.stage_types != "double")) {
+        std::cerr << "vio_pipeline: --observability-ledger taps a single full-covariance MSCKF run in double; it "
+                     "does not apply to --invariant, --sweep, --covariance sqrt or --stage-types\n";
         return 2;
     }
     if ((!args.capture_dir.empty() || args.live_assert) && (args.invariant || args.sweep))
@@ -1012,6 +1044,7 @@ int main(int argc, char** argv) {
         if (args.video && !args.invariant)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
         report_capture(rec.get(), args.capture_dir, args.live_assert);
+        report_ledger(*taps, args);
         return 0;
     }
 
@@ -1077,6 +1110,7 @@ int main(int argc, char** argv) {
         if (args.video)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
         report_capture(rec.get(), args.capture_dir, args.live_assert);
+        report_ledger(*taps, args);
     }
     if (!args.out.empty())
         std::cout << "\n  artifacts in " << args.out << "/\n";

@@ -68,6 +68,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 | C1 | Joint step against finite differences | Over several propagate → update → retract cycles | `invariant_joint_step_fd.cpp` | locked |
 | C2 | Square-root and full covariance agree | δx and P agree to 1e-12 on a rectangular factor after augmentation | "the square-root update takes the rectangular factor …" | locked |
 | C3 | Stage-boundary fixtures replay bit for bit | Captured fixtures reproduce; the first violation points at a real fault | `stage_capture.cpp` | locked (the oracle has a false positive, <Issue id={487} />) |
+| C4 | Where the loop gains unobservable information | The unobservable basis carried through the loop by the filter's own Jacobians closes against N(x̂) + Σ per-stage defects to roundoff; S3, S9 and untapped changes add no defect; no information along global translation; the yaw shares add up to the total | `observability_ledger.cpp` (4 cases); on EuRoC, `vio_pipeline --observability-ledger` | locked (instrument); body-frame leak characterized: S6's mean shift carries 95–99%, <Issue id={480} /> |
 
 ## D. The system, on synthetic data with matched noise
 
