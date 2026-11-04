@@ -347,7 +347,10 @@ public:
     }
 
     /// Per-frame CSV: t, cumulative yaw/pos information, each stage's yaw share, yaw σ.
+    /// Full round-trip precision: EuRoC frame times are Unix-epoch seconds (~1.4e9).
     void write_csv(std::ostream& os) const {
+        const auto flags = os.flags();
+        const auto prec = os.precision(std::numeric_limits<double>::max_digits10);
         os << "t,info_yaw,info_pos";
         for (std::size_t s = 0; s < kLeakSources; ++s)
             os << ",share_yaw_" << leak_source_name(static_cast<LeakSource>(s));
@@ -358,6 +361,8 @@ public:
                 os << ',' << sh.yaw;
             os << ',' << r.yaw_sigma << '\n';
         }
+        os.precision(prec);
+        os.flags(flags);
     }
 
 private:

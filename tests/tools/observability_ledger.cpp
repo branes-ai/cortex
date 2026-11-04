@@ -20,6 +20,8 @@
 #include <cmath>
 #include <cstdint>
 #include <span>
+#include <sstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -119,6 +121,25 @@ TEST_CASE("Observability ledger: a change no tap reported is booked as untapped"
     REQUIRE(max_abs(ledger.defect(LeakSource::untapped)) > 0.1);
     REQUIRE(ledger.totals().closure_max < 1e-12);
     REQUIRE(ledger.totals().restarts == 0);
+}
+
+TEST_CASE("Observability ledger: the CSV tells EuRoC frame times apart", "[tools][observability]") {
+    Ledger ledger;
+    St s = scene_state();
+    St a = s;
+    sdk::msckf::StateHelper<double>::augment_clone(a);
+    ledger.on_s3(s, 0.0, {}, a);
+    ledger.on_frame(1403636579.763555);  // Unix-epoch seconds, 50 ms apart
+    ledger.on_frame(1403636579.813555);
+    std::ostringstream os;
+    ledger.write_csv(os);
+    REQUIRE(os.precision() == 6);  // the caller's precision is restored
+    std::istringstream is(os.str());
+    std::string header, r1, r2;
+    std::getline(is, header);
+    std::getline(is, r1);
+    std::getline(is, r2);
+    REQUIRE(r1.substr(0, r1.find(',')) != r2.substr(0, r2.find(',')));
 }
 
 TEST_CASE("Observability ledger: on the synthetic world the leak is yaw, from S6 moving the mean",
