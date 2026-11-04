@@ -285,7 +285,7 @@ T = N(x̂) + Σ D to roundoff.
 | S6 applied updates | 34 788 | 27 513 | 14 799 |
 | closure, T against N(x̂) + Σ D | 1.2e-10 | 4.3e-11 | 1.2e-10 |
 | share of the spurious yaw information: S6 moving the mean | **99.4%** | **99.1%** | **94.7%** |
-| … S2's first-order Φ | 0.6% | 0.9% | 5.3% |
+| … S2, Φ against the mean's Euler step | 0.6% | 0.9% | 5.3% |
 | … S3, S9, S6's own projection, untapped | 0 | 0 | 0 |
 | information along global translation | 1e-22 | 7e-23 | 5e-23 |
 | filter yaw σ, start → minimum | 0.1 → 0.027 rad | 0.1 → 0.024 rad | 0.1 → 0.019 rad |
@@ -294,8 +294,9 @@ The ledger ignores process noise, which only forgets information, so its totals 
 (3.4e9 rad⁻² on V1_01). The shares are the finding. Translation never leaks, because its basis
 doesn't depend on the state. Yaw leaks through the update: an update corrects the mean, the next
 Jacobians are linearized at the corrected mean, and the basis they annihilate has moved from the one
-the earlier Jacobians carried. S2's share grows with rotation rate, as a first-order Φ should, and
-stays a minor term. This is the mechanism that first-estimates Jacobians and the R-IEKF each target.
+the earlier Jacobians carried. S2's share grows with rotation rate and stays a minor term. It
+comes from linearizing Φ against the mean's Euler step, not from truncating Φ: the S2 bench finds a
+higher-order Φ leaks more. This is the mechanism that first-estimates Jacobians and the R-IEKF each target.
 The run is unchanged by the tap: ATE is bit-identical to an untapped run. With `--out`, the ledger
 also writes `observability_ledger.csv`, the running totals and per-stage yaw shares at every frame.
 

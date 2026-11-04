@@ -49,7 +49,8 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
 6. **NIS ≈ 1 does not mean consistent.** Gauge leaks and extrinsic errors don't show in the
    innovations.
 7. **A body-frame EKF leaks yaw.** The leak comes from the update moving the linearization point
-   under a basis the filter's Jacobians keep (95–99% on EuRoC); S2's first-order Φ adds the rest, and
+   under a basis the filter's Jacobians keep (95–99% on EuRoC); S2's Φ, linearized against the mean's
+   Euler step, adds the rest, and
    S3 and S9 add none (<Issue id={480} />). A more accurate Φ makes it worse; the cure is a different
    error state.
 8. **Partial FEJ is worse than none.**

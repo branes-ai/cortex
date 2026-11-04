@@ -28,8 +28,9 @@
 // T drifts away from the current N(x̂) only by defects that individual stages
 // introduce, so T = N(x̂) + Σ_stage D_stage exactly:
 //
-//   S2_propagation      Φ N(x̂⁻) − N(x̂⁺): the first-order Φ does not carry the
-//                       basis at the old mean onto the basis at the new mean
+//   S2_propagation      Φ N(x̂⁻) − N(x̂⁺): Φ, linearized against the mean's Euler
+//                       step, does not carry the basis at the old mean onto the
+//                       basis at the new mean (a higher-order Φ leaks more, #471)
 //   S3_augmentation     [I; J] N(x̂⁻) − N(x̂⁺): zero, a clone is an exact copy
 //   S6_mean_shift       N(x̂⁻) − N(x̂⁺): the update moves the linearization point
 //                       under a basis that stays put

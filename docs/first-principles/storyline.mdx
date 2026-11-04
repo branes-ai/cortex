@@ -125,7 +125,7 @@ Each candidate cause got a measurement. The method is described on
 | Q/R mistuned | Best NEES at Q×10. R×4 gives NIS 1.08 but ATE 2.07 m; R×10 gives 278 m. No (Q, R) pair is both consistent and accurate (<Issue id={280} />) | Refuted as the sole cause; tuning only compensates |
 | Gross calibration or time-sync bias | Innovation mean −0.013σ | Refuted |
 | Non-white innovations | After a deterministic update order, MH_05 innovations are white | Partly an artifact |
-| **Yaw null-space leak (body-frame EKF)** | ‖H·N‖ is 2e-16 at a consistent point and **0.147** at σ = 2 cm, growing with σ (0.028 → 0.462); the translation leak is exactly 0 (<Issue id={337} />). On real V2_03 the mean leak is 0.39, nonzero on every update. The S6 update adds none (<Issue id={480} />); S2 leaks 2.4e-6 per 5 ms step | **Confirmed as a mechanism.** It lives in S2/S3 linearization, not S6. Its share of the NEES is not yet attributed |
+| **Yaw null-space leak (body-frame EKF)** | ‖H·N‖ is 2e-16 at a consistent point and **0.147** at σ = 2 cm, growing with σ (0.028 → 0.462); the translation leak is exactly 0 (<Issue id={337} />). On real V2_03 the mean leak is 0.39, nonzero on every update. S6's projection adds none at its own linearization point (<Issue id={457} />); S2 leaks 2.4e-6 per 5 ms step | **Confirmed as a mechanism.** Attributed in the row below: the S6 update moving the mean carries 95–99%, S2 1–5%, S3 none |
 | FEJ, measurement-only | Attitude NEES 993 → 1336 (V1_01); MH_05 → 107,544 and 20.9 m (<Issue id={339} />) | **Refuted** |
 | FEJ, full | V1_01 → 2281 m; MH_05 → 11 km | **Refuted** as implemented: partial FEJ mixes a first-estimate H with a current-estimate P |
 | Unmodeled calibration, as an isotropic R term | NIS 14.7 → 1.41, but NEES 140 → **3074** and ATE → 4.74 m | Refuted as the fix: it cures the symptom and worsens the state |
@@ -135,7 +135,7 @@ Each candidate cause got a measurement. The method is described on
 | Diagonal Q_d (S2) | Drops 0.35% of Q; propagation-only NEES 6.4 against 6 | Cleared for the body-frame filter (but see Chapter 5 for the R-IEKF) |
 | Update algebra (S6) | NIS/dof 1.002 at matched (P, R); null-space residual 2.8e-16 | Cleared |
 | Augmentation and marginalization (S3, S9) | Machine-zero residuals | Cleared |
-| Linearization points drifting apart across stages | Observability ledger: the update moving the mean carries 95–99% of the spurious yaw information on EuRoC, S2's Φ 1–5%, S3 and S9 none; no position leak (<Issue id={480} />) | **Confirmed** for the body-frame filter; the R-IEKF removes it by construction |
+| Linearization points drifting apart across stages | Observability ledger: the update moving the mean carries 95–99% of the spurious yaw information on EuRoC, S2 1–5%, S3 and S9 none; no position leak (<Issue id={480} />) | **Confirmed** for the body-frame filter; the R-IEKF removes it by construction |
 | Arithmetic precision | Long double = double | Refuted |
 | χ² gate too loose | 5·dof admitted 59% (dof 1) and 70.5% (dof 3) of 2σ outliers; the χ²₀.₉₅ quantile admits 46% and 22.5%. End to end it lowers EuRoC ATE (V1_01 0.29 → 0.22 m, MH_05 0.75 → 0.73 m, V2_03 0.27 → 0.18 m) and leaves NIS unchanged (1.5, 2.2, 14.7) (finding <Issue id={481} />; measured in <Issue id={572} />) | **Fixed** (the shipped gate); an accuracy lever, not the over-confidence driver |
 
@@ -272,15 +272,15 @@ there.
 | | V1_01 | MH_05 | V2_03 | synthetic, 1× noise |
 |---|---|---|---|---|
 | S6: the update moves the mean | 99.4% | 99.1% | 94.7% | 99.9% |
-| S2: first-order Φ | 0.6% | 0.9% | 5.3% | 0.1% |
+| S2: Φ against the mean's Euler step | 0.6% | 0.9% | 5.3% | 0.1% |
 | S3, S9, untapped changes | 0 | 0 | 0 | 0 |
 | information along global translation | 0 (1e-22) | 0 | 0 | 0 |
 | filter yaw σ, start → minimum | 0.1 → 0.027 rad | 0.1 → 0.024 | 0.1 → 0.019 | 0.1 → 0.043 |
 
 So the cause is the textbook EKF inconsistency. An update corrects the mean, the next Jacobians are
 evaluated at the corrected mean, and the basis they annihilate is no longer the one the earlier
-Jacobians carried. S2's share grows with rotation rate (V2_03), as a first-order Φ should; it isn't
-the driver. Three remedies act on that mechanism:
+Jacobians carried. S2's share, Φ linearized against the mean's Euler step (a higher-order Φ leaks more, not
+less), grows with rotation rate (V2_03); it isn't the driver. Three remedies act on that mechanism:
 
 - First-estimates Jacobians, which were tried and refuted on ATE (<Issue id={280} />, <Issue id={339} />).
 - Projecting each H off the carried basis, the observability-constrained EKF, which hasn't been tried.

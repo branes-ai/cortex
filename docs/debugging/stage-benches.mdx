@@ -220,7 +220,7 @@ failure points at one sub-step. The S6 benches (#457) found:
   That rules out this mechanism inside S6; it doesn't rule out other sources of the #212
   over-confidence. The leak happens between updates: each update moves the linearization point the
   next one is evaluated at. The observability ledger books 95–99% of the spurious yaw information
-  on EuRoC to that, and 1–5% to S2's first-order Φ
+  on EuRoC to that, and 1–5% to S2's Φ
   ([#480](https://github.com/branes-ai/cortex/issues/480); see
   [Capture and composition](capture-and-composition.mdx)).
 - **The χ² gate was loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
