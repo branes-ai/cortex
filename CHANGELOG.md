@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.10](https://github.com/branes-ai/cortex/compare/v0.83.9...v0.83.10) (2026-11-04)
+
+
+### Bug Fixes
+
+* **tools:** attribute the body-frame yaw leak per stage with an observability ledger ([#576](https://github.com/branes-ai/cortex/issues/576)) ([358de50](https://github.com/branes-ai/cortex/commit/358de5015e70a93a6fb1aa737236ef2c58aeb07e))
+
 ## [0.83.9](https://github.com/branes-ai/cortex/compare/v0.83.8...v0.83.9) (2026-11-03)
 
 
