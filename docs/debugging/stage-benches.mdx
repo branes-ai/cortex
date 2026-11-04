@@ -218,8 +218,11 @@ failure points at one sub-step. The S6 benches (#457) found:
 - **The update adds no information along the unobservable directions.** At the estimated state as
   much as at the true one, the projected Jacobian annihilates them (global position, yaw) to ≈1e-16.
   That rules out this mechanism inside S6; it doesn't rule out other sources of the #212
-  over-confidence. The yaw leak the S2 bench measures in propagation is an identified one, and
-  [#480](https://github.com/branes-ai/cortex/issues/480) attributes the leak stage by stage.
+  over-confidence. The leak happens between updates: each update moves the linearization point the
+  next one is evaluated at. The observability ledger books 95–99% of the spurious yaw information
+  on EuRoC to that, and 1–5% to S2's Φ
+  ([#480](https://github.com/branes-ai/cortex/issues/480); see
+  [Capture and composition](capture-and-composition.mdx)).
 - **The χ² gate was loose at low dof.** Inliers are χ²-consistent, but with 1–3 dof the
   5-per-dof gate admitted 59–70% of measurements biased by 2σ. The shipped gate is now the 95% χ²
   quantile, which admits 46% and 22.5% of them and 95–97.5% of inliers at every dof
