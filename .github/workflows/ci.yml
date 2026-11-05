@@ -81,7 +81,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: branes-ai/architecture/actions/check-records@94fe5cd6bd41ae11fca90fe5008c365cbf60d776  # main after architecture#2
+      - uses: branes-ai/architecture/actions/check-records@14df5b889373d8e1eec6249ce0fdc59a451bfd4c  # main after architecture#2
         with:
           strict: 'true'
 
@@ -98,7 +98,7 @@ jobs:
           persist-credentials: false
       # Installs the pinned docs-kit (docs-site/package.json), builds the site as
       # the deploy does, and checks every link and anchor in it.
-      - uses: branes-ai/docs-kit/actions/check@8f55c75f0151e934eb2b0abe384cfcc0e5f75df1  # v0.6.0
+      - uses: branes-ai/docs-kit/actions/check@717776d1db4888d57dab00e718ead6b9e98d6b2b  # v0.6.0
 
   build-and-test-sitl:
     name: Build and Test (SITL - x86)
