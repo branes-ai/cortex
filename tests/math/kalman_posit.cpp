@@ -274,6 +274,7 @@ TEST_CASE("kalman filter tracks a constant-velocity target in IEEE and posit ari
 
     SECTION("double reference filters the measurement noise") {
         REQUIRE(r.r64.positive_definite);
+        REQUIRE(r.r64.max_asymmetry < 1e-12);
         REQUIRE(r.r64.rms_position < 0.5 * r.raw);
     }
     SECTION("32-bit types match the double reference") {
