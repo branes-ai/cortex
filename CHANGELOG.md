@@ -56,6 +56,13 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.83.12](https://github.com/branes-ai/cortex/compare/v0.83.11...v0.83.12) (2026-11-05)
+
+
+### Tests
+
+* **math:** add the kalman filter example over universal posits ([#580](https://github.com/branes-ai/cortex/issues/580)) ([979f996](https://github.com/branes-ai/cortex/commit/979f9965b0f0f62a3a96798a32f51fa025b2c8ec))
+
 ## [0.83.11](https://github.com/branes-ai/cortex/compare/v0.83.10...v0.83.11) (2026-11-05)
 
 
