@@ -194,3 +194,11 @@ Work is tracked as GitHub issues in this repo, grouped into epics and phases.
 - **Cross-cutting labels:** `epic`, `mvp-blocker`, `clean-room`, `no-gpl`,
   `cv-stack`, `decision-needed` (needs a maintainer call before work starts).
 - Issues are tracked on the *Branes CORTEX* project board with an estimate.
+
+## Contributor License Agreement
+
+Before we can merge any contribution, every author must accept the [Branes.AI Individual Contributor License Agreement](https://github.com/branes-ai/cla/blob/main/ICLA.md). A bot checks every pull request. To sign, post this comment on your pull request, exactly as written:
+
+> I have read the Branes.AI Individual Contributor License Agreement and I hereby sign it.
+
+One acceptance covers every Branes.AI repository. If your employer or university has rights to your work, it must also sign the [Corporate CLA](https://github.com/branes-ai/cla/blob/main/CCLA.md); contact kishore.kondapi@branes.ai. Make sure your commit email is linked to your GitHub account so the bot can match your commits to your signature.
