@@ -133,6 +133,10 @@ checkouts: `-DFETCHCONTENT_SOURCE_DIR_MTL5=… -DFETCHCONTENT_SOURCE_DIR_UNIVERS
   `ctest --preset sitl-release --label-regex slow`. The test presets run four
   tests at a time, so a test that writes a file must give it a path no other
   test uses.
+- **Tag a characterization `[nightly]`:** a test that pins a known defect, so
+  that a fix fails it by design (the yaw observability leak, #212). Pull
+  requests skip `[nightly]` tests, and `.github/workflows/nightly.yml` runs
+  them every night and on demand.
 - **Keep Catch2 test-case names ASCII.** Unicode in `TEST_CASE` names breaks
   the MSVC CI job through CTest's codepage handling.
 - **Formatting:** run `clang-format` (18.x, `.clang-format` at the root) on

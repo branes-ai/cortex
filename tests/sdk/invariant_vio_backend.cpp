@@ -228,7 +228,8 @@ std::vector<EndToEnd> run_seeds(std::span<const std::uint32_t> seeds,
     return r;
 }
 
-/// Test cases in one process share the runs.
+/// The sections of one test case share the runs. CTest runs each test case in
+/// a process of its own, so two test cases would each compute them.
 const std::vector<EndToEnd>& end_to_end() {
     static const std::vector<EndToEnd> runs = run_seeds(kSeeds);
     return runs;
@@ -274,19 +275,20 @@ void check_accuracy(std::span<const std::uint32_t> seeds, const std::vector<EndT
 
 TEST_CASE("invariant VIO backend: end-to-end integration over a seed sweep", "[sdk][riekf][backend][s365][slow]") {
     const auto& runs = end_to_end();
-    for (std::size_t k = 0; k < runs.size(); ++k) {
-        const EndToEnd& e = runs[k];
-        INFO("seed " << kSeeds[k]);
-        WARN("invariant VIO backend seed "
-             << kSeeds[k] << ": RMS pos err=" << e.rms_pos << " m  | NEES full=" << e.nees_full.report().normalized
-             << "  pos=" << e.nees_pos.report().normalized << "  yaw=" << e.nees_yaw.report().normalized
-             << "  roll/pitch=" << e.nees_rp.report().normalized);
-        check_structure(e);
+    SECTION("the structure holds on every seed") {
+        for (std::size_t k = 0; k < runs.size(); ++k) {
+            const EndToEnd& e = runs[k];
+            INFO("seed " << kSeeds[k]);
+            WARN("invariant VIO backend seed "
+                 << kSeeds[k] << ": RMS pos err=" << e.rms_pos << " m  | NEES full=" << e.nees_full.report().normalized
+                 << "  pos=" << e.nees_pos.report().normalized << "  yaw=" << e.nees_yaw.report().normalized
+                 << "  roll/pitch=" << e.nees_rp.report().normalized);
+            check_structure(e);
+        }
     }
-}
-
-TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[sdk][riekf][backend][s365][slow]") {
-    check_accuracy(kSeeds, end_to_end());
+    SECTION("it tracks and stays consistent on every seed") {
+        check_accuracy(kSeeds, runs);
+    }
 }
 
 // #548: with a 2 s onset the first windows span about 1 deg of parallax, and the

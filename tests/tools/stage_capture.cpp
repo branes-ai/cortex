@@ -270,7 +270,15 @@ TEST_CASE("the NIS trigger captures exactly the S6 updates above the threshold",
 }
 
 TEST_CASE("the first-violation trigger captures only the first failing boundary", "[tools][capture][slow]") {
+    // The first violation is an S5 triangulation (below). Checking every
+    // boundary of every stage up to it ran each fixture through its bench,
+    // twice: six minutes in a debug build, most of it in the S6 benches. The
+    // trigger is the same code for every stage, so S5 alone, with its many
+    // passing boundaries before frame 24, checks it in about a second
+    // (release).
+    const std::vector<std::string> stages{"S5_triangulation"};
     bn::CaptureOptions opt;
+    opt.stages = stages;
     opt.first_violation = true;
     Recorder rec(opt, intrinsics());
     auto be = make_backend();
@@ -283,6 +291,7 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     rec.finish();
     REQUIRE(rec.stats().first_violation_frame.has_value());
     REQUIRE(rec.stats().boundaries == 1);
+    REQUIRE(rec.stats().first_violation->stage == "S5_triangulation");
     std::vector<std::string> captured;
     bool fails = false;
     for (const auto& nf : rec.fixtures()) {
@@ -294,6 +303,7 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     // Every fixture of every stage up to that frame, in run order: the first
     // one that fails its bench belongs to the captured boundary.
     bn::CaptureOptions upto;
+    upto.stages = stages;
     upto.last_frame = *rec.stats().first_violation_frame;
     Recorder all(upto, intrinsics());
     auto be2 = make_backend();
