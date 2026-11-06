@@ -8,8 +8,7 @@ name: Cache cleanup
 #
 # When a pull request closes, merged or not, this deletes its caches. Run it by
 # hand to sweep the caches of every closed pull request. sccache stores one
-# cache per object, so a cortex pull request leaves hundreds, and GitHub allows
-# about 500 deletes an hour: a sweep of many can take several runs.
+# cache per object, so a cortex pull request leaves hundreds.
 #
 # pull_request_target, so that a pull request from a fork gets a token that can
 # delete caches. It checks out no code and runs nothing from the pull request.
@@ -36,9 +35,9 @@ jobs:
       - name: Delete the caches
         run: |
           set -euo pipefail
-          # GitHub throttles cache requests (HTTP 429), and allows about 80
-          # deletes a minute and 500 an hour. A throttled call waits a minute
-          # and is tried again, up to five times; deletes go one a second.
+          # GitHub throttles a burst of cache requests (HTTP 429), so deletes
+          # go one at a time, which ran at about three a second, and a
+          # throttled call waits a minute and is tried again, up to five times.
           retry() {
             local n
             for n in 1 2 3 4 5; do
@@ -59,7 +58,6 @@ jobs:
                   break 2
                 fi
                 n=$((n + 1))
-                sleep 1
               done
             done
             echo "$ref: deleted $n"
