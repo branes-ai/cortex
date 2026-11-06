@@ -161,6 +161,10 @@ checkouts: `-DFETCHCONTENT_SOURCE_DIR_MTL5=… -DFETCHCONTENT_SOURCE_DIR_UNIVERS
   the next **SemVer** version and the `CHANGELOG.md` entry. `feat` bumps the
   minor version and `fix` the patch (pre-1.0, breaking changes bump the minor).
   Merging the release PR tags `vX.Y.Z` and publishes the GitHub release.
+  Only `feat`, `fix`, `perf`, `revert`, `refactor` and `build` commits are
+  releasable: `docs`, `ci`, `test` and `chore` stay out of the changelog and
+  open no release PR. The release PR is merged when a version is wanted (before
+  a dependent pins it, or at a milestone), not after every merge.
 
 ## Documentation
 
