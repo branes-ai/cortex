@@ -156,11 +156,17 @@ checkouts: `-DFETCHCONTENT_SOURCE_DIR_MTL5=… -DFETCHCONTENT_SOURCE_DIR_UNIVERS
   the review before merging.
 - **Link issues:** `Resolves #N` closes an issue on merge; use `Relates to #N`
   for partial work, and never `Resolves` an epic.
-- **Releases are automatic.** [release-please](https://github.com/googleapis/release-please)
+- **Releases are cut on purpose.** [release-please](https://github.com/googleapis/release-please)
   reads the Conventional Commit types on `main` and maintains a release PR with
   the next **SemVer** version and the `CHANGELOG.md` entry. `feat` bumps the
   minor version and `fix` the patch (pre-1.0, breaking changes bump the minor).
   Merging the release PR tags `vX.Y.Z` and publishes the GitHub release.
+  Only `feat`, `fix`, `perf`, `revert`, `refactor` and `build` commits are
+  releasable: `docs`, `ci`, `test` and `chore` stay out of the changelog and
+  open no release PR, unless the commit is breaking (`!` or a
+  `BREAKING CHANGE` footer) or carries a `Release-As` footer. The release PR
+  is merged when a version is wanted (before a dependent pins it, or at a
+  milestone), not after every merge.
 
 ## Documentation
 
