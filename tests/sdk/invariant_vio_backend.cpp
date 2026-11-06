@@ -272,7 +272,7 @@ void check_accuracy(std::span<const std::uint32_t> seeds, const std::vector<EndT
 }
 }  // namespace
 
-TEST_CASE("invariant VIO backend: end-to-end integration over a seed sweep", "[sdk][riekf][backend][s365]") {
+TEST_CASE("invariant VIO backend: end-to-end integration over a seed sweep", "[sdk][riekf][backend][s365][slow]") {
     const auto& runs = end_to_end();
     for (std::size_t k = 0; k < runs.size(); ++k) {
         const EndToEnd& e = runs[k];
@@ -285,7 +285,7 @@ TEST_CASE("invariant VIO backend: end-to-end integration over a seed sweep", "[s
     }
 }
 
-TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[sdk][riekf][backend][s365]") {
+TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[sdk][riekf][backend][s365][slow]") {
     check_accuracy(kSeeds, end_to_end());
 }
 
@@ -294,7 +294,7 @@ TEST_CASE("invariant VIO backend: tracks and stays consistent on every seed", "[
 // there, drove roll/pitch NEES to 20-120 on every seed. The Gauss-Newton
 // refinement holds a 2 s start to the same bands as the default 0.25 s one.
 // Seeds 13 and 8 are two of the worst before the fix.
-TEST_CASE("invariant VIO backend: a slow 2 s start stays consistent", "[sdk][riekf][backend][s365]") {
+TEST_CASE("invariant VIO backend: a slow 2 s start stays consistent", "[sdk][riekf][backend][s365][slow]") {
     constexpr std::array<std::uint32_t, 2> seeds{{13, 8}};
     const auto runs = run_seeds(seeds, 2.0);
     for (std::size_t k = 0; k < runs.size(); ++k) {

@@ -42,6 +42,16 @@
       }
     },
     {
+      "name": "sitl-clang-release",
+      "inherits": "sitl-release",
+      "displayName": "SITL Release, Clang (host x86)",
+      "description": "Host SITL release build with Clang. The CI release jobs run the [slow] tests with this preset and sitl-release.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
       "name": "kpu-cross",
       "inherits": "base",
       "displayName": "KPU Cross-Compile (aarch64)",
@@ -116,6 +126,7 @@
     { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "displayName": "SITL Debug" },
     { "name": "sitl-release", "configurePreset": "sitl-release", "displayName": "SITL Release" },
     { "name": "sitl-clang-debug", "configurePreset": "sitl-clang-debug", "displayName": "SITL Debug (Clang)" },
+    { "name": "sitl-clang-release", "configurePreset": "sitl-clang-release", "displayName": "SITL Release (Clang)" },
     { "name": "kpu-cross",    "configurePreset": "kpu-cross",    "displayName": "KPU Cross" },
     { "name": "wsl2-sitl",    "configurePreset": "wsl2-sitl",    "displayName": "WSL2 SITL" },
     { "name": "msvc-debug",   "configurePreset": "msvc", "displayName": "MSVC Debug",   "configuration": "Debug" },
@@ -124,12 +135,13 @@
     { "name": "msvc-ninja-debug", "configurePreset": "msvc-ninja-debug", "displayName": "MSVC + Ninja Debug (CI)" }
   ],
   "testPresets": [
-    { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true } },
-    { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true } },
-    { "name": "sitl-clang-debug", "configurePreset": "sitl-clang-debug", "output": { "outputOnFailure": true } },
-    { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true } },
-    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true } },
-    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true } },
-    { "name": "msvc-ninja-debug", "configurePreset": "msvc-ninja-debug", "output": { "outputOnFailure": true } }
+    { "name": "sitl-debug",   "configurePreset": "sitl-debug",   "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "sitl-release", "configurePreset": "sitl-release", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "sitl-clang-debug", "configurePreset": "sitl-clang-debug", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "sitl-clang-release", "configurePreset": "sitl-clang-release", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "msvc-debug",   "configurePreset": "msvc", "configuration": "Debug",   "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "msvc-release", "configurePreset": "msvc", "configuration": "Release", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "msvc-ninja",   "configurePreset": "msvc-ninja", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } },
+    { "name": "msvc-ninja-debug", "configurePreset": "msvc-ninja-debug", "output": { "outputOnFailure": true }, "execution": { "jobs": 4 } }
   ]
 }

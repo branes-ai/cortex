@@ -161,7 +161,8 @@ TEST_CASE("the square-root backend matches the full-covariance backend within to
     REQUIRE(max_rel_trace_diff < 1e-6);
 }
 
-TEST_CASE("the square-root covariance factor stays well-conditioned over a long run", "[sdk][msckf][sqrt][backend]") {
+TEST_CASE("the square-root covariance factor stays well-conditioned over a long run",
+          "[sdk][msckf][sqrt][backend][slow]") {
     // A bounded oscillation: thousands of predict / augment / update /
     // marginalize cycles in a well-posed viewing geometry — the regime where
     // a square-root factor is expected to retain conditioning a Joseph-form P

@@ -149,7 +149,7 @@ TEST_CASE("captured fixtures replay bit-identically through their stage benches"
     REQUIRE(rec.stats().fixtures == rec.fixtures().size());
 }
 
-TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-identically", "[tools][capture]") {
+TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-identically", "[tools][capture][slow]") {
     bn::CaptureOptions opt;
     opt.stages = {"S1_initialization"};
     opt.source = "synthetic_world (default config), 0.5 px noise, prefer_dynamic_init";
@@ -269,7 +269,7 @@ TEST_CASE("the NIS trigger captures exactly the S6 updates above the threshold",
     REQUIRE(rec.stats().boundaries == above);
 }
 
-TEST_CASE("the first-violation trigger captures only the first failing boundary", "[tools][capture]") {
+TEST_CASE("the first-violation trigger captures only the first failing boundary", "[tools][capture][slow]") {
     bn::CaptureOptions opt;
     opt.first_violation = true;
     Recorder rec(opt, intrinsics());

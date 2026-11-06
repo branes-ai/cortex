@@ -136,7 +136,7 @@ TEST_CASE("S3 bench: every fixture passes for every variant (double, float, long
             require_pass<S3>(nf, v.name, {"double", "float", "long_double"});
 }
 
-TEST_CASE("S3 bench: the shipped augmentation passes in posit<32,2>", "[tools][bench][s3]") {
+TEST_CASE("S3 bench: the shipped augmentation passes in posit<32,2>", "[tools][bench][s3][slow]") {
     for (const auto& nf : S3::builtin_fixtures())
         require_pass<S3>(nf, bn::kShipped, {"posit32"});
 }

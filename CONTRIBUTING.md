@@ -126,6 +126,13 @@ checkouts: `-DFETCHCONTENT_SOURCE_DIR_MTL5=… -DFETCHCONTENT_SOURCE_DIR_UNIVERS
   headers, never as `.cpp` in the globbed directories.
 - **Build and test with two compilers** for C++ changes. CI runs GCC (Linux)
   and MSVC (Windows, Release and Debug); test with Clang locally too.
+- **Tag a long end-to-end case `[slow]`:** a seed sweep, a capture, or a long
+  run that takes more than about 20 s unoptimized. Tags are CTest labels, and
+  the debug CI jobs skip `[slow]` cases (`ctest --label-exclude slow`), which
+  run optimized in the release jobs instead. Run them locally with
+  `ctest --preset sitl-release --label-regex slow`. The test presets run four
+  tests at a time, so a test that writes a file must give it a path no other
+  test uses.
 - **Keep Catch2 test-case names ASCII.** Unicode in `TEST_CASE` names breaks
   the MSVC CI job through CTest's codepage handling.
 - **Formatting:** run `clang-format` (18.x, `.clang-format` at the root) on

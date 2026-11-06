@@ -4,7 +4,8 @@
 # Adapted from the compile_all() pattern in MTL5 and Universal, with two cortex
 # specializations: targets register every Catch2 TEST_CASE with CTest via
 # catch_discover_tests (so `ctest` lists individual cases, not just one entry
-# per binary), and an optional TEST_PREFIX namespaces those case names for
+# per binary) with their tags as CTest labels (so `ctest -LE slow` skips the
+# [slow] cases), and an optional TEST_PREFIX namespaces those case names for
 # suites whose acceptance commands filter on a prefix (e.g. `ctest -R vio_euroc`).
 #
 # The point is productivity: drop a `<name>.cpp` into the right tests/<layer>/
@@ -45,9 +46,9 @@ function(compile_all)
             set_target_properties(${name} PROPERTIES FOLDER "${CA_FOLDER}")
         endif()
         if(CA_TEST_PREFIX)
-            catch_discover_tests(${name} TEST_PREFIX "${CA_TEST_PREFIX}")
+            catch_discover_tests(${name} TEST_PREFIX "${CA_TEST_PREFIX}" ADD_TAGS_AS_LABELS)
         else()
-            catch_discover_tests(${name})
+            catch_discover_tests(${name} ADD_TAGS_AS_LABELS)
         endif()
     endforeach()
 endfunction()
