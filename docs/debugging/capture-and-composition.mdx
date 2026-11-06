@@ -130,9 +130,13 @@ turned up two things the stage benches' own fixtures had not:
 - **S5 rejects tracks whose rays diverge, and its contract calls that a failure.** A two-view track
   at the image edge (0.74° of parallax, normal-matrix κ ≈ 2.4e4) with ordinary pixel noise has rays
   that meet 6 cm *behind* the cameras. Every method rejects it: the shipped solve, the midpoint, the
-  DLT and inverse depth. The bench's `triangulation.resolved` exempts only a parallax gate, so a
-  correct rejection reads as a violation. It is the run's first violation, within three frames of
-  initialization.
+  DLT and inverse depth. The bench's `triangulation.resolved` exempted only a parallax gate, so a
+  correct rejection read as a violation. It was the run's first violation, within three frames of
+  initialization. Since [#487](https://github.com/branes-ai/cortex/issues/487) the contract also
+  exempts a rejection when no positive-depth solution exists: the least-squares point of the rays
+  is behind a camera, or the rays are parallel. It reports that point's depth as
+  `triangulation.linear_min_depth`. On the synthetic world, up to 3 px of noise, S5 then has no
+  violation in 120 frames.
 - **The S6d symmetry check was too tight.** The bench rebuilds S = H·P·Hᵀ + σ²I and held its
   asymmetry to the scale of S (σ² ≈ 1e-4). The products in H·P·Hᵀ cancel, so their rounding scales
   with |H|·|P|·|H|ᵀ instead; a real update showed 3.8e-18. The bench now scales the tolerance by the
@@ -206,14 +210,15 @@ happens. It reports the first violation: stage, frame, invariant, value and boun
 it also writes that boundary as a fixture.
 
 ```text
-live assertion  : FIRST VIOLATION S5_triangulation, frame 4 (t=1.40372e+09 s), triangulation.resolved = 0 (bound 1)
+live assertion  : FIRST VIOLATION S5_triangulation, frame 114 (t=1.40372e+09 s), reprojection.max_residual = 0.0516872 (bound 0.05)
 ```
 
 It is the stage recorder (#446) with the first-violation trigger, so nothing new runs on the
 filter's path. A normal build never sets a tap, and its outputs are byte-identical to `main`. On
-V1_01 and on the synthetic world, the first violation is the S5 contract problem filed as
-[#487](https://github.com/branes-ai/cortex/issues/487): a two-view track whose rays diverge,
-correctly rejected and still counted as a failure. Until #487 is fixed, live assertion stops there.
+V1_01 the first violation used to be at frame 4: a two-view track whose rays diverge, correctly
+rejected and still counted as a failure ([#487](https://github.com/branes-ai/cortex/issues/487)).
+With that fixed, the run gets to frame 114. There a track reaches S5 whose best point leaves an
+observation 5.2σ from its measurement: an outlier the front end passed on.
 
 A test checks the attribution on a running filter. A fault injected into S3 at post-init frame 0
 is reported as `S3_augmentation`, frame 0.
@@ -306,8 +311,9 @@ also writes `observability_ledger.csv`, the running totals and per-stage yaw sha
   check in #446. The filter forms its own S = H·P·Hᵀ + σ²I, and the two S's differ by rounding
   that scales with |H|·|P|·|H|ᵀ, not |S|. A captured loop showed 3.6e-15 against a 2.2e-15 bound.
   The tolerance now scales with the products.
-- **#487 shows up in the loop too.** The built-in tapes use post-init frames 16–18; frames 13–15
-  and 20–22 hold a diverging-ray track.
+- **#487 showed up in the loop too.** The built-in tapes use post-init frames 16–18, because
+  frames 13–15 and 20–22 hold a diverging-ray track. Since #487 a loop over frames 13–15 passes
+  every invariant.
 
 ## The resulting workflow
 

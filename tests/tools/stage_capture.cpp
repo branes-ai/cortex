@@ -274,7 +274,7 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     // boundary of every stage up to it ran each fixture through its bench,
     // twice: six minutes in a debug build, most of it in the S6 benches. The
     // trigger is the same code for every stage, so S5 alone, with its many
-    // passing boundaries before frame 24, checks it in about a second
+    // passing boundaries before frame 18, checks it in about a second
     // (release).
     const std::vector<std::string> stages{"S5_triangulation"};
     bn::CaptureOptions opt;
@@ -283,10 +283,12 @@ TEST_CASE("the first-violation trigger captures only the first failing boundary"
     Recorder rec(opt, intrinsics());
     auto be = make_backend();
     be.set_stage_tap(&rec);
-    // 3 px of pixel noise: the first S5 violation then lands at frame 24 (as it
-    // does at 2.5 and 4 px). At 2 px it lands at frame 70 and at 0.5 px at frame
-    // 76, past kFrames (measured with the EuRoC cam0 p2 of #467).
-    constexpr double kPx = 3.0;
+    // 5 px of pixel noise: the first S5 violation then lands at frame 18, a
+    // track whose reprojection residual exceeds 5 sigma. Up to 3 px there is
+    // none in 120 frames, and at 4 px the first is at frame 45, past kFrames.
+    // Before #487 every one of those runs "violated" first at a track whose
+    // rays meet behind the cameras, which S5 is right to reject.
+    constexpr double kPx = 5.0;
     run(be, kFrames, kPx);
     rec.finish();
     REQUIRE(rec.stats().first_violation_frame.has_value());

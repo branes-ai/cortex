@@ -6,7 +6,9 @@
 // Stage under test: stages::s5_triangulation::apply(state, updater, track) — the
 // linear ray-perpendicular solve, the optional parallax gate, Gauss-Newton
 // reprojection refinement. Contract (#445 §B, S5):
-//   • the track resolves (except where a parallax gate legitimately rejects it);
+//   • the track resolves, except where a parallax gate legitimately rejects it
+//     or no positive-depth solution exists (the rays meet behind a camera or
+//     are parallel; #487);
 //   • the feature has positive depth in every observing camera;
 //   • the reprojection residual is bounded (a few σ of the measurement noise);
 //   • reported (the #265 scope): the maximum inter-view parallax and the
@@ -45,13 +47,16 @@
 #include <branes/tools/bench/bench.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace branes::tools::bench {
@@ -185,14 +190,29 @@ struct S5TriangulationBench {
         // when the measured parallax is actually below the gate. A rejection above
         // it is a triangulation failure and stays one.
         const bool gated = out.gate_deg > 0.0 && geo.max_parallax_deg < out.gate_deg;
+        // A track with no positive-depth solution must be rejected (#487): the
+        // least-squares meeting point of its rays lies behind a camera, or the
+        // rays are parallel and meet nowhere. Its "no" is the right answer too.
+        const auto lin = linear_solution(in);
+        const bool no_solution = !lin.has_value() || *std::min_element(lin->depths.begin(), lin->depths.end()) <= 0.0;
         auto resolved = inv::check_scalar(out.ok, 1.0, inv::Bound::Lower, kInvStage, "triangulation.resolved", "flag");
-        if (gated) {
+        if (!out.ok && (gated || no_solution)) {
             resolved.bound = inv::Bound::Report;
             resolved.pass = true;
         }
         r.push_back(resolved);
-        if (!out.ok)
+        if (!out.ok) {
+            // Why it was rejected, in native units: the linear point's depth in the
+            // camera that sees it least (negative: behind; absent: parallel rays).
+            if (lin)
+                r.push_back(inv::check_scalar(*std::min_element(lin->depths.begin(), lin->depths.end()),
+                                              0.0,
+                                              inv::Bound::Report,
+                                              kInvStage,
+                                              "triangulation.linear_min_depth",
+                                              "m"));
             return r;
+        }
 
         r.push_back(inv::check_at_least<double>(geo.depths, 1e-6, kInvStage, "depth.positive_in_every_camera", "m"));
         // Reprojection: the point explains its observations within 5σ of the
@@ -391,6 +411,71 @@ private:
         double max_parallax_deg = 0.0;
         sdk::msckf::DynMat<T> normal{3, 3};  ///< Σ (I − d̂ d̂ᵀ) over the world-frame rays
     };
+
+    struct LinearSolution {
+        Vec3<double> p{};
+        std::vector<double> depths;  ///< the point's depth in every observing camera
+    };
+
+    /// The point closest to every observation ray (lines, not half-lines) in the
+    /// least-squares sense, in double: Σ(I − d̂d̂ᵀ)·p = Σ(I − d̂d̂ᵀ)·c over the camera
+    /// centres c. nullopt when the rays are parallel (the normal matrix is
+    /// singular), so they meet nowhere. This is the contract's judge of whether
+    /// a positive-depth solution exists, independent of the method under test.
+    template <class T>
+    [[nodiscard]] static std::optional<LinearSolution> linear_solution(const Input<T>& in) {
+        using M3 = std::array<std::array<double, 3>, 3>;
+        const auto& ex = in.extrinsics;
+        M3 A{};
+        Vec3<double> b{};
+        std::vector<std::pair<Vec3<double>, Vec3<double>>> cams;  // centre, optical axis (world)
+        for (const auto& o : in.track.observations) {
+            const auto& cl = in.state.clones[o.clone_index];
+            const auto Rwc = cl.R * ex.R_imu_cam;
+            const Vec3<T> cT = cl.p + cl.R * ex.p_imu_cam;
+            const Vec3<T> dT = Rwc * Vec3<T>{{o.xy[0], o.xy[1], T{1}}};
+            const Vec3<T> zT = Rwc * Vec3<T>{{T{0}, T{0}, T{1}}};
+            Vec3<double> c{}, d{}, z{};
+            for (std::size_t i = 0; i < 3; ++i) {
+                c[i] = static_cast<double>(cT[i]);
+                d[i] = static_cast<double>(dT[i]);
+                z[i] = static_cast<double>(zT[i]);
+            }
+            const double n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            for (std::size_t i = 0; i < 3; ++i)
+                d[i] /= n;
+            for (std::size_t i = 0; i < 3; ++i)
+                for (std::size_t j = 0; j < 3; ++j) {
+                    const double m = (i == j ? 1.0 : 0.0) - d[i] * d[j];
+                    A[i][j] += m;
+                    b[i] += m * c[j];
+                }
+            cams.emplace_back(c, z);
+        }
+        // Cramer's rule; a determinant small against ‖A‖³ means parallel rays.
+        auto det3 = [](const M3& m) {
+            return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                   m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                   m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        };
+        double scale = 0.0;
+        for (const auto& row : A)
+            for (const double x : row)
+                scale = std::max(scale, std::abs(x));
+        const double det = det3(A);
+        if (!(scale > 0.0) || !(std::abs(det) > 1e-12 * scale * scale * scale))
+            return std::nullopt;
+        LinearSolution s;
+        for (std::size_t k = 0; k < 3; ++k) {
+            M3 Ak = A;
+            for (std::size_t i = 0; i < 3; ++i)
+                Ak[i][k] = b[i];
+            s.p[k] = det3(Ak) / det;
+        }
+        for (const auto& [c, z] : cams)
+            s.depths.push_back(z[0] * (s.p[0] - c[0]) + z[1] * (s.p[1] - c[1]) + z[2] * (s.p[2] - c[2]));
+        return s;
+    }
 
     /// Per-observation depth and reprojection residual at p_f, the ray-set
     /// parallax, and the normal matrix — the same camera model as the updater.

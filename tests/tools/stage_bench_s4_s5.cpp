@@ -172,6 +172,58 @@ TEST_CASE("bench review hardening: base64 padding, vacuous truth, gate rejection
         if (x.name == "triangulation.resolved")
             resolved_failed = !x.pass;
     REQUIRE(resolved_failed);
+    // ...and so has an ungated rejection of a track that has a solution in front.
+    resolved_failed = false;
+    for (const auto& x : S5::invariants<double>(ka, S5::Output<double>{0, {}, 0.0}, S5::known_answer()))
+        if (x.name == "triangulation.resolved")
+            resolved_failed = !x.pass;
+    REQUIRE(resolved_failed);
+}
+
+TEST_CASE("S5 bench: rejecting a track with no positive-depth solution is correct (#487)", "[tools][bench][s5]") {
+    // The known-answer clones observe a point 3 m BEHIND them: every ray, read as
+    // a line, passes through it, so the least-squares meeting point is behind
+    // every camera and no positive-depth point explains the observations.
+    auto in = S5::decode_input<double>(S5::known_answer().input);
+    const double F[3] = {0.2, -0.1, -3.0};
+    for (auto& o : in.track.observations) {
+        const auto& p = in.state.clones[o.clone_index].p;
+        o.xy = {{(F[0] - p[0]) / (F[2] - p[2]), (F[1] - p[1]) / (F[2] - p[2])}};
+    }
+    const auto out = S5::run<double>(in, "shipped");
+    REQUIRE(out.ok == 0);  // the stage rejects it, without any gate
+    bool saw_resolved = false, saw_depth = false;
+    for (const auto& x : S5::invariants<double>(in, out, S5::known_answer())) {
+        INFO(x.name << " = " << x.value);
+        REQUIRE(x.pass);
+        if (x.name == "triangulation.resolved") {
+            saw_resolved = true;
+            REQUIRE(x.bound == bn::inv::Bound::Report);
+        }
+        if (x.name == "triangulation.linear_min_depth") {
+            saw_depth = true;
+            REQUIRE(x.value < 0.0);
+        }
+    }
+    REQUIRE(saw_resolved);
+    REQUIRE(saw_depth);
+
+    // Parallel rays meet nowhere: rejecting them is correct too.
+    for (auto& o : in.track.observations)
+        o.xy = {{0.1, 0.05}};
+    const auto par = S5::run<double>(in, "shipped");
+    REQUIRE(par.ok == 0);
+    bool saw_par_resolved = false, saw_par_depth = false;
+    for (const auto& x : S5::invariants<double>(in, par, S5::known_answer())) {
+        if (x.name == "triangulation.resolved") {
+            saw_par_resolved = true;
+            REQUIRE(x.pass);
+        }
+        // Parallel rays have no meeting point, so no linear depth is reported.
+        saw_par_depth = saw_par_depth || x.name == "triangulation.linear_min_depth";
+    }
+    REQUIRE(saw_par_resolved);
+    REQUIRE_FALSE(saw_par_depth);
 
     // S5: a camera the bench does not supply is an input error, not a rejection.
     auto bad = S5::known_answer().input;
