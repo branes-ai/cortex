@@ -1,7 +1,7 @@
 {
  "_about": "EuRoC MAV baseline (docs/benchmarks/euroc-baseline.mdx). Aggregate metrics only, scored by tools/traj_eval: ATE in m (4-DoF and SE3 alignment), RPE as the mean over 8/16/24/32/40 m segments (m, deg), start_s and coverage_s in s after the first ground-truth stamp. scripts/euroc-baseline.sh reruns cortex and compares against cortex.run.",
  "cortex": {
-  "commit": "348c774",
+  "commit": "472a54d",
   "binary": "tools/vio_pipeline --source euroc (MSCKF, double stages, full covariance)",
   "date": "2026-11-06"
  },
@@ -109,18 +109,18 @@
    "compare_from_s": 17.401,
    "cortex": {
     "run": {
-     "ate_4dof": 29803.5842,
-     "ate_se3": 29803.2312,
-     "rpe_trans_m": 15100.318,
-     "rpe_rot_deg": 129.1852,
+     "ate_4dof": 0.484,
+     "ate_se3": 0.4833,
+     "rpe_trans_m": 0.4535,
+     "rpe_rot_deg": 1.603,
      "start_s": 0.0,
      "coverage_s": 131.5
     },
     "window": {
-     "ate_4dof": 28798.2384,
-     "ate_se3": 28797.4745,
-     "rpe_trans_m": 16356.7816,
-     "rpe_rot_deg": 124.9922,
+     "ate_4dof": 0.4143,
+     "ate_se3": 0.4138,
+     "rpe_trans_m": 0.3722,
+     "rpe_rot_deg": 0.8385,
      "start_s": 17.45,
      "coverage_s": 114.05
     }

@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <initializer_list>
+#include <optional>
 #include <span>
 #include <tuple>
 #include <utility>
@@ -52,6 +53,16 @@ struct ImuInitConfig {
     /// the window to count as "at rest".
     T max_accel_std = T{1} / T{2};   ///< m/s²
     T max_gyro_std = T{1} / T{100};  ///< rad/s
+    /// Low-pass for `vibrating_rest_bias`, in samples (#591). The window is cut
+    /// into blocks of this many samples, and `max_gyro_std` bounds the spread
+    /// of the block means instead of the samples. At rest the angular rate is
+    /// constant, so the test is for a rate that changes. Rotor vibration on a
+    /// grounded multirotor changes the reading far faster than the platform
+    /// can turn: on EuRoC MH_03 it puts the per-sample std at 0.02–0.04 rad/s
+    /// on a start that is still. Averaging over a block removes it, while a
+    /// real change of rate, slow compared with the block, survives. 10 samples
+    /// is 50 ms at EuRoC's 200 Hz, a 20 Hz low-pass; 1 tests the raw samples.
+    std::size_t gyro_lowpass_samples = 10;
     /// The measured gravity magnitude must match `gravity_magnitude` to
     /// within this fraction, else the window is rejected (e.g. the device
     /// was accelerating, not at rest).
@@ -120,6 +131,15 @@ struct DynInitKeyframe {
     T dt = T{0};         ///< interval covered by the preintegration
 };
 
+/// A gyro-bias estimate from a window at rest but for vibration (#591):
+/// the window's gyro mean, and how much its low-passed rate varied (smaller is
+/// stiller, so a better estimate).
+template <math::Scalar T>
+struct RestBias {
+    math::lie::detail::Vec<T, 3> gyro_bias{};
+    T rate_variation = T{0};  ///< rad/s
+};
+
 template <math::Scalar T>
 class ImuInitializer {
 public:
@@ -167,6 +187,32 @@ public:
         return r;
     }
 
+    /// The gyro mean of a window that is at rest but for vibration, as a gyro-bias
+    /// estimate (#591), with its rate variation; nullopt if the window is not. The gates are try_static's,
+    /// except that the gyro is tested after the `gyro_lowpass_samples` low-pass.
+    /// try_static keeps the per-sample test, so a start it accepts today is
+    /// accepted the same way. The backend keeps the stillest such mean while it
+    /// waits for a static window and hands it to `try_gravity_align` if it
+    /// times out, so a vibrating start is not seeded with a zero bias. (The
+    /// stillest, not the newest: a window that ends as motion starts can still
+    /// pass, with a skewed mean, and the bias barely drifts over the wait.) Like
+    /// try_static's gate, it cannot tell a constant slow turn from a bias: no
+    /// test of how the rate varies can.
+    [[nodiscard]] std::optional<RestBias<T>> vibrating_rest_bias(std::span<const Vec3> gyro,
+                                                                 std::span<const Vec3> accel) const {
+        const std::size_t n = gyro.size();
+        if (n == 0 || accel.size() != n)
+            return std::nullopt;
+        const Vec3 accel_mean = mean(accel);
+        const T variation = rate_variation(gyro);
+        if (variation > cfg_.max_gyro_std || std_dev(accel, accel_mean) > cfg_.max_accel_std)
+            return std::nullopt;
+        const T g_meas = math::lie::detail::norm(accel_mean);
+        if (!(g_meas > T{0}) || abs_(g_meas - cfg_.gravity_magnitude) / cfg_.gravity_magnitude > cfg_.gravity_tol)
+            return std::nullopt;
+        return RestBias<T>{mean(gyro), variation};
+    }
+
     /// Gravity-only attitude bootstrap for a platform that is *not* at rest
     /// (so try_static rejects it) but for which no visual-inertial keyframes
     /// are available yet (so try_dynamic cannot run). Over a short window the
@@ -178,10 +224,14 @@ public:
     /// `success = false` only when the window is empty/mismatched or the mean
     /// specific force is not plausibly gravity (magnitude outside
     /// `gravity_align_tol`), in which case its direction is meaningless and
-    /// the caller should fall back to identity. The gyro mean is trusted as
-    /// the bias only when the window is rotation-quiet (within `max_gyro_std`);
-    /// on a rotating start it is real angular rate, not bias, so bias stays 0.
-    [[nodiscard]] Result try_gravity_align(std::span<const Vec3> gyro, std::span<const Vec3> accel) const {
+    /// the caller should fall back to identity. The gyro bias is, in order:
+    /// `rest_bias` when given (a `vibrating_rest_bias` from earlier in the
+    /// wait); the window's gyro mean when its rate does not vary, even under
+    /// vibration (the low-passed test); else 0, since on a rotating start the
+    /// mean is real angular rate, not bias.
+    [[nodiscard]] Result try_gravity_align(std::span<const Vec3> gyro,
+                                           std::span<const Vec3> accel,
+                                           const std::optional<Vec3>& rest_bias = std::nullopt) const {
         Result r;
         const std::size_t n = accel.size();
         if (n == 0 || gyro.size() != n)
@@ -199,7 +249,10 @@ public:
         r.R_world_imu = align_to_world_up(up_body);
         r.gravity_world = Vec3{{T{0}, T{0}, -cfg_.gravity_magnitude}};
         const Vec3 gyro_mean = mean(gyro);
-        r.gyro_bias = (std_dev(gyro, gyro_mean) <= cfg_.max_gyro_std) ? gyro_mean : Vec3{};
+        if (rest_bias)
+            r.gyro_bias = *rest_bias;
+        else
+            r.gyro_bias = (rate_variation(gyro) <= cfg_.max_gyro_std) ? gyro_mean : Vec3{};
         r.accel_bias = Vec3{};
         r.success = true;
         return r;
@@ -284,6 +337,25 @@ private:
                 worst = s;
         }
         return worst;
+    }
+
+    /// How much the angular rate varies over the window, below the low-pass:
+    /// the std (max over axes) of the means of consecutive blocks of
+    /// `gyro_lowpass_samples` samples, the newest block ending the window. Any
+    /// leftover oldest samples are not used. With fewer than two blocks, or a
+    /// block of 1, it is the per-sample std.
+    [[nodiscard]] T rate_variation(std::span<const Vec3> gyro) const {
+        const std::size_t k = cfg_.gyro_lowpass_samples;
+        const std::size_t blocks = k == 0 ? 0 : gyro.size() / k;
+        if (k <= 1 || blocks < 2)
+            return std_dev(gyro, mean(gyro));
+        std::vector<Vec3> means;
+        means.reserve(blocks);
+        const std::size_t first = gyro.size() - blocks * k;
+        for (std::size_t b = 0; b < blocks; ++b)
+            means.push_back(mean(gyro.subspan(first + b * k, k)));
+        const std::span<const Vec3> m{means};
+        return std_dev(m, mean(m));
     }
 
     // Rotation R_world_imu such that R · up_body = world +z. up_body is a

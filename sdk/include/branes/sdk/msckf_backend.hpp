@@ -149,6 +149,7 @@ public:
         init_gyro_.clear();
         init_accel_.clear();
         init_samples_seen_ = 0;
+        rest_bias_.reset();
         init_frames_.clear();
         init_preint_ = ImuPreintegrator<T>{};
         init_have_imu_t_ = false;
@@ -533,6 +534,11 @@ private:
                 return;
             }
         }
+        // A window at rest but for rotor vibration (#591): keep the stillest
+        // one's gyro mean as the bias for the timeout fallback below.
+        if (const auto b = initializer_.vibrating_rest_bias(g, a))
+            if (!rest_bias_ || b->rate_variation < rest_bias_->rate_variation)
+                rest_bias_ = *b;
         // No stationary window after kInitMaxSamples of trying: bootstrap from
         // the most recent window without waiting for a rest that may never
         // come (e.g. a sequence airborne from the first sample).
@@ -551,7 +557,8 @@ private:
             // mount, identity leaves gravity uncancelled in propagation and
             // the position diverges quadratically. Identity is the last
             // resort only when the mean force isn't even gravity-like.
-            const auto grav = initializer_.try_gravity_align(g, a);
+            const auto grav = initializer_.try_gravity_align(
+                g, a, rest_bias_ ? std::optional<DVec3>{rest_bias_->gyro_bias} : std::nullopt);
             if (grav.success)
                 apply_init(grav, InitMethod::GravityAlign, t);
             else
@@ -789,6 +796,7 @@ private:
     DVec3 last_gyro_{};  ///< most recent IMU sample, held over to the image time
     DVec3 last_accel_{};
     std::vector<DVec3> init_gyro_;
+    std::optional<RestBias<T>> rest_bias_;  ///< stillest vibrating_rest_bias while waiting to init (#591)
     std::vector<DVec3> init_accel_;
     std::size_t init_samples_seen_ = 0;  ///< total IMU samples seen during init (for the timeout)
 
