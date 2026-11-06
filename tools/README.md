@@ -61,6 +61,19 @@ assemble with `ffmpeg` for an `.mp4`.
 The reading: the filter holds up to ~2× its assumed noise, NIS crosses 1 right at
 the matched level, then loses lock — a measured operating envelope.
 
+## Scoring a trajectory against EuRoC ground truth (`traj_eval`)
+
+On an EuRoC run, `vio_pipeline` also writes `trajectory.tum` (`t x y z qx qy qz qw`).
+`traj_eval` scores that file, or any other estimator's in the same format, the same
+way: ATE after a 4-DoF (position + yaw) and a rigid alignment, and RPE over 8–40 m
+of travel. `scripts/euroc-baseline.sh` runs both on all 11 sequences and compares
+with the recorded baseline ([EuRoC Baseline vs OpenVINS](../docs/benchmarks/euroc-baseline.mdx)).
+
+```sh
+./build/tools/traj_eval --dataset /path/to/V1_01_easy/mav0 --est build/euroc/trajectory.tum
+./build/tools/traj_eval --dataset ... --est ... --from 4.6 --json   # from 4.6 s after the first GT stamp
+```
+
 ## Real-data stage inspectors (epic #371)
 
 The stage probes above are **synthetic** contract gates: known ground truth, run
