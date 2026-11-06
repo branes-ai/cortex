@@ -141,7 +141,8 @@ TEST_CASE("S0 bench rejects a ragged output fixture", "[tools][bench][s0]") {
     REQUIRE_THROWS_AS(S0::decode_output<double>(f.expected), std::invalid_argument);
 }
 
-TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every native type", "[tools][bench][s1][sfm][slow]") {
+TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every native type",
+          "[tools][bench][s1][sfm][slow]") {
     require_pass<S1>({"ka", S1::known_answer()}, "sfm_two_view_pnp", {"double", "float", "long_double"});
 }
 

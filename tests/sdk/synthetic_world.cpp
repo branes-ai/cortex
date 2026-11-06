@@ -30,7 +30,8 @@ double norm3(const Vec3& a) {
 }
 }  // namespace
 
-TEST_CASE("synthetic world generates a trackable VIO stream with exact ground truth", "[sdk][synthetic][pipeline][slow]") {
+TEST_CASE("synthetic world generates a trackable VIO stream with exact ground truth",
+          "[sdk][synthetic][pipeline][slow]") {
     ev::SyntheticConfig<T> cfg;  // gentle "ground robot" so the baseline is tight
     cfg.trans_amp = 0.5;
     cfg.motion_rate = 0.6;

@@ -193,7 +193,8 @@ TEST_CASE("Observability ledger: on the synthetic world the leak is yaw, from S6
     REQUIRE(ledger.rows().size() > 50);
 }
 
-TEST_CASE("Observability ledger: the spurious yaw information accumulates over the run", "[tools][observability][slow]") {
+TEST_CASE("Observability ledger: the spurious yaw information accumulates over the run",
+          "[tools][observability][slow]") {
     const auto early = run_world(80, 0.5).totals();
     const auto late = run_world(250, 0.5).totals();
     REQUIRE(late.info.yaw > 10.0 * early.info.yaw);
