@@ -58,6 +58,11 @@ if [ "$named" -eq 0 ]; then
     mapfile -t seqs < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["sequences"]))' "$BASELINE")
 fi
 
+unknown="$(python3 -c 'import json,sys; known=json.load(open(sys.argv[1]))["sequences"]; print(" ".join(s for s in sys.argv[2:] if s not in known))' "$BASELINE" "${seqs[@]}")"
+if [ -n "$unknown" ]; then
+    echo "euroc-baseline: not in $BASELINE: $unknown" >&2
+    exit 2
+fi
 if [ "$update" = 1 ] && [ "$named" -gt 0 ]; then
     echo "euroc-baseline: --update records a full run; drop the sequence names" >&2
     exit 2
@@ -77,13 +82,15 @@ mkdir -p "$OUT"
 run_one() {
     local seq="$1"
     local mav0 from start
-    mav0="$(find "$DATASET_ROOT" -type d -name mav0 -path "*/$seq/*" -not -path '*__MACOSX*' 2>/dev/null | head -1)"
-    if [ -z "$mav0" ]; then
-        echo "$seq: no mav0 under $DATASET_ROOT"
-        return 0
-    fi
+    # Clear the last run's scores first, so a sequence that can't run now is
+    # reported as failed rather than scored from stale files.
     mkdir -p "$OUT/$seq"
     rm -f "$OUT/$seq/trajectory.tum" "$OUT/$seq/score.json" "$OUT/$seq/score_window.json"
+    mav0="$(find "$DATASET_ROOT" -type d -name mav0 -path "*/$seq/*" -not -path '*__MACOSX*' 2>/dev/null | head -1)"
+    if [ -z "$mav0" ]; then
+        echo "$seq: no mav0 under $DATASET_ROOT" | tee "$OUT/$seq/vio_pipeline.log"
+        return 0
+    fi
     start=$(date +%s)
     "$BIN/vio_pipeline" --source euroc --dataset "$mav0" --out "$OUT/$seq" > "$OUT/$seq/vio_pipeline.log" 2>&1 || true
     from="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sequences"][sys.argv[2]]["compare_from_s"])' "$BASELINE" "$seq")"
