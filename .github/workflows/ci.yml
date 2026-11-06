@@ -202,7 +202,8 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Run the [slow] C++ tests
-        run: ctest --preset ${{ matrix.preset }} --label-regex slow
+        # The [nightly] characterizations run in nightly.yml, not here.
+        run: ctest --preset ${{ matrix.preset }} --label-regex slow --label-exclude nightly
       - name: sccache stats
         if: always()
         run: sccache --show-stats
@@ -220,9 +221,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Release runs the whole suite; Debug skips the [slow] cases, which
-          # the Linux release jobs and this Release job run optimized.
-          - { preset: msvc-ninja,       label: Release, ctest_args: "" }
+          # Release runs the whole suite but the [nightly] characterizations
+          # (nightly.yml); Debug also skips the [slow] cases, which the Linux
+          # release jobs and this Release job run optimized.
+          - { preset: msvc-ninja,       label: Release, ctest_args: "--label-exclude nightly" }
           - { preset: msvc-ninja-debug, label: Debug,   ctest_args: "--label-exclude slow" }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4

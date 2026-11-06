@@ -73,7 +73,7 @@ TEST_CASE("S10 end-to-end: with perfect calibration and exact sensors the world 
 // error it should cover grows. This pins the defect as a characterization; a
 // fix (or the R-IEKF taking over as the reference, #347) flips both checks.
 TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information into yaw",
-          "[sdk][s10][calibration][slow]") {
+          "[sdk][s10][calibration][slow][nightly]") {
     std::vector<T> nees, pos;
     for (const std::uint32_t seed : {1u, 2u, 3u}) {
         const auto r = ev::matched_noise_control<T>(seed);
