@@ -213,9 +213,17 @@ TEST_CASE("S5 bench: rejecting a track with no positive-depth solution is correc
         o.xy = {{0.1, 0.05}};
     const auto par = S5::run<double>(in, "shipped");
     REQUIRE(par.ok == 0);
-    for (const auto& x : S5::invariants<double>(in, par, S5::known_answer()))
-        if (x.name == "triangulation.resolved")
+    bool saw_par_resolved = false, saw_par_depth = false;
+    for (const auto& x : S5::invariants<double>(in, par, S5::known_answer())) {
+        if (x.name == "triangulation.resolved") {
+            saw_par_resolved = true;
             REQUIRE(x.pass);
+        }
+        // Parallel rays have no meeting point, so no linear depth is reported.
+        saw_par_depth = saw_par_depth || x.name == "triangulation.linear_min_depth";
+    }
+    REQUIRE(saw_par_resolved);
+    REQUIRE_FALSE(saw_par_depth);
 
     // S5: a camera the bench does not supply is an input error, not a rejection.
     auto bad = S5::known_answer().input;
