@@ -110,6 +110,7 @@ struct VibratingStart {
     }
 };
 
+// The per-sample gyro std, max over axes: what the static gate tests.
 T per_sample_std(const std::vector<Vec3>& v) {
     T worst = 0.0;
     for (std::size_t i = 0; i < 3; ++i) {

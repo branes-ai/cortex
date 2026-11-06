@@ -339,11 +339,11 @@ private:
         return worst;
     }
 
-    // How much the angular rate varies over the window, below the low-pass:
-    // the std (max over axes) of the means of consecutive blocks of
-    // `gyro_lowpass_samples` samples, the newest block ending the window. Any
-    // leftover oldest samples are not used. With fewer than two blocks, or a
-    // block of 1, it is the per-sample std.
+    /// How much the angular rate varies over the window, below the low-pass:
+    /// the std (max over axes) of the means of consecutive blocks of
+    /// `gyro_lowpass_samples` samples, the newest block ending the window. Any
+    /// leftover oldest samples are not used. With fewer than two blocks, or a
+    /// block of 1, it is the per-sample std.
     [[nodiscard]] T rate_variation(std::span<const Vec3> gyro) const {
         const std::size_t k = cfg_.gyro_lowpass_samples;
         const std::size_t blocks = k == 0 ? 0 : gyro.size() / k;
