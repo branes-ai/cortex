@@ -79,6 +79,111 @@ TEST_CASE("static init rejects a non-stationary window", "[sdk][imu_init]") {
     REQUIRE_FALSE(init.try_static(gyro, accel).success);
 }
 
+namespace {
+
+// A still, tilted platform with rotor vibration (#591), over the backend's
+// 50-sample static window: the gyro reads the bias plus two high-frequency
+// tones (0.43 and 0.29 cycles/sample, rotor harmonics aliased at 200 Hz), a
+// per-sample std of ~0.03 rad/s around a zero mean rate. The accelerometer
+// vibrates too, within the static gate. `slow` replaces the tones with a rate
+// swing of the same size slow enough to be real motion (0.01 cycles/sample).
+struct VibratingStart {
+    Vec3 bias{{-0.003, 0.021, 0.077}};  // EuRoC-like, as measured on MH_03
+    SO3 R_true = SO3::exp(Vec3{{0.43, 0.17, 0.0}});
+    std::vector<Vec3> gyro, accel;
+
+    explicit VibratingStart(bool slow = false, T accel_scale = 1.0, std::size_t n = 50) {
+        const Vec3 a_rest = R_true.inverse() * Vec3{{0.0, 0.0, 9.81 * accel_scale}};
+        const T two_pi = 2.0 * std::numbers::pi_v<T>;
+        for (std::size_t k = 0; k < n; ++k) {
+            const T x = static_cast<T>(k);
+            Vec3 w;
+            for (std::size_t i = 0; i < 3; ++i) {
+                const T ph = 1.3 * static_cast<T>(i);
+                w[i] = slow ? 0.03 * std::sin(two_pi * 0.01 * x + ph)
+                            : 0.04 * std::sin(two_pi * 0.43 * x + ph) + 0.02 * std::sin(two_pi * 0.29 * x + 2.0 * ph);
+            }
+            gyro.push_back(bias + w);
+            const T j = 0.3 * std::sin(two_pi * 0.37 * x);
+            accel.push_back(Vec3{{a_rest[0] + j, a_rest[1] - j, a_rest[2] + 0.5 * j}});
+        }
+    }
+};
+
+T per_sample_std(const std::vector<Vec3>& v) {
+    T worst = 0.0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        T m = 0.0, q = 0.0;
+        for (const auto& x : v)
+            m += x[i];
+        m /= static_cast<T>(v.size());
+        for (const auto& x : v)
+            q += (x[i] - m) * (x[i] - m);
+        worst = std::max(worst, std::sqrt(q / static_cast<T>(v.size())));
+    }
+    return worst;
+}
+
+}  // namespace
+
+TEST_CASE("a vibrating start at rest yields its gyro mean as the bias (#591)", "[sdk][imu_init]") {
+    const VibratingStart w;
+    REQUIRE(per_sample_std(w.gyro) > 0.025);
+    bs::ImuInitializer<T> init;
+
+    // try_static keeps the per-sample test, so it rejects the window...
+    REQUIRE_FALSE(init.try_static(w.gyro, w.accel).success);
+    // ...but the low-passed test sees a constant rate, and the mean is the bias.
+    const auto b = init.vibrating_rest_bias(w.gyro, w.accel);
+    REQUIRE(b.has_value());
+    REQUIRE(b->rate_variation < 0.01);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE_THAT(b->gyro_bias[i], Catch::Matchers::WithinAbs(w.bias[i], 2e-3));
+
+    // With the low-pass off it is the per-sample test, and the window fails.
+    bs::ImuInitConfig<T> raw;
+    raw.gyro_lowpass_samples = 1;
+    REQUIRE_FALSE(bs::ImuInitializer<T>{raw}.vibrating_rest_bias(w.gyro, w.accel).has_value());
+}
+
+TEST_CASE("a slow rate change as large as the vibration is not at rest", "[sdk][imu_init]") {
+    const VibratingStart w(/*slow=*/true);
+    REQUIRE(per_sample_std(w.gyro) < 0.025);  // smaller per-sample spread than the vibration
+    bs::ImuInitializer<T> init;
+    REQUIRE_FALSE(init.vibrating_rest_bias(w.gyro, w.accel).has_value());
+    REQUIRE_FALSE(init.try_static(w.gyro, w.accel).success);
+}
+
+TEST_CASE("vibrating_rest_bias keeps the static gravity gate", "[sdk][imu_init]") {
+    const VibratingStart w(/*slow=*/false, /*accel_scale=*/1.08);  // |a| 8 % off: not at rest
+    REQUIRE_FALSE(bs::ImuInitializer<T>{}.vibrating_rest_bias(w.gyro, w.accel).has_value());
+}
+
+TEST_CASE("gravity-align seeds a rest bias instead of zero (#591)", "[sdk][imu_init]") {
+    // The timeout window itself is turning slowly, so its own mean is rate,
+    // not bias: without a hint the bias stays zero, as before.
+    const VibratingStart turning(/*slow=*/true, /*accel_scale=*/1.08);
+    bs::ImuInitializer<T> init;
+    const auto plain = init.try_gravity_align(turning.gyro, turning.accel);
+    REQUIRE(plain.success);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(plain.gyro_bias[i] == T{0});
+
+    // With the bias from an earlier window at rest, that bias is seeded.
+    const Vec3 rest{{-0.003, 0.021, 0.077}};
+    const auto hinted = init.try_gravity_align(turning.gyro, turning.accel, rest);
+    REQUIRE(hinted.success);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE(hinted.gyro_bias[i] == rest[i]);
+
+    // A vibrating window that is itself at rest seeds its own mean.
+    const VibratingStart still(/*slow=*/false, /*accel_scale=*/1.08);
+    const auto own = init.try_gravity_align(still.gyro, still.accel);
+    REQUIRE(own.success);
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE_THAT(own.gyro_bias[i], Catch::Matchers::WithinAbs(still.bias[i], 2e-3));
+}
+
 TEST_CASE("gravity-align recovers roll/pitch on a moving start static init rejects", "[sdk][imu_init]") {
     // A genuinely tilted platform that is also rotating + jostling: the mean
     // specific force is still gravity-dominated, so roll/pitch is recoverable

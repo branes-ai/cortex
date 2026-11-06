@@ -204,3 +204,46 @@ TEST_CASE("the backend rejects an empty calibration and out-of-range cameras", "
     backend.process_camera(t + 0.01, obs);  // must not crash
     REQUIRE(branes::sdk::msckf::is_positive_semidefinite(backend.state().covariance()));
 }
+
+TEST_CASE("a vibrating start at rest seeds its bias through the gravity-align fallback (#591)",
+          "[sdk][msckf][backend]") {
+    Backend backend;
+    backend.initialize(default_config());
+
+    // EuRoC MH_03's start: a grounded multirotor, still for the first 0.5 s,
+    // its rotor vibration putting the per-sample gyro std at ~0.03 rad/s, so
+    // the static gate rejects it. Then it manoeuvres (and jostles), so no
+    // later window is at rest and the backend times out at 400 samples
+    // into the gravity-only fallback. The bias must come from the rest window,
+    // not be seeded as zero.
+    const auto R_true = branes::math::lie::SO3<T>::exp(DVec3{{0.43, 0.17, 0.0}});
+    const DVec3 a_rest = R_true.inverse() * DVec3{{0.0, 0.0, 9.81}};
+    const DVec3 bias{{-0.003, 0.021, 0.077}};
+    const T two_pi = 2.0 * std::numbers::pi_v<T>;
+
+    double t = 0.0;
+    for (int k = 0; k < 450; ++k, t += 0.005) {
+        const T x = static_cast<T>(k);
+        DVec3 gyro = bias;
+        for (std::size_t i = 0; i < 3; ++i) {
+            const T ph = 1.3 * static_cast<T>(i);
+            gyro[i] += 0.04 * std::sin(two_pi * 0.43 * x + ph) + 0.02 * std::sin(two_pi * 0.29 * x + 2.0 * ph);
+        }
+        DVec3 accel = a_rest;
+        const T j = 0.3 * std::sin(two_pi * 0.37 * x);
+        accel = accel + DVec3{{j, -j, 0.5 * j}};
+        if (k >= 100) {  // manoeuvring and jostled: not at rest
+            const T u = x - 100.0;
+            for (std::size_t i = 0; i < 3; ++i)
+                gyro[i] += 0.2 * std::sin(two_pi * 0.02 * u + static_cast<T>(i)) - 0.2 * std::sin(static_cast<T>(i));
+            accel = accel + DVec3{{0.8 * std::sin(two_pi * 0.03 * u), 0.0, 0.0}};
+        }
+        backend.process_imu(imu_sample(t, gyro, accel));
+    }
+
+    REQUIRE(backend.initialized());
+    REQUIRE(backend.init_diagnostics().method == bs::InitMethod::GravityAlign);
+    const DVec3 bg = backend.init_diagnostics().gyro_bias;
+    for (std::size_t i = 0; i < 3; ++i)
+        REQUIRE_THAT(bg[i], Catch::Matchers::WithinAbs(bias[i], 2e-3));
+}
