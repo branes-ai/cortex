@@ -18,6 +18,7 @@
 //   ./vio_pipeline --sweep --out DIR               # noise level → robustness curve
 //   ./vio_pipeline --video --out DIR               # + per-frame scene + overlay data
 //   ./vio_pipeline --source euroc --dataset ROOT --video --out DIR
+//   ./vio_pipeline --source euroc --dataset ROOT --out DIR   # + DIR/trajectory.tum
 //   ./vio_pipeline --source euroc --dataset ROOT --capture DIR --capture-nis 5
 //   ./vio_pipeline --source euroc --dataset ROOT --prefer-dynamic --capture DIR --capture-stages S1_initialization
 //                                                  # stage boundaries → bench fixtures (#446)
@@ -726,6 +727,28 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
     return r;
 }
 
+// The estimated trajectory as <out>/trajectory.tum, one pose per line:
+// "t x y z qx qy qz qw" (the TUM format), t in seconds at full precision, the
+// pose of the IMU in the world frame. Lets an external evaluator score cortex
+// and another estimator on the same terms.
+void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
+    if (args.out.empty())
+        return;
+    std::ofstream f(args.out + "/trajectory.tum");
+    if (!f) {
+        std::cerr << "vio_pipeline: cannot write " << args.out << "/trajectory.tum\n";
+        return;
+    }
+    f << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const auto& sp : traj) {
+        const auto& p = sp.pose.translation();
+        const auto& q = sp.pose.rotation().quaternion();  // (w, x, y, z)
+        f << sp.t_s << ' ' << static_cast<double>(p[0]) << ' ' << static_cast<double>(p[1]) << ' '
+          << static_cast<double>(p[2]) << ' ' << static_cast<double>(q[1]) << ' ' << static_cast<double>(q[2]) << ' '
+          << static_cast<double>(q[3]) << ' ' << static_cast<double>(q[0]) << '\n';
+    }
+}
+
 // ── EuRoC source (real images through the KLT front end) ───────────────────
 // Gated: returns false (with a hint) when the dataset is absent/unreadable.
 template <class Cov, msckf::StageTypePolicy Stages>
@@ -819,6 +842,7 @@ bool run_euroc(const Args& args,
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.nis_normalized = safe_nis(est.backend().nis_consistency());
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
+    write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
         std::cerr << "  EuRoC pose association produced no matches (missing GT, timestamp drift, or no tracked "
@@ -897,6 +921,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     out.frames = n;
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
+    write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
         std::cerr << "  EuRoC pose association produced no matches (missing GT, timestamp drift, or no tracked "
@@ -926,7 +951,8 @@ int main(int argc, char** argv) {
             << "vio_pipeline — end-to-end VIO noise->robustness demo\n"
                "  --source synthetic|euroc   stream source (default synthetic)\n"
                "  --dataset ROOT             EuRoC mav0 root (for --source euroc)\n"
-               "  --out DIR                  write JSONL stream + CSVs (+ scene with --video)\n"
+               "  --out DIR                  write JSONL stream + CSVs (+ scene with --video); with\n"
+               "                             --source euroc, also trajectory.tum (t x y z qx qy qz qw)\n"
                "  --noise S                  additive sensor-noise scale (synthetic; 1 = matched)\n"
                "  --sweep                    noise level -> robustness curve (synthetic)\n"
                "  --video                    emit per-frame scene + overlay data (frames.jsonl)\n"
@@ -1006,6 +1032,9 @@ int main(int argc, char** argv) {
             f.open(args.out + "/" + name);
             if (!f)
                 std::cerr << "vio_pipeline: cannot write " << args.out << "/" << name << "\n";
+            // Full precision: EuRoC times are ~1.4e9 s, which the default 6
+            // significant digits round to the nearest 10,000 s.
+            f << std::setprecision(std::numeric_limits<double>::max_digits10);
         }
         return f;
     };
