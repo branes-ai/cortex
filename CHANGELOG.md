@@ -56,6 +56,20 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.84.0](https://github.com/branes-ai/cortex/compare/v0.83.13...v0.84.0) (2026-11-06)
+
+
+### Features
+
+* **tools:** add the euroc baseline benchmark against openvins ([#595](https://github.com/branes-ai/cortex/issues/595)) ([ee87dfe](https://github.com/branes-ai/cortex/commit/ee87dfe9a1012231288d2c0c2b1e3cc8cff7cd80))
+* **tools:** vio_pipeline writes its euroc trajectory in tum format ([#590](https://github.com/branes-ai/cortex/issues/590)) ([9e1a2dd](https://github.com/branes-ai/cortex/commit/9e1a2ddefb8e6feb0cadb068edfcdd48f18b8768))
+
+
+### Bug Fixes
+
+* **sdk:** seed a vibrating rest window's gyro bias in the gravity-align fallback ([#596](https://github.com/branes-ai/cortex/issues/596)) ([7293fd9](https://github.com/branes-ai/cortex/commit/7293fd96c9dad8db90071835103bf721a1e9b390))
+* **tools:** s5 bench accepts a rejection when no positive-depth solution exists ([#589](https://github.com/branes-ai/cortex/issues/589)) ([904812f](https://github.com/branes-ai/cortex/commit/904812fbc7acf9e799171c2a8f4997210dab0a14))
+
 ## [0.83.13](https://github.com/branes-ai/cortex/compare/v0.83.12...v0.83.13) (2026-11-05)
 
 
