@@ -140,7 +140,7 @@ private:
 
 }  // namespace
 
-TEST_CASE("composition bench: every built-in fixture passes the shipped loop", "[tools][bench][composition]") {
+TEST_CASE("composition bench: every built-in fixture passes the shipped loop", "[tools][bench][composition][slow]") {
     for (const auto& nf : Loop::builtin_fixtures()) {
         const auto r = run(nf, bn::kShipped, {"double", "float"});
         for (const auto& t : r.types) {
@@ -160,7 +160,7 @@ TEST_CASE("composition bench: the known answer holds exactly and P stays 0", "[t
 }
 
 TEST_CASE("composition bench: an injected fault is caught at the stage that introduced it",
-          "[tools][bench][composition]") {
+          "[tools][bench][composition][slow]") {
     for (const auto& nf : {bn::NamedFixture{"ka", Loop::known_answer()}, bn::NamedFixture{"cap", Loop::captured()}}) {
         INFO(nf.name);
         const auto s3 = run(nf, "fault_s3_clone_jacobian", {"double"}).types.front();
@@ -188,7 +188,7 @@ TEST_CASE("composition bench: a loop captured from a run replays bit-identically
     REQUIRE(value_of(r.types.front(), "replay.bit_identical") == 0.0);
 }
 
-TEST_CASE("composition bench: the committed fixture files load and pass", "[tools][bench][composition]") {
+TEST_CASE("composition bench: the committed fixture files load and pass", "[tools][bench][composition][slow]") {
     const std::filesystem::path dir = std::filesystem::path(BRANES_BENCH_FIXTURE_DIR) / "c_filter_loop";
     std::size_t n = 0;
     for (const auto& e : std::filesystem::directory_iterator(dir)) {

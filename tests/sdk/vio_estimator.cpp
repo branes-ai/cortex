@@ -215,7 +215,7 @@ const std::vector<std::array<double, 3>>& double_positions() {
 }
 
 TEMPLATE_TEST_CASE(
-    "the estimator runs end to end in every arithmetic type", "[sdk][vio][types]", float, posit32, long double) {
+    "the estimator runs end to end in every arithmetic type", "[sdk][vio][types][slow]", float, posit32, long double) {
     using S = TestType;
     auto est = branes::test::make_estimator<S>();
     bs::VioConfig cfg;

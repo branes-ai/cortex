@@ -141,12 +141,12 @@ TEST_CASE("S0 bench rejects a ragged output fixture", "[tools][bench][s0]") {
     REQUIRE_THROWS_AS(S0::decode_output<double>(f.expected), std::invalid_argument);
 }
 
-TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every native type", "[tools][bench][s1][sfm]") {
+TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every native type", "[tools][bench][s1][sfm][slow]") {
     require_pass<S1>({"ka", S1::known_answer()}, "sfm_two_view_pnp", {"double", "float", "long_double"});
 }
 
 TEST_CASE("S1 SfM bench: the 0.1 px window builds and matches the truth, but its scale is off (#501)",
-          "[tools][bench][s1][sfm]") {
+          "[tools][bench][s1][sfm][slow]") {
     const auto run = bn::run_fixture<S1>({"gt", S1::ground_truth()}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
     REQUIRE(result(run, "sfm.window_built").pass);
     REQUIRE(result(run, "sfm.pnp_reprojection_rms").pass);
@@ -166,7 +166,7 @@ TEST_CASE("S1 SfM bench: a 1 px window fails the PnP inlier gate (#500)", "[tool
     REQUIRE(out.window.status == branes::sdk::sfm::InitWindowStatus::PnpFailed);
 }
 
-TEST_CASE("S1 SfM bench: the alternatives on the same windows", "[tools][bench][s1][sfm]") {
+TEST_CASE("S1 SfM bench: the alternatives on the same windows", "[tools][bench][s1][sfm][slow]") {
     // The pre-#247 bootstrap on frame 1 loses the 0.1 px window the shipped one builds.
     const auto gt = S1::ground_truth();
     const auto in = S1::decode_input<double>(gt.input);
@@ -183,7 +183,7 @@ TEST_CASE("S1 SfM bench: the alternatives on the same windows", "[tools][bench][
     REQUIRE(k4.window.keyframe_frames.front() == 0);
 }
 
-TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they did", "[tools][bench][s1][sfm]") {
+TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they did", "[tools][bench][s1][sfm][slow]") {
     const std::filesystem::path dir = std::filesystem::path(BRANES_BENCH_FIXTURE_DIR) / "s1_initialization";
     using St = branes::sdk::sfm::InitWindowStatus;
     const std::pair<const char*, St> cases[] = {

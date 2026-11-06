@@ -71,7 +71,7 @@ TEST_CASE("bench fixture loader rejects malformed fixtures", "[tools][bench]") {
     REQUIRE_THROWS_AS(bn::from_json(k), std::invalid_argument);
 }
 
-TEST_CASE("S9 bench: all three built-in fixture kinds pass in every type and variant", "[tools][bench][s9]") {
+TEST_CASE("S9 bench: all three built-in fixture kinds pass in every type and variant", "[tools][bench][s9][slow]") {
     const auto fixtures = Bench::builtin_fixtures();
     REQUIRE(fixtures.size() == 3);
     REQUIRE(fixtures[0].fixture.kind == bn::FixtureKind::KnownAnswer);

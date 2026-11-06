@@ -126,7 +126,7 @@ TEST_CASE("precision: a quaternion rounded in float decodes in double only as ro
     CHECK_THROWS(bn::unpack_so3<double>(q));
 }
 
-TEST_CASE("precision: S9 adds no rounding of its own in any type", "[tools][bench][precision][s9]") {
+TEST_CASE("precision: S9 adds no rounding of its own in any type", "[tools][bench][precision][s9][slow]") {
     // The built-ins and the ladder's two ends (kappa ~ 1 and ~ 1e12), in the
     // IEEE types and one posit (emulated arithmetic is slow in a debug build).
     auto fixtures = Bench::builtin_fixtures();

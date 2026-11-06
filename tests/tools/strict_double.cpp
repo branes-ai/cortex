@@ -81,7 +81,7 @@ std::size_t require_bit_identical() {
 
 }  // namespace
 
-TEST_CASE("strict_double reproduces double bit for bit in every stage bench", "[tools][bench][generic]") {
+TEST_CASE("strict_double reproduces double bit for bit in every stage bench", "[tools][bench][generic][slow]") {
     std::size_t runs = 0;
     runs += require_bit_identical<bn::S0SensorModelBench>();
     runs += require_bit_identical<bn::S1InitializationBench>();

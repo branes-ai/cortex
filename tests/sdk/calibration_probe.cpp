@@ -46,7 +46,7 @@ TEST_CASE("S10 calibration noise budget: ~1deg extrinsic uncertainty ~ the empir
 }
 
 TEST_CASE("S10 end-to-end: with perfect calibration and exact sensors the world is self-consistent",
-          "[sdk][s10][calibration]") {
+          "[sdk][s10][calibration][slow]") {
     const auto sw = ev::r_inflation_sweep<T>();
     REQUIRE(sw.curve.size() >= 5);
     // With PERFECT calibration and EXACT sensors the pose NEES is below the
@@ -72,7 +72,7 @@ TEST_CASE("S10 end-to-end: with perfect calibration and exact sensors the world 
 // leak (#212): yaw is unobservable, yet its σ collapses from the prior while the
 // error it should cover grows. This pins the defect as a characterization; a
 // fix (or the R-IEKF taking over as the reference, #347) flips both checks.
-TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information into yaw", "[sdk][s10][calibration]") {
+TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information into yaw", "[sdk][s10][calibration][slow]") {
     std::vector<T> nees, pos;
     for (const std::uint32_t seed : {1u, 2u, 3u}) {
         const auto r = ev::matched_noise_control<T>(seed);
