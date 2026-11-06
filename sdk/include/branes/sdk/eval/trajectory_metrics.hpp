@@ -16,6 +16,12 @@
 // the translational RMSE. Both are clean-room from the definitions — no
 // ov_eval / evo source contact.
 //
+// Two more for comparing VIO estimators (docs/benchmarks/euroc-baseline.mdx):
+// a position + yaw (4-DoF) alignment, since a VIO observes roll and pitch
+// but not global yaw or position, and RPE over sub-trajectories of a fixed
+// travelled distance rather than a fixed index step, so the score does not
+// depend on the estimator's output rate.
+//
 // Header-only, C++20, type-generic.
 
 #ifndef BRANES_SDK_EVAL_TRAJECTORY_METRICS_HPP
@@ -23,6 +29,7 @@
 
 #include <branes/math/lie/se3.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
@@ -205,30 +212,92 @@ template <math::Scalar T>
     return out;
 }
 
-/// Absolute Trajectory Error: translational RMSE after rigid alignment.
-/// `estimated` and `reference` are matched element-wise (same length).
+/// Position + yaw (4-DoF) alignment of `estimated` onto `reference`: the
+/// rotation about world z and the translation minimizing
+/// Σ‖reference − (R·estimated + t)‖². After centering, the cost depends on
+/// the yaw θ only through −2(c·cos θ + s·sin θ) with
+/// c = Σ(aₓbₓ + a_y b_y) and s = Σ(aₓb_y − a_y bₓ), so θ = atan2(s, c).
+/// Same preconditions as `align_rigid`.
 template <math::Scalar T>
-[[nodiscard]] T ate_rmse(const std::vector<detail::Vec3<T>>& estimated, const std::vector<detail::Vec3<T>>& reference) {
-    const Alignment<T> a = align_rigid(estimated, reference);
+[[nodiscard]] Alignment<T> align_yaw(const std::vector<detail::Vec3<T>>& estimated,
+                                     const std::vector<detail::Vec3<T>>& reference) {
+    const std::size_t n = estimated.size();
+    if (n == 0 || reference.size() != n)
+        throw std::invalid_argument("align_yaw: empty or mismatched trajectories");
+
+    detail::Vec3<T> mean_e{}, mean_r{};
+    for (std::size_t i = 0; i < n; ++i) {
+        mean_e = mean_e + estimated[i];
+        mean_r = mean_r + reference[i];
+    }
+    const T inv = T{1} / static_cast<T>(n);
+    mean_e = mean_e * inv;
+    mean_r = mean_r * inv;
+
+    T c = T{0}, s = T{0};
+    for (std::size_t i = 0; i < n; ++i) {
+        const detail::Vec3<T> a = estimated[i] - mean_e;
+        const detail::Vec3<T> b = reference[i] - mean_r;
+        c += a[0] * b[0] + a[1] * b[1];
+        s += a[0] * b[1] - a[1] * b[0];
+    }
+    Alignment<T> al;
+    al.R = math::lie::SO3<T>::exp(detail::Vec3<T>{{T{0}, T{0}, std::atan2(s, c)}});
+    al.t = mean_r - al.R * mean_e;
+    return al;
+}
+
+namespace detail {
+
+/// RMSE of reference − (R·estimated + t) over matched positions.
+template <math::Scalar T>
+[[nodiscard]] T
+aligned_rmse(const std::vector<Vec3<T>>& estimated, const std::vector<Vec3<T>>& reference, const Alignment<T>& a) {
     T sum = T{0};
     for (std::size_t i = 0; i < estimated.size(); ++i) {
-        const detail::Vec3<T> e = reference[i] - (a.R * estimated[i] + a.t);
+        const Vec3<T> e = reference[i] - (a.R * estimated[i] + a.t);
         sum += math::lie::detail::dot(e, e);
     }
     return std::sqrt(sum / static_cast<T>(estimated.size()));
 }
 
+template <math::Scalar T>
+[[nodiscard]] std::vector<Vec3<T>> translations(const std::vector<StampedPose<T>>& poses) {
+    std::vector<Vec3<T>> p;
+    p.reserve(poses.size());
+    for (const auto& s : poses)
+        p.push_back(s.pose.translation());
+    return p;
+}
+
+}  // namespace detail
+
+/// Absolute Trajectory Error: translational RMSE after rigid alignment.
+/// `estimated` and `reference` are matched element-wise (same length).
+template <math::Scalar T>
+[[nodiscard]] T ate_rmse(const std::vector<detail::Vec3<T>>& estimated, const std::vector<detail::Vec3<T>>& reference) {
+    return detail::aligned_rmse<T>(estimated, reference, align_rigid(estimated, reference));
+}
+
+/// ATE after a position + yaw (4-DoF) alignment (`align_yaw`). Never below
+/// `ate_rmse` on the same input, since the rigid alignment is the wider search.
+template <math::Scalar T>
+[[nodiscard]] T ate_rmse_4dof(const std::vector<detail::Vec3<T>>& estimated,
+                              const std::vector<detail::Vec3<T>>& reference) {
+    return detail::aligned_rmse<T>(estimated, reference, align_yaw(estimated, reference));
+}
+
+/// Convenience overload: 4-DoF ATE on matched pose lists (uses translations).
+template <math::Scalar T>
+[[nodiscard]] T ate_rmse_4dof(const std::vector<StampedPose<T>>& estimated,
+                              const std::vector<StampedPose<T>>& reference) {
+    return ate_rmse_4dof<T>(detail::translations(estimated), detail::translations(reference));
+}
+
 /// Convenience overload: ATE on matched pose lists (uses translations).
 template <math::Scalar T>
 [[nodiscard]] T ate_rmse(const std::vector<StampedPose<T>>& estimated, const std::vector<StampedPose<T>>& reference) {
-    std::vector<detail::Vec3<T>> pe, pr;
-    pe.reserve(estimated.size());
-    pr.reserve(reference.size());
-    for (const auto& s : estimated)
-        pe.push_back(s.pose.translation());
-    for (const auto& s : reference)
-        pr.push_back(s.pose.translation());
-    return ate_rmse<T>(pe, pr);
+    return ate_rmse<T>(detail::translations(estimated), detail::translations(reference));
 }
 
 /// Relative Pose Error: translational RMSE of the relative motion over a
@@ -304,6 +373,68 @@ template <math::Scalar T>
         d.rotation_deg_per_m = rot_per_m_sum / static_cast<T>(count);
     }
     return d;
+}
+
+/// RPE over sub-trajectories of a fixed travelled distance, for one length.
+template <math::Scalar T>
+struct RpeSegment {
+    double length_m = 0.0;   ///< ground-truth distance travelled over the segment
+    T translation_m = T{0};  ///< mean ‖translation error‖ of the relative motion
+    T rotation_deg = T{0};   ///< mean rotation error of the relative motion
+    std::size_t pairs = 0;   ///< segments averaged
+};
+
+/// Relative Pose Error by travelled distance. For each start i and length L,
+/// j is the first pose at least L metres further along the reference path;
+/// the error of the pair is E = (Rᵢ⁻¹·Rⱼ)⁻¹·(Eᵢ⁻¹·Eⱼ), with R the reference and
+/// E the estimate, scored by ‖t(E)‖ and the angle of its rotation. A length
+/// longer than the whole path yields no entry. Matched lists, same length;
+/// invariant to a global rigid transform of either list.
+template <math::Scalar T>
+[[nodiscard]] std::vector<RpeSegment<T>> rpe_by_distance(const std::vector<StampedPose<T>>& estimated,
+                                                         const std::vector<StampedPose<T>>& reference,
+                                                         const std::vector<double>& lengths_m) {
+    const std::size_t n = estimated.size();
+    if (n == 0 || reference.size() != n)
+        throw std::invalid_argument("rpe_by_distance: empty or mismatched trajectories");
+
+    std::vector<double> dist(n, 0.0);  // distance along the reference path
+    for (std::size_t i = 1; i < n; ++i) {
+        const auto d = reference[i].pose.translation() - reference[i - 1].pose.translation();
+        dist[i] = dist[i - 1] + static_cast<double>(std::sqrt(math::lie::detail::dot(d, d)));
+    }
+
+    const T rad2deg = static_cast<T>(180) / std::numbers::pi_v<T>;
+    std::vector<RpeSegment<T>> out;
+    for (const double L : lengths_m) {
+        if (!(L > 0.0))
+            throw std::invalid_argument("rpe_by_distance: segment lengths must be positive");
+        RpeSegment<T> seg;
+        seg.length_m = L;
+        T trans_sum = T{0}, rot_sum = T{0};
+        std::size_t j = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            j = std::max(j, i);
+            while (j < n && dist[j] < dist[i] + L)
+                ++j;
+            if (j >= n)
+                break;  // dist is non-decreasing: no later start reaches L either
+            const auto rel_e = estimated[i].pose.inverse() * estimated[j].pose;
+            const auto rel_r = reference[i].pose.inverse() * reference[j].pose;
+            const auto err = rel_r.inverse() * rel_e;
+            const auto te = err.translation();
+            const auto phi = err.rotation().log();
+            trans_sum += std::sqrt(math::lie::detail::dot(te, te));
+            rot_sum += std::sqrt(math::lie::detail::dot(phi, phi)) * rad2deg;
+            ++seg.pairs;
+        }
+        if (seg.pairs == 0)
+            continue;
+        seg.translation_m = trans_sum / static_cast<T>(seg.pairs);
+        seg.rotation_deg = rot_sum / static_cast<T>(seg.pairs);
+        out.push_back(seg);
+    }
+    return out;
 }
 
 }  // namespace branes::sdk::eval

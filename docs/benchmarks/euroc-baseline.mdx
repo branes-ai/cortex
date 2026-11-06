@@ -1,0 +1,132 @@
+---
+title: EuRoC Baseline vs OpenVINS
+description: cortex on all 11 EuRoC MAV sequences against OpenVINS v2.7, scored by one evaluator, and the regression benchmark that reruns it.
+sidebar:
+  label: "EuRoC Baseline vs OpenVINS"
+---
+
+The goal for the VIO pipeline is accuracy competitive with OpenVINS on EuRoC.
+Published tables use their own sequence subsets, start offsets, alignments and
+evaluators, so a gap between our number and a paper's mixes the estimator with
+the protocol. This baseline runs both estimators on the same data, through the
+same evaluator, so the gap is the estimator's.
+
+The numbers come from `scripts/euroc-baseline.json`, which
+`scripts/euroc-baseline.sh` reruns and compares against (see
+[the regression benchmark](#the-regression-benchmark)).
+
+## Protocol
+
+- **Data:** the 11 EuRoC MAV sequences, cam0 and imu0, ground truth from
+  `state_groundtruth_estimate0`.
+- **cortex** (commit 348c774, 2026-11-06): `vio_pipeline --source euroc` with
+  its defaults, monocular, the MSCKF with double stages and a full covariance.
+  Every run starts at the first frame.
+- **OpenVINS v2.7:** the unmodified upstream binary, run outside every Branes
+  repository with its upstream defaults, as [ADR 0002](../adr/0002-no-gpl-clean-room-policy.md)'s
+  2026-11-06 amendment allows. Three run modes: monocular and stereo from
+  the upstream start offsets, and monocular from the first frame. Only the
+  aggregate metrics below are recorded. No test or CI job runs it or reads
+  its output.
+- **Evaluator:** `tools/traj_eval` scores every trajectory the same way. It
+  matches each estimated pose to the nearest ground-truth sample within
+  20 ms and reports:
+  - **ATE 4-DoF:** translational RMSE after a position + yaw alignment, the
+    four directions a VIO cannot observe. This is the headline number.
+  - **ATE SE3:** the same after a rigid Horn alignment (`vio_pipeline`'s ATE).
+    It also forgives roll and pitch errors, which a VIO can observe.
+  - **RPE:** the error of the relative motion over sub-trajectories of 8, 16,
+    24, 32 and 40 m of ground-truth travel. It is reported as the mean
+    translation (m) and rotation (deg) error per length, then averaged over
+    the lengths.
+
+  The metrics are implemented in `branes::sdk::eval` from their definitions
+  (Horn 1987 for the rigid alignment, and the closed-form yaw angle derived in
+  `align_yaw`), and are unit-tested in `tests/sdk/trajectory_metrics.cpp`.
+- **Window:** OpenVINS's upstream start offsets skip the opening seconds of
+  the machine-hall sequences, so the **window** columns score cortex only
+  from OpenVINS mono's first pose. Both estimators are then scored over the
+  same span.
+
+## ATE, 4-DoF (m)
+
+| Sequence | cortex, whole run | cortex, window | OpenVINS mono | OpenVINS stereo | cortex ÷ OV mono |
+|---|---:|---:|---:|---:|---:|
+| MH_01_easy | 3.336 | 0.869 | 0.096 | 0.072 | 9.1× |
+| MH_02_easy | 0.822 | 0.461 | 0.168 | 0.117 | 2.7× |
+| MH_03_medium | 29,804 | 28,798 | 0.147 | 0.096 | diverged |
+| MH_04_difficult | 0.481 | 0.366 | 0.147 | 0.127 | 2.5× |
+| MH_05_difficult | 0.732 | 0.610 | 0.458 | 0.281 | 1.3× |
+| V1_01_easy | 0.216 | 0.217 | 0.069 | 0.063 | 3.1× |
+| V1_02_medium | 0.206 | 0.201 | 0.058 | 0.048 | 3.4× |
+| V1_03_difficult | 0.194 | 0.177 | 0.067 | 0.059 | 2.6× |
+| V2_01_easy | 0.318 | 0.304 | 0.127 | 0.060 | 2.4× |
+| V2_02_medium | 0.410 | 0.383 | 0.073 | 0.044 | 5.3× |
+| V2_03_difficult | 0.185 | 0.188 | 0.181 | 0.087 | 1.0× |
+
+The ratio compares cortex's window with OpenVINS mono; both are monocular.
+
+## RPE, mean over 8–40 m (translation / rotation)
+
+Over the window:
+
+| Sequence | cortex | OpenVINS mono | OpenVINS stereo |
+|---|---:|---:|---:|
+| MH_01_easy | 0.488 m / 2.01° | 0.137 m / 1.55° | 0.141 m / 1.67° |
+| MH_02_easy | 0.556 m / 1.80° | 0.173 m / 1.07° | 0.132 m / 0.86° |
+| MH_03_medium | 16,357 m / 124.99° | 0.178 m / 0.61° | 0.159 m / 0.62° |
+| MH_04_difficult | 0.547 m / 0.65° | 0.206 m / 0.83° | 0.213 m / 0.50° |
+| MH_05_difficult | 0.695 m / 0.76° | 0.506 m / 1.06° | 0.300 m / 0.85° |
+| V1_01_easy | 0.428 m / 5.36° | 0.262 m / 2.84° | 0.229 m / 2.83° |
+| V1_02_medium | 0.240 m / 4.01° | 0.110 m / 0.57° | 0.106 m / 0.73° |
+| V1_03_difficult | 0.260 m / 2.59° | 0.125 m / 1.24° | 0.125 m / 1.02° |
+| V2_01_easy | 0.641 m / 5.42° | 0.220 m / 1.06° | 0.102 m / 0.89° |
+| V2_02_medium | 0.333 m / 5.09° | 0.090 m / 1.55° | 0.061 m / 1.27° |
+| V2_03_difficult | 0.268 m / 2.05° | 0.201 m / 1.56° | 0.108 m / 1.38° |
+
+## What the baseline says
+
+- **The typical gap is 2.5–3.5×** in 4-DoF ATE: the median over the ten
+  sequences cortex completes is about 2.7×. Only V2_03 and MH_05 come close.
+- **Initialization costs the most.**
+  - MH_03 diverges: the gravity-align fallback seeds a zero gyro bias on a
+    vibrating start (#591).
+  - MH_01's whole-run ATE (3.3 m) is nearly four times its window score, because
+    the filter is seeded from a dynamic init with a 92% scale error (#592).
+  - #500 and #501 are the dynamic-init gates behind both.
+- **Rotation drift is the next gap.** In the Vicon rooms cortex's rotation
+  RPE is 1.3–7× OpenVINS mono's (V1_02: 4.01° against 0.57°). That is
+  consistent with the body-frame MSCKF's yaw observability leak (#212, #480).
+- **Starting at the first frame matters for OpenVINS too.** Run monocular
+  from the first frame, it diverges on MH_04 (4-DoF ATE 9,889 m) and is
+  otherwise within 0.035 m of its start-offset score. Its start offsets hide
+  the hard openings that cortex is scored on in the whole-run column.
+
+## The regression benchmark
+
+`scripts/euroc-baseline.sh` reruns the baseline on the development station.
+It runs `vio_pipeline` on every sequence, scores each trajectory with
+`traj_eval` over the whole run and over the window, and compares the
+whole-run scores with the recorded cortex numbers:
+
+```sh
+scripts/euroc-baseline.sh                    # all 11 sequences, ~25 min serial
+scripts/euroc-baseline.sh V1_01_easy MH_05_difficult
+CORTEX_BASELINE_JOBS=4 scripts/euroc-baseline.sh
+scripts/euroc-baseline.sh --update           # record a new baseline
+```
+
+- **Verdict:** a sequence is **worse** when its 4-DoF ATE, RPE translation or
+  RPE rotation exceeds the recorded value by more than 10%
+  (`CORTEX_BASELINE_TOL`) plus a noise floor (5 mm, 5 mm, 0.05°). It is
+  **better** when it falls below by the same margin.
+- **Exit status:** the script exits non-zero on any worse or failed
+  sequence.
+- **Updating:** when a change improves the pipeline, `--update` records the
+  new numbers and the commit; update the tables on this page to match.
+- **Not in CI:** the script needs the EuRoC dataset on disk. The OpenVINS columns it
+  prints are the recorded targets, not inputs; nothing here runs OpenVINS.
+
+To score another estimator's trajectory on the same terms, write it as TUM
+(`t x y z qx qy qz qw`, IMU pose in the world frame) and run
+`traj_eval --dataset <mav0> --est <file> [--from <s>] [--json]`.

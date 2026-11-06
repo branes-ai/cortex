@@ -1,0 +1,532 @@
+{
+ "_about": "EuRoC MAV baseline (docs/benchmarks/euroc-baseline.mdx). Aggregate metrics only, scored by tools/traj_eval: ATE in m (4-DoF and SE3 alignment), RPE as the mean over 8/16/24/32/40 m segments (m, deg), start_s and coverage_s in s after the first ground-truth stamp. scripts/euroc-baseline.sh reruns cortex and compares against cortex.run.",
+ "cortex": {
+  "commit": "348c774",
+  "binary": "tools/vio_pipeline --source euroc (MSCKF, double stages, full covariance)",
+  "date": "2026-11-06"
+ },
+ "openvins": {
+  "release": "v2.7",
+  "note": "Unmodified upstream binary run outside every Branes repository under ADR 0002's 2026-11-06 amendment; upstream defaults. mono and stereo start at the upstream start offsets; mono_from_start starts at the first frame. These are targets, not test inputs: no test or CI job reads them."
+ },
+ "compare_from_s": "window start shared by cortex.window and openvins.mono: OpenVINS mono's first pose",
+ "sequences": {
+  "MH_01_easy": {
+   "compare_from_s": 43.823,
+   "cortex": {
+    "run": {
+     "ate_4dof": 3.336,
+     "ate_se3": 3.3266,
+     "rpe_trans_m": 1.7395,
+     "rpe_rot_deg": 3.1642,
+     "start_s": 0.025,
+     "coverage_s": 181.9
+    },
+    "window": {
+     "ate_4dof": 0.8694,
+     "ate_se3": 0.8635,
+     "rpe_trans_m": 0.4883,
+     "rpe_rot_deg": 2.0149,
+     "start_s": 43.825,
+     "coverage_s": 138.1
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.0958,
+     "ate_se3": 0.0955,
+     "rpe_trans_m": 0.1373,
+     "rpe_rot_deg": 1.5485,
+     "start_s": 43.8231,
+     "coverage_s": 138.0519
+    },
+    "stereo": {
+     "ate_4dof": 0.072,
+     "ate_se3": 0.07,
+     "rpe_trans_m": 0.1411,
+     "rpe_rot_deg": 1.6661,
+     "start_s": 43.8238,
+     "coverage_s": 138.1012
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.0694,
+     "ate_se3": 0.0687,
+     "rpe_trans_m": 0.1436,
+     "rpe_rot_deg": 1.7493,
+     "start_s": 43.8229,
+     "coverage_s": 138.0522
+    }
+   }
+  },
+  "MH_02_easy": {
+   "compare_from_s": 38.116,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.8215,
+     "ate_se3": 0.8089,
+     "rpe_trans_m": 0.7159,
+     "rpe_rot_deg": 2.7682,
+     "start_s": 0.015,
+     "coverage_s": 149.95
+    },
+    "window": {
+     "ate_4dof": 0.4605,
+     "ate_se3": 0.4302,
+     "rpe_trans_m": 0.5564,
+     "rpe_rot_deg": 1.7983,
+     "start_s": 38.165,
+     "coverage_s": 111.8
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.1678,
+     "ate_se3": 0.1514,
+     "rpe_trans_m": 0.1727,
+     "rpe_rot_deg": 1.0737,
+     "start_s": 38.1158,
+     "coverage_s": 111.8493
+    },
+    "stereo": {
+     "ate_4dof": 0.1165,
+     "ate_se3": 0.1107,
+     "rpe_trans_m": 0.1322,
+     "rpe_rot_deg": 0.8596,
+     "start_s": 38.1676,
+     "coverage_s": 111.7974
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.1579,
+     "ate_se3": 0.1478,
+     "rpe_trans_m": 0.1688,
+     "rpe_rot_deg": 1.0705,
+     "start_s": 38.1666,
+     "coverage_s": 111.7985
+    }
+   }
+  },
+  "MH_03_medium": {
+   "compare_from_s": 17.401,
+   "cortex": {
+    "run": {
+     "ate_4dof": 29803.5842,
+     "ate_se3": 29803.2312,
+     "rpe_trans_m": 15100.318,
+     "rpe_rot_deg": 129.1852,
+     "start_s": 0.0,
+     "coverage_s": 131.5
+    },
+    "window": {
+     "ate_4dof": 28798.2384,
+     "ate_se3": 28797.4745,
+     "rpe_trans_m": 16356.7816,
+     "rpe_rot_deg": 124.9922,
+     "start_s": 17.45,
+     "coverage_s": 114.05
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.1469,
+     "ate_se3": 0.1466,
+     "rpe_trans_m": 0.1782,
+     "rpe_rot_deg": 0.6128,
+     "start_s": 17.4011,
+     "coverage_s": 114.099
+    },
+    "stereo": {
+     "ate_4dof": 0.0958,
+     "ate_se3": 0.0957,
+     "rpe_trans_m": 0.1588,
+     "rpe_rot_deg": 0.6162,
+     "start_s": 17.4006,
+     "coverage_s": 114.0996
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.1466,
+     "ate_se3": 0.146,
+     "rpe_trans_m": 0.1878,
+     "rpe_rot_deg": 0.6729,
+     "start_s": 17.0989,
+     "coverage_s": 114.4012
+    }
+   }
+  },
+  "MH_04_difficult": {
+   "compare_from_s": 19.153,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.4815,
+     "ate_se3": 0.4803,
+     "rpe_trans_m": 0.7247,
+     "rpe_rot_deg": 1.9979,
+     "start_s": 0.005,
+     "coverage_s": 98.75
+    },
+    "window": {
+     "ate_4dof": 0.3661,
+     "ate_se3": 0.3606,
+     "rpe_trans_m": 0.547,
+     "rpe_rot_deg": 0.6538,
+     "start_s": 19.155,
+     "coverage_s": 79.6
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.1473,
+     "ate_se3": 0.1456,
+     "rpe_trans_m": 0.2057,
+     "rpe_rot_deg": 0.829,
+     "start_s": 19.153,
+     "coverage_s": 79.602
+    },
+    "stereo": {
+     "ate_4dof": 0.1269,
+     "ate_se3": 0.1251,
+     "rpe_trans_m": 0.2128,
+     "rpe_rot_deg": 0.5015,
+     "start_s": 19.2111,
+     "coverage_s": 79.5439
+    },
+    "mono_from_start": {
+     "ate_4dof": 9889.2902,
+     "ate_se3": 9889.1142,
+     "rpe_trans_m": 6160.469,
+     "rpe_rot_deg": 38.7426,
+     "start_s": 4.005,
+     "coverage_s": 94.7506
+    }
+   }
+  },
+  "MH_05_difficult": {
+   "compare_from_s": 19.734,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.732,
+     "ate_se3": 0.7308,
+     "rpe_trans_m": 0.8135,
+     "rpe_rot_deg": 1.0675,
+     "start_s": -0.015,
+     "coverage_s": 111.05
+    },
+    "window": {
+     "ate_4dof": 0.6096,
+     "ate_se3": 0.6083,
+     "rpe_trans_m": 0.6953,
+     "rpe_rot_deg": 0.7592,
+     "start_s": 19.735,
+     "coverage_s": 91.3
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.4575,
+     "ate_se3": 0.4532,
+     "rpe_trans_m": 0.5057,
+     "rpe_rot_deg": 1.0592,
+     "start_s": 19.7339,
+     "coverage_s": 91.3012
+    },
+    "stereo": {
+     "ate_4dof": 0.2813,
+     "ate_se3": 0.2713,
+     "rpe_trans_m": 0.3004,
+     "rpe_rot_deg": 0.847,
+     "start_s": 19.7347,
+     "coverage_s": 91.3003
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.4265,
+     "ate_se3": 0.421,
+     "rpe_trans_m": 0.5207,
+     "rpe_rot_deg": 1.0372,
+     "start_s": 19.7353,
+     "coverage_s": 91.2999
+    }
+   }
+  },
+  "V1_01_easy": {
+   "compare_from_s": 4.559,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.216,
+     "ate_se3": 0.215,
+     "rpe_trans_m": 0.4339,
+     "rpe_rot_deg": 5.4172,
+     "start_s": 0.01,
+     "coverage_s": 143.55
+    },
+    "window": {
+     "ate_4dof": 0.2173,
+     "ate_se3": 0.2162,
+     "rpe_trans_m": 0.4279,
+     "rpe_rot_deg": 5.356,
+     "start_s": 4.56,
+     "coverage_s": 139.0
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.0691,
+     "ate_se3": 0.069,
+     "rpe_trans_m": 0.2619,
+     "rpe_rot_deg": 2.8392,
+     "start_s": 4.5592,
+     "coverage_s": 139.0009
+    },
+    "stereo": {
+     "ate_4dof": 0.0627,
+     "ate_se3": 0.0623,
+     "rpe_trans_m": 0.2287,
+     "rpe_rot_deg": 2.8299,
+     "start_s": 4.5607,
+     "coverage_s": 138.9994
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.0691,
+     "ate_se3": 0.069,
+     "rpe_trans_m": 0.2619,
+     "rpe_rot_deg": 2.8392,
+     "start_s": 4.5592,
+     "coverage_s": 139.0009
+    }
+   }
+  },
+  "V1_02_medium": {
+   "compare_from_s": 3.955,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.2065,
+     "ate_se3": 0.2032,
+     "rpe_trans_m": 0.2418,
+     "rpe_rot_deg": 4.003,
+     "start_s": 0.005,
+     "coverage_s": 83.5
+    },
+    "window": {
+     "ate_4dof": 0.201,
+     "ate_se3": 0.199,
+     "rpe_trans_m": 0.2405,
+     "rpe_rot_deg": 4.0082,
+     "start_s": 4.005,
+     "coverage_s": 79.5
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.0583,
+     "ate_se3": 0.0576,
+     "rpe_trans_m": 0.1097,
+     "rpe_rot_deg": 0.5666,
+     "start_s": 3.9555,
+     "coverage_s": 79.5493
+    },
+    "stereo": {
+     "ate_4dof": 0.0481,
+     "ate_se3": 0.048,
+     "rpe_trans_m": 0.1064,
+     "rpe_rot_deg": 0.7297,
+     "start_s": 3.9526,
+     "coverage_s": 79.5521
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.0583,
+     "ate_se3": 0.0576,
+     "rpe_trans_m": 0.1097,
+     "rpe_rot_deg": 0.5666,
+     "start_s": 3.9555,
+     "coverage_s": 79.5493
+    }
+   }
+  },
+  "V1_03_difficult": {
+   "compare_from_s": 5.405,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.1941,
+     "ate_se3": 0.1885,
+     "rpe_trans_m": 0.2707,
+     "rpe_rot_deg": 3.2861,
+     "start_s": 0.005,
+     "coverage_s": 104.65
+    },
+    "window": {
+     "ate_4dof": 0.1766,
+     "ate_se3": 0.1728,
+     "rpe_trans_m": 0.2598,
+     "rpe_rot_deg": 2.5851,
+     "start_s": 5.405,
+     "coverage_s": 99.25
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.0668,
+     "ate_se3": 0.0662,
+     "rpe_trans_m": 0.1246,
+     "rpe_rot_deg": 1.2404,
+     "start_s": 5.405,
+     "coverage_s": 99.2499
+    },
+    "stereo": {
+     "ate_4dof": 0.0587,
+     "ate_se3": 0.0585,
+     "rpe_trans_m": 0.1251,
+     "rpe_rot_deg": 1.0226,
+     "start_s": 5.4105,
+     "coverage_s": 99.2444
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.0668,
+     "ate_se3": 0.0662,
+     "rpe_trans_m": 0.1246,
+     "rpe_rot_deg": 1.2404,
+     "start_s": 5.405,
+     "coverage_s": 99.2499
+    }
+   }
+  },
+  "V2_01_easy": {
+   "compare_from_s": 3.725,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.3183,
+     "ate_se3": 0.3172,
+     "rpe_trans_m": 0.6571,
+     "rpe_rot_deg": 5.3896,
+     "start_s": 0.025,
+     "coverage_s": 111.95
+    },
+    "window": {
+     "ate_4dof": 0.3037,
+     "ate_se3": 0.3023,
+     "rpe_trans_m": 0.6411,
+     "rpe_rot_deg": 5.4197,
+     "start_s": 3.725,
+     "coverage_s": 108.25
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.1268,
+     "ate_se3": 0.1043,
+     "rpe_trans_m": 0.2198,
+     "rpe_rot_deg": 1.0612,
+     "start_s": 3.725,
+     "coverage_s": 108.2502
+    },
+    "stereo": {
+     "ate_4dof": 0.0599,
+     "ate_se3": 0.0498,
+     "rpe_trans_m": 0.1015,
+     "rpe_rot_deg": 0.8933,
+     "start_s": 3.725,
+     "coverage_s": 108.2502
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.1268,
+     "ate_se3": 0.1043,
+     "rpe_trans_m": 0.2198,
+     "rpe_rot_deg": 1.0612,
+     "start_s": 3.725,
+     "coverage_s": 108.2502
+    }
+   }
+  },
+  "V2_02_medium": {
+   "compare_from_s": 2.88,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.4097,
+     "ate_se3": 0.4058,
+     "rpe_trans_m": 0.3559,
+     "rpe_rot_deg": 5.278,
+     "start_s": -0.02,
+     "coverage_s": 115.45
+    },
+    "window": {
+     "ate_4dof": 0.383,
+     "ate_se3": 0.3786,
+     "rpe_trans_m": 0.3325,
+     "rpe_rot_deg": 5.0888,
+     "start_s": 2.93,
+     "coverage_s": 112.5
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.0728,
+     "ate_se3": 0.0666,
+     "rpe_trans_m": 0.0896,
+     "rpe_rot_deg": 1.5455,
+     "start_s": 2.8803,
+     "coverage_s": 112.5498
+    },
+    "stereo": {
+     "ate_4dof": 0.0438,
+     "ate_se3": 0.0354,
+     "rpe_trans_m": 0.0609,
+     "rpe_rot_deg": 1.2673,
+     "start_s": 2.8846,
+     "coverage_s": 112.5455
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.0728,
+     "ate_se3": 0.0666,
+     "rpe_trans_m": 0.0896,
+     "rpe_rot_deg": 1.5455,
+     "start_s": 2.8803,
+     "coverage_s": 112.5498
+    }
+   }
+  },
+  "V2_03_difficult": {
+   "compare_from_s": 4.565,
+   "cortex": {
+    "run": {
+     "ate_4dof": 0.1849,
+     "ate_se3": 0.1809,
+     "rpe_trans_m": 0.2724,
+     "rpe_rot_deg": 2.2154,
+     "start_s": 0.415,
+     "coverage_s": 114.4
+    },
+    "window": {
+     "ate_4dof": 0.1878,
+     "ate_se3": 0.1839,
+     "rpe_trans_m": 0.2675,
+     "rpe_rot_deg": 2.0511,
+     "start_s": 4.565,
+     "coverage_s": 110.25
+    }
+   },
+   "openvins": {
+    "mono": {
+     "ate_4dof": 0.1806,
+     "ate_se3": 0.1779,
+     "rpe_trans_m": 0.2012,
+     "rpe_rot_deg": 1.5607,
+     "start_s": 4.565,
+     "coverage_s": 110.2501
+    },
+    "stereo": {
+     "ate_4dof": 0.0866,
+     "ate_se3": 0.0852,
+     "rpe_trans_m": 0.1082,
+     "rpe_rot_deg": 1.379,
+     "start_s": 4.563,
+     "coverage_s": 110.2521
+    },
+    "mono_from_start": {
+     "ate_4dof": 0.1806,
+     "ate_se3": 0.1779,
+     "rpe_trans_m": 0.2012,
+     "rpe_rot_deg": 1.5607,
+     "start_s": 4.565,
+     "coverage_s": 110.2501
+    }
+   }
+  }
+ }
+}

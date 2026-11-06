@@ -47,6 +47,7 @@
 #include <branes/tools/invariant_backend_adapter.hpp>
 #include <branes/tools/observability_ledger.hpp>
 #include <branes/tools/stage_type_presets.hpp>
+#include <branes/tools/tum_trajectory.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -729,8 +730,8 @@ RunResult run_synthetic(const ev::SyntheticData<T>& w,
 
 // The estimated trajectory as <out>/trajectory.tum, one pose per line:
 // "t x y z qx qy qz qw" (the TUM format), t in seconds at full precision, the
-// pose of the IMU in the world frame. Lets an external evaluator score cortex
-// and another estimator on the same terms.
+// pose of the IMU in the world frame. traj_eval scores it, and any other
+// estimator's TUM output, on the same terms (docs/benchmarks/euroc-baseline.mdx).
 void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
     if (args.out.empty())
         return;
@@ -739,14 +740,7 @@ void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
         std::cerr << "vio_pipeline: cannot write " << args.out << "/trajectory.tum\n";
         return;
     }
-    f << std::setprecision(std::numeric_limits<double>::max_digits10);
-    for (const auto& sp : traj) {
-        const auto& p = sp.pose.translation();
-        const auto& q = sp.pose.rotation().quaternion();  // (w, x, y, z)
-        f << sp.t_s << ' ' << static_cast<double>(p[0]) << ' ' << static_cast<double>(p[1]) << ' '
-          << static_cast<double>(p[2]) << ' ' << static_cast<double>(q[1]) << ' ' << static_cast<double>(q[2]) << ' '
-          << static_cast<double>(q[3]) << ' ' << static_cast<double>(q[0]) << '\n';
-    }
+    branes::tools::write_tum<T>(f, traj);
 }
 
 // ── EuRoC source (real images through the KLT front end) ───────────────────
