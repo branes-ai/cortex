@@ -82,6 +82,15 @@ struct ImuInitConfig {
     /// dynamic init so the backend retries on a later, better-excited window or
     /// falls back. (scale > 0 alone is insufficient — 1e-8 is "positive".)
     T min_dynamic_motion = T{5} / T{100};  ///< 5 cm of resolved motion
+    /// Scale-settling gate for the dynamic alignment (#592). The alignment is
+    /// re-solved on the window's first ⌈2n/3⌉ keyframes (the same SfM gauge,
+    /// so the two scales are comparable), and declined if that scale differs
+    /// from the full window's by more than this fraction: the scale has not
+    /// settled, and the window does not determine it. On the S1 bench's 0.1 px
+    /// window, whose scale is 21 % off, the two differ by 16 %. It tests
+    /// convergence, not accuracy: on EuRoC, settled 1 s windows are still
+    /// about 14 % off (median), a bias of the short-baseline SfM track (#501).
+    T max_scale_change = T{5} / T{100};  ///< 5 %
 };
 
 /// What initialization recovers. `R_world_imu` is gravity-aligned with
@@ -109,6 +118,14 @@ struct ImuInitResult {
     /// solve runs — even when the observability gate then declines — so callers
     /// can see how close the window came to the `min_dynamic_motion` floor.
     T resolved_motion = T{0};
+    /// The scale re-solved on the window's leading ⌈2n/3⌉ keyframes, for the
+    /// `max_scale_change` gate; 0 when it was not solved (fewer than 4
+    /// keyframes, or the alignment declined earlier).
+    T prefix_scale = T{0};
+    /// True when the alignment was declined only because its scale had not
+    /// settled (the window resolved enough motion, but the prefix disagreed):
+    /// the platform is moving and a longer window may yet align.
+    bool scale_unsettled = false;
 };
 
 /// One keyframe for dynamic initialization. The caller supplies the
@@ -288,6 +305,22 @@ public:
         if (r.resolved_motion < cfg_.min_dynamic_motion)
             return r;  // unobservable scale ⇒ decline (success stays false)
 
+        // Scale-settling gate (#592): the same alignment on the leading part of
+        // the window must agree on the scale. A prefix that cannot be solved
+        // counts as unsettled.
+        if (n >= kMinSettlingKeyframes) {
+            Result prefix;
+            prefix.gyro_bias = r.gyro_bias;
+            const std::size_t m = (2 * n + 2) / 3;  // ⌈2n/3⌉
+            if (estimate_gravity_and_velocities(kfs.first(m), prefix))
+                r.prefix_scale = prefix.scale;
+            const T change = r.prefix_scale > T{0} ? abs_(r.scale / r.prefix_scale - T{1}) : T{1};
+            if (!(change <= cfg_.max_scale_change)) {
+                r.scale_unsettled = true;
+                return r;  // unsettled scale ⇒ decline (success stays false)
+            }
+        }
+
         // The alignment recovers gravity in the (arbitrary) vision world
         // frame. Rotate the whole result into a gravity-aligned world —
         // gravity along −z — so that R_world_imu and gravity_world are
@@ -309,6 +342,10 @@ public:
     }
 
 private:
+    /// The settling gate needs a prefix of at least 3 keyframes (⌈2·4/3⌉ = 3);
+    /// shorter windows skip it.
+    static constexpr std::size_t kMinSettlingKeyframes = 4;
+
     static T abs_(const T& x) {
         return math::lie::detail::abs_(x);
     }

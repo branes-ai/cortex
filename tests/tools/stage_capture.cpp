@@ -67,6 +67,9 @@ void run(Backend& be, std::size_t frames, double px = 0.5) {
 // The filter initializes within the first 8 frames; 32 frames reach post-init
 // frame 21, past the first full-window marginalizations (S9 from frame 11).
 constexpr std::size_t kFrames = 32;
+// With prefer_dynamic_init the 0.5 px windows settle their scale only near
+// frame 83 (#592).
+constexpr std::size_t kDynFrames = 96;
 
 /// The synthetic world's camera, for S0.
 std::vector<Recorder::Intrinsics> intrinsics() {
@@ -156,10 +159,11 @@ TEST_CASE("dynamic-init attempts are captured as S1 fixtures that replay bit-ide
     Recorder rec(opt, intrinsics());
     auto be = make_backend(/*prefer_dynamic_init=*/true);
     be.set_stage_tap(&rec);
-    run(be, kFrames);
-    // The backend attempts dynamic init from the fifth frame until a window
-    // aligns (4 attempts on this run). Before #537 none aligned, because the
-    // world's velocity step left no IMU-consistent window.
+    run(be, kDynFrames);
+    // The backend attempts dynamic init from the tenth frame until a window
+    // aligns with a settled scale (#592): 75 attempts on this run, aligning at
+    // frame 83. Before #537 none aligned, because the world's velocity step
+    // left no IMU-consistent window.
     REQUIRE(be.initialized());
     REQUIRE(rec.fixtures().size() >= 1);
     REQUIRE(rec.stats().init_attempts == rec.fixtures().size());

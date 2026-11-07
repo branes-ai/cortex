@@ -7,7 +7,9 @@
 // figures rely on: the gravity-direction (roll/pitch) error is recovered
 // yaw-invariantly, velocity/bias errors are the vector norms, the per-block
 // initial σ is read from √diag(P), the isotropic seed is flagged, the dynamic
-// scale error is computed against the metric truth, and the record serializes.
+// scale error is computed against the ground-truth displacement over the
+// alignment window (and only when ground truth covers it), and the record
+// serializes.
 
 #include <branes/sdk/eval/nav_consistency.hpp>
 #include <branes/sdk/msckf/state.hpp>
@@ -72,7 +74,7 @@ TEST_CASE("S1 inspector: static init - gravity-dir error, biases, isotropic seed
     REQUIRE(r.cov.size() == r.dim * r.dim);
 }
 
-TEST_CASE("S1 inspector: dynamic init - scale error vs metric truth", "[tools][s1_inspect]") {
+TEST_CASE("S1 inspector: dynamic init - scale error vs the window's ground truth", "[tools][s1_inspect]") {
     ms::State<double> s(0.1);
     s.R = SO3{};
     s.v = Vec3{{1.2, -0.3, 0.05}};  // dynamic init recovers a velocity
@@ -82,21 +84,48 @@ TEST_CASE("S1 inspector: dynamic init - scale error vs metric truth", "[tools][s
     branes::sdk::InitDiagnostics<double> diag;
     diag.method = branes::sdk::InitMethod::Dynamic;
     diag.t_s = 2.5;
-    diag.dyn_scale = 1.08;  // 8% off the metric truth
+    // The SfM window measured 2 vision units between its first and last
+    // keyframes, and the truth is 0.5 m: the true scale is 0.25 m per unit.
+    diag.dyn_scale = 0.27;  // 8% above it
+    diag.dyn_vision_span = 2.0;
+    diag.dyn_t_first = 2.0;
+    diag.dyn_t_last = 2.5;
     diag.dyn_seed_speed = 1.24;
     diag.dyn_keyframes = 6;
 
     ev::NavSample<double> gt;
     gt.R = SO3{};
     gt.v = Vec3{{1.0, 0.0, 0.0}};
+    ev::NavSample<double> gt_first = gt, gt_last = gt;
+    gt_first.p = Vec3{{1.0, 2.0, 3.0}};
+    gt_last.p = Vec3{{1.3, 2.4, 3.0}};  // 0.5 m away
 
-    const auto r = bt::S1InitInspector().build(diag, s, &gt);
+    const auto r = bt::S1InitInspector().build(diag, s, &gt, &gt_first, &gt_last);
     REQUIRE(r.method == "dynamic");
-    REQUIRE_THAT(r.scale, WithinRel(1.08, 1e-9));
-    REQUIRE_THAT(r.scale_error_pct, WithinAbs(8.0, 1e-6));  // |1.08 − 1| · 100, EuRoC is metric
+    REQUIRE_THAT(r.scale, WithinRel(0.27, 1e-9));
+    REQUIRE(r.scale_checked);
+    REQUIRE_THAT(r.true_scale, WithinRel(0.25, 1e-9));
+    REQUIRE_THAT(r.scale_error_pct, WithinAbs(8.0, 1e-6));  // |0.27 / 0.25 − 1| · 100
     REQUIRE(r.dyn_keyframes == 6);
     REQUIRE_THAT(r.dyn_seed_speed, WithinRel(1.24, 1e-9));
     REQUIRE(r.velocity_error_ms > 0.0);
+}
+
+TEST_CASE("S1 inspector: dynamic init - scale unchecked without the window's ground truth", "[tools][s1_inspect]") {
+    // EuRoC MH_01's ground truth starts about 1 s after the sensors, so its
+    // first alignment window has none (#592). The scale is not 1 in vision
+    // units, but that alone is no error.
+    ms::State<double> s(0.1);
+    branes::sdk::InitDiagnostics<double> diag;
+    diag.method = branes::sdk::InitMethod::Dynamic;
+    diag.dyn_scale = 0.079;
+    diag.dyn_vision_span = 1.0;
+
+    const auto r = bt::S1InitInspector().build(diag, s, nullptr);
+    REQUIRE_FALSE(r.have_gt);
+    REQUIRE_FALSE(r.scale_checked);
+    REQUIRE(r.scale_error_pct == 0.0);
+    REQUIRE(bt::to_json(r).at("scale_checked") == false);
 }
 
 TEST_CASE("S1 inspector: no ground truth - error fields stay zero; record serializes", "[tools][s1_inspect]") {

@@ -71,6 +71,13 @@ struct InitDiagnostics {
     double dyn_scale = 0.0;
     double dyn_seed_speed = 0.0;
     int dyn_keyframes = 0;
+    // The window the alignment used: its first and last keyframe times, and the
+    // distance between those keyframes in vision units. Scaled by dyn_scale it
+    // is the metric displacement, so a caller with ground truth can check the
+    // scale (the vision units are arbitrary, so dyn_scale alone means nothing).
+    double dyn_t_first = 0.0;
+    double dyn_t_last = 0.0;
+    double dyn_vision_span = 0.0;
     // Dynamic-init attempt accounting, accumulated across every try while
     // uninitialized — populated even when dynamic never fires, to localize why
     // (#247). dyn_attempts: tries past kMinDynFrames; dyn_window_builds: how

@@ -82,16 +82,24 @@ TEST_CASE("a never-stationary tilted start initializes via gravity alignment", "
     // translational jostle keep every window above the static gates, so the
     // backend must fall through to the gravity-only bootstrap. (This path was
     // previously unreachable — the init buffer was trimmed on every miss and
-    // never reached the timeout.)
+    // never reached the timeout.) No window is a rest, so this is a moving
+    // start: the fallback waits 1200 samples, not 400, for a dynamic init
+    // that this camera-less run never offers (#592).
     const auto R_true = branes::math::lie::SO3<T>::exp(DVec3{{0.43, 0.17, 0.0}});
     const DVec3 up_world{{0.0, 0.0, 9.81}};
     const DVec3 a_rest = R_true.inverse() * up_world;
 
     double t = 0.0;
-    for (int k = 0; k < 450; ++k, t += 0.005) {  // > kInitMaxSamples (400)
+    for (int k = 0; k < 1250; ++k, t += 0.005) {  // > kInitMaxSamplesMoving (1200)
         const DVec3 gyro{{0.2 * std::sin(0.2 * k), 0.15 * std::cos(0.13 * k), 0.1 * std::sin(0.07 * k)}};
         const T j = 0.4 * std::sin(0.3 * k);
         backend.process_imu(imu_sample(t, gyro, DVec3{{a_rest[0] + j, a_rest[1] - j, a_rest[2] + 0.5 * j}}));
+        // Past kInitMaxSamples (400) it still waits; the fallback fires on the
+        // 1200th sample (k = 1199), not before.
+        if (k == 450 || k == 1198)
+            REQUIRE_FALSE(backend.initialized());
+        if (k == 1199)
+            REQUIRE(backend.initialized());
     }
 
     REQUIRE(backend.initialized());
