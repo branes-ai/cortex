@@ -15,11 +15,12 @@
 //   S4_frontend             stages/s4_frontend.hpp             frame observations → tracks, ended tracks
 //   S5_triangulation        stages/s5_triangulation.hpp        track → feature position
 //   S6a–S6e (MSCKF update)  stages/s6_msckf_update.hpp         track → updated state
+//   S8_zero_velocity        stages/s8_zero_velocity.hpp        IMU + frames at rest → v = 0, b_g = ω̄
 //   S9_marginalization      stages/s9_marginalization.hpp      state → state − clone
 //   S10_online_calibration  stages/s10_online_calibration.hpp  state → state + calibration states
 //
-// S7 (SLAM features) and S8 (zero-velocity update) are not implemented in
-// cortex; they get a stage header when they are.
+// S7 (SLAM features) is not implemented in cortex; it gets a stage header when
+// it is.
 //
 // Header-only, C++20.
 

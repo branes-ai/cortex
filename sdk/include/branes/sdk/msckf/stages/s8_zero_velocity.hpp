@@ -23,8 +23,9 @@
 // - the image's, the median feature displacement over 0.25 s. It sees a
 //   translation, which moves the features, but a pure rotation moves them as
 //   well, and the IMU's test rejects that.
-// On the 11 EuRoC sequences the pair fires at no frame where ground truth
-// moves faster than 0.05 m/s, and at 47–78 % of the frames at rest.
+// On the 11 EuRoC sequences the pair fired at none of the 24,353 frames whose
+// ground truth moves faster than 0.05 m/s, and at 47–78 % of the frames at
+// rest: a measurement on those runs, not a guarantee.
 //
 // Header-only, C++20, type-generic.
 

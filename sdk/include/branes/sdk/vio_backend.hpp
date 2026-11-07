@@ -91,8 +91,8 @@ struct VioConfig {
     /// (the filter's R, about 4.6 px on EuRoC) this is the KLT noise itself.
     double init_track_sigma_px = 1.0;
     /// S8: while the IMU and the image both say the platform is at rest, apply
-    /// v = 0 and gyro-bias pseudo-measurements each frame instead of cloning the
-    /// frame and updating with its features (#600). At rest a monocular MSCKF has no
+    /// a v = 0 pseudo-measurement each frame, and a gyro-bias one per 0.25 s IMU
+    /// window, instead of cloning the frame and updating with its features (#600). At rest a monocular MSCKF has no
     /// parallax to hold the velocity: on EuRoC MH_01 it drifted to 1.6 m/s
     /// over a 22 s rest on the ground.
     bool zero_velocity_update = true;

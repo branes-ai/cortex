@@ -149,6 +149,7 @@ public:
         zopt.max_disparity_px = static_cast<T>(config.zupt_max_disparity_px);
         zupt_ = msckf::stages::s8_zero_velocity::Detector<T>{zopt};
         zupt_frames_ = 0;
+        zupt_bias_age_ = zupt_.options().imu_samples;
 
         rebind_operators();
 
@@ -198,7 +199,10 @@ public:
                 return;  // drop out-of-order / duplicate samples — don't touch filter time
             propagate(gyro, accel, static_cast<T>(dt));
         }
-        zupt_.push_imu(gyro);
+        if (config_.zero_velocity_update) {
+            zupt_.push_imu(gyro);
+            ++zupt_bias_age_;
+        }
         last_imu_time_ = imu.timestamp_s;
         have_last_time_ = true;
         state_.timestamp = imu.timestamp_s;
@@ -240,13 +244,20 @@ public:
         // the window: a clone without parallax adds no information, and its
         // features would triangulate on a zero baseline (#600). The tracks
         // resume when the platform moves.
-        zupt_.push_frame(obs);
-        if (config_.zero_velocity_update && zupt_.check().still) {
-            namespace s8 = msckf::stages::s8_zero_velocity;
-            (void)s8::apply(state_, static_cast<T>(config_.zupt_velocity_sigma));
-            (void)s8::apply_gyro_bias(state_, zupt_.mean_rate(), static_cast<T>(config_.zupt_gyro_bias_sigma));
-            ++zupt_frames_;
-            return;
+        if (config_.zero_velocity_update) {
+            zupt_.push_frame(obs);
+            if (zupt_.check().still) {
+                namespace s8 = msckf::stages::s8_zero_velocity;
+                (void)s8::apply(state_, static_cast<T>(config_.zupt_velocity_sigma));
+                // The bias measurement is the mean of the detector's IMU window:
+                // use each window's samples once, not at every frame it spans.
+                if (zupt_bias_age_ >= zupt_.options().imu_samples) {
+                    (void)s8::apply_gyro_bias(state_, zupt_.mean_rate(), static_cast<T>(config_.zupt_gyro_bias_sigma));
+                    zupt_bias_age_ = 0;
+                }
+                ++zupt_frames_;
+                return;
+            }
         }
 
         // S6 + S9: keep the window bounded — update with, then marginalize, the
@@ -862,6 +873,7 @@ private:
     std::vector<sfm::InitFrame<T>> init_frames_;
     msckf::stages::s8_zero_velocity::Detector<T> zupt_{};  ///< S8 stillness detector (#600)
     std::size_t zupt_frames_ = 0;                          ///< frames S8 applied v = 0 at
+    std::size_t zupt_bias_age_ = 0;                        ///< IMU samples since S8's last gyro-bias update
     T init_track_sigma_{};                                 ///< init_track_sigma_px in camera 0's normalized units
     sfm::InitWindowOptions<T> init_window_opts_{};         ///< SfM gates from it (#500)
     ImuPreintegrator<T> init_preint_{};

@@ -138,11 +138,12 @@ sequence, and a stage bench calls one in isolation. The stage names carry the tr
 | S4_frontend | frame observations → tracks, ended tracks | `s4_frontend.hpp` |
 | S5_triangulation | track → feature position | `s5_triangulation.hpp` |
 | S6a_jacobians … S6e_ekf_update | track → updated state, one entry point per sub-step | `s6_msckf_update.hpp` |
+| S8_zero_velocity | IMU + frames at rest → `v = 0`, `b_g = ω̄` pseudo-measurements | `s8_zero_velocity.hpp` |
 | S9_marginalization | state → state − clone | `s9_marginalization.hpp` |
 | S10_online_calibration | state → state + camera↔IMU extrinsic states (6/camera, optional) | `s10_online_calibration.hpp` |
 
 S6c_compression is the identity in cortex today (one feature per update leaves 2m − 3 rows), kept
-as an explicit slot for a compressing variant. S7 and S8 are not implemented in cortex.
+as an explicit slot for a compressing variant. S7 is not implemented in cortex.
 
 ---
 
@@ -536,9 +537,10 @@ must not false-positive during slow motion (would inject a wrong `v=0` constrain
 **cortex.** `msckf/stages/s8_zero_velocity.hpp` (#600), on by default
 (`VioConfig::zero_velocity_update`). The detector requires both the IMU's test (the gyro rate
 variation below a 20 Hz low-pass, ≤ 0.008 rad/s over 0.25 s) and the image's (median feature
-displacement over 5 frames ≤ 1 px). At rest the backend applies `v = 0` (σ 0.01 m/s) and
-`b_g = ω̄` (σ 0.001 rad/s) each frame and adds no clone. On EuRoC it fires at no frame moving
-faster than 0.05 m/s and at 47–78 % of the frames at rest. The ROC and static-drift probes listed
+displacement over 5 frames ≤ 1 px). At rest the backend applies `v = 0` (σ 0.01 m/s) each frame,
+`b_g = ω̄` (σ 0.001 rad/s) once per 0.25 s IMU window, and adds no clone. On the 11 EuRoC sequences
+it fired at none of the 24,353 frames whose ground truth moves faster than 0.05 m/s, and at
+47–78 % of the frames at rest; that is a measurement on those runs, not a guarantee. The ROC and static-drift probes listed
 above are not yet written.
 
 ---

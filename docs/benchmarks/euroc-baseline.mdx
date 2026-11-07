@@ -127,8 +127,9 @@ Over the window:
   velocity; on MH_01 the estimated speed grew from 0.06 to 1.6 m/s while the
   drone rested on the ground. Since #600 a zero-velocity update (S8) holds
   the velocity at zero and the gyro bias at the mean rate while both the IMU
-  and the image are still. Its detector fires at no frame where ground truth
-  moves faster than 0.05 m/s. Over the whole run every sequence improves or
+  and the image are still. On these 11 sequences its detector fired at none
+  of the 24,353 frames whose ground truth moves faster than 0.05 m/s (a
+  measurement on these runs, not a guarantee). Over the whole run every sequence improves or
   holds: MH_01 2.305 → 0.342 m, MH_02 0.817 → 0.371 m, V2_01 0.318 →
   0.206 m, V2_02 0.410 → 0.307 m. Over the window MH_03, MH_04, MH_05 and
   V1_03 are 5–20% worse (MH_04 0.366 → 0.441 m), so the median ratio moves
