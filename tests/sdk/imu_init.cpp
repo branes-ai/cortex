@@ -367,6 +367,37 @@ std::vector<bs::DynInitKeyframe<T>> scaled_window(std::size_t n, T scale_true, T
     return kfs;
 }
 
+// A window still for its first `still` keyframes, then accelerating: the full
+// window resolves the motion, but its leading part has none, so the prefix
+// alignment cannot recover a positive scale.
+std::vector<bs::DynInitKeyframe<T>> late_excitation_window(std::size_t n, std::size_t still, T scale_true) {
+    const Vec3 g_world{{0.0, 0.0, -9.81}};
+    const T dt = 0.1;
+    std::vector<SO3> R(n);
+    std::vector<Vec3> p(n), v(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const T s = i < still ? T{0} : static_cast<T>(i - still + 1) * dt;  // time since the motion began
+        R[i] = SO3::exp(Vec3{{0.3 * s, -0.2 * s, 0.5 * s}});
+        const Vec3 a{{1.5, -0.8, 0.6}};
+        p[i] = a * (0.5 * s * s);
+        v[i] = a * s;
+    }
+    std::vector<bs::DynInitKeyframe<T>> kfs(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        kfs[i].R_world_imu = R[i];
+        kfs[i].p_world_imu = p[i] * (1.0 / scale_true);
+        if (i == 0)
+            continue;
+        const auto Rit = R[i - 1].inverse().matrix();
+        kfs[i].dt = dt;
+        kfs[i].dR_dbg = bs::ImuInitializer<T>::Mat3::identity();
+        kfs[i].dR = R[i - 1].inverse() * R[i];
+        kfs[i].dv = Rit * (v[i] - v[i - 1] - g_world * dt);
+        kfs[i].dp = Rit * (p[i] - p[i - 1] - v[i - 1] * dt - g_world * (T{0.5} * dt * dt));
+    }
+    return kfs;
+}
+
 }  // namespace
 
 TEST_CASE("dynamic init: a settled scale passes the settling gate", "[sdk][imu_init]") {
@@ -402,8 +433,25 @@ TEST_CASE("dynamic init declines a scale that has not settled", "[sdk][imu_init]
 TEST_CASE("dynamic init skips the settling gate below 4 keyframes", "[sdk][imu_init]") {
     const auto kfs = scaled_window(3, 4.0, 0.0);
     const auto r = bs::ImuInitializer<T>{}.try_dynamic(kfs);
+    REQUIRE(r.success);  // it aligned, so the gate was reached and skipped
     REQUIRE(r.prefix_scale == 0.0);
     REQUIRE_FALSE(r.scale_unsettled);
+}
+
+TEST_CASE("dynamic init declines a window whose prefix cannot be aligned", "[sdk][imu_init]") {
+    // Still for the first 6 of 9 keyframes (the whole prefix), then moving.
+    const auto kfs = late_excitation_window(9, 6, 4.0);
+    const auto r = bs::ImuInitializer<T>{}.try_dynamic(kfs);
+    REQUIRE(r.resolved_motion >= bs::ImuInitConfig<T>{}.min_dynamic_motion);  // the whole window is observable
+    REQUIRE_FALSE(r.success);
+    REQUIRE(r.prefix_scale == 0.0);  // the prefix solve failed
+    REQUIRE(r.scale_unsettled);
+
+    // The same motion from the start: the prefix aligns and agrees.
+    const auto moving = late_excitation_window(9, 1, 4.0);
+    const auto m = bs::ImuInitializer<T>{}.try_dynamic(moving);
+    REQUIRE(m.success);
+    REQUIRE(m.prefix_scale > 0.0);
 }
 
 TEST_CASE("dynamic init recovers the gyro bias with a non-identity dR_dbg", "[sdk][imu_init]") {

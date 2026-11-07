@@ -224,6 +224,15 @@ TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they d
         const auto out = S1::run<double>(S1::decode_input<double>(nf.fixture.input), "sfm_two_view_pnp");
         REQUIRE(out.window.status == status);
         REQUIRE((out.success == 1) == aligns);
+        if (status == St::Ok && !aligns) {
+            // The window built, so the alignment declined it: by the settling gate.
+            const auto in = S1::decode_input<double>(nf.fixture.input);
+            branes::sdk::ImuInitConfig<double> cfg;
+            cfg.gravity_magnitude = in.gravity_magnitude;
+            const auto r = branes::sdk::ImuInitializer<double>(cfg).try_dynamic(
+                std::span<const branes::sdk::DynInitKeyframe<double>>{out.window.keyframes});
+            REQUIRE(r.scale_unsettled);
+        }
     }
 }
 
