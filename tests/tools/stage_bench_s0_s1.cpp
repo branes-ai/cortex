@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -146,18 +147,28 @@ TEST_CASE("S1 SfM bench: an exact window is recovered to rounding in every nativ
     require_pass<S1>({"ka", S1::known_answer()}, "sfm_two_view_pnp", {"double", "float", "long_double"});
 }
 
-TEST_CASE("S1 SfM bench: the 0.1 px window builds and matches the truth, but its scale is off (#501)",
+TEST_CASE("S1 SfM bench: the 0.1 px window builds and matches the truth, but its scale has not settled (#501, #592)",
           "[tools][bench][s1][sfm][slow]") {
-    const auto run = bn::run_fixture<S1>({"gt", S1::ground_truth()}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
+    const auto gt = S1::ground_truth();
+    const auto run = bn::run_fixture<S1>({"gt", gt}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
     REQUIRE(result(run, "sfm.window_built").pass);
     REQUIRE(result(run, "sfm.pnp_reprojection_rms").pass);
-    REQUIRE(result(run, "init.resolved").pass);
     REQUIRE(result(run, "truth.sfm_rotation_error").pass);
     REQUIRE(result(run, "truth.sfm_position_error").pass);
-    // The alignment accepts a ~21 % scale error from a ~1 % track error.
-    const auto& scale = result(run, "truth.sfm_scale_error");
-    REQUIRE_FALSE(scale.pass);
-    REQUIRE(scale.value > 10.0);
+    // From a ~1 % track error the alignment's scale is ~21 % off (#501). Its
+    // first 2/3 of the window disagree with the whole on the scale, so the
+    // settling gate declines it rather than seed the filter (#592).
+    REQUIRE_FALSE(result(run, "init.resolved").pass);
+    const auto in = S1::decode_input<double>(gt.input);
+    const auto win = branes::sdk::sfm::build_init_window<double>(
+        std::span<const branes::sdk::sfm::InitFrame<double>>{in.frames}, in.extrinsics);
+    REQUIRE(win.success);
+    branes::sdk::ImuInitConfig<double> cfg;
+    cfg.gravity_magnitude = in.gravity_magnitude;
+    const auto r = branes::sdk::ImuInitializer<double>(cfg).try_dynamic(
+        std::span<const branes::sdk::DynInitKeyframe<double>>{win.keyframes});
+    REQUIRE_FALSE(r.success);
+    REQUIRE(r.scale_unsettled);
 }
 
 TEST_CASE("S1 SfM bench: a 1 px window fails the PnP inlier gate (#500)", "[tools][bench][s1][sfm]") {
@@ -187,12 +198,19 @@ TEST_CASE("S1 SfM bench: the alternatives on the same windows", "[tools][bench][
 TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they did", "[tools][bench][s1][sfm][slow]") {
     const std::filesystem::path dir = std::filesystem::path(BRANES_BENCH_FIXTURE_DIR) / "s1_initialization";
     using St = branes::sdk::sfm::InitWindowStatus;
-    const std::pair<const char*, St> cases[] = {
-        {"captured_euroc_mh05_at_rest", St::PnpFailed},                     // ~0.05 px of disparity
-        {"captured_euroc_mh05_moving_two_view_failed", St::TwoViewFailed},  // > 100 px of disparity (#500)
-        {"captured_euroc_mh05_aligned", St::Ok},
+    struct Case {
+        const char* name;
+        St status;
+        bool aligns;
     };
-    for (const auto& [name, status] : cases) {
+    const Case cases[] = {
+        {"captured_euroc_mh05_at_rest", St::PnpFailed, false},                     // ~0.05 px of disparity
+        {"captured_euroc_mh05_moving_two_view_failed", St::TwoViewFailed, false},  // > 100 px of disparity (#500)
+        // The window builds, but its scale changes 14 % between its first 2/3
+        // and the whole: the settling gate declines it (#592).
+        {"captured_euroc_mh05_unsettled_scale", St::Ok, false},
+    };
+    for (const auto& [name, status, aligns] : cases) {
         INFO(name);
         const bn::NamedFixture nf{name, bn::load(dir / (std::string(name) + ".json"))};
         REQUIRE(nf.fixture.variant == "sfm_two_view_pnp");
@@ -205,7 +223,7 @@ TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they d
             REQUIRE(result(run, "replay.same_shape_and_finiteness").pass);
         const auto out = S1::run<double>(S1::decode_input<double>(nf.fixture.input), "sfm_two_view_pnp");
         REQUIRE(out.window.status == status);
-        REQUIRE((out.success == 1) == (status == St::Ok));
+        REQUIRE((out.success == 1) == aligns);
     }
 }
 

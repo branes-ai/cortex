@@ -483,7 +483,20 @@ private:
     /// that makes the metric scale observable, so give dynamic init time to
     /// fire on a later excited window instead of preempting it at 2 s.
     static constexpr std::size_t kInitMaxSamplesDynamic = 4000;  ///< ~20 s @ 200 Hz
-    static constexpr std::size_t kMinDynFrames = 5;              ///< camera frames before attempting dynamic init
+    /// Longer runway before the gravity-only fallback, in the default mode, on
+    /// a moving start: no IMU window has looked like rest, not even a vibrating
+    /// one (#591). The fallback seeds zero velocity, which on a moving start
+    /// costs more than waiting for a dynamic window whose scale has settled:
+    /// on EuRoC MH_01 the fallback at 2 s scores 2.84 m ATE over OpenVINS's
+    /// span, the dynamic init at 3.8 s 0.58 m (#592). Its early windows fail
+    /// the two-view bootstrap (#500), so the alignment cannot be the signal.
+    static constexpr std::size_t kInitMaxSamplesMoving = 1200;  ///< ~6 s @ 200 Hz
+    /// Camera frames before attempting dynamic init. On a shorter window the
+    /// settling gate compares too few keyframes to mean much: EuRoC MH_01's
+    /// first 5-frame window passes it (its 4-frame prefix agrees) and seeds
+    /// the filter at 0.87 m ATE over OpenVINS's span, where its first settled
+    /// window of 10 or more frames scores 0.58 m (#592).
+    static constexpr std::size_t kMinDynFrames = 10;
     // Bounded init-window frame buffer. Wider spans more time, so even a slow
     // moving start accumulates enough translational baseline for the two-view
     // gravity/scale solve to be well-observable: a 12-frame (0.55 s @ 20 Hz)
@@ -550,7 +563,9 @@ private:
         // produce yet. Until that lands, gravity-only alignment fixes the
         // dominant error (roll/pitch), which is enough to keep the filter
         // from diverging. See the dynamic-VI-init follow-up.
-        const std::size_t init_max = config_.prefer_dynamic_init ? kInitMaxSamplesDynamic : kInitMaxSamples;
+        const std::size_t init_max = config_.prefer_dynamic_init ? kInitMaxSamplesDynamic
+                                     : !rest_bias_               ? kInitMaxSamplesMoving
+                                                                 : kInitMaxSamples;
         if (init_samples_seen_ >= init_max) {
             // Prefer gravity-only alignment (roll/pitch from the mean
             // specific force) over a blind identity attitude: on a tilted
@@ -671,6 +686,11 @@ private:
                                                               std::span<const DVec3>{init_accel_},
                                                               static_cast<T>(config_.gravity_magnitude),
                                                               init_diag_);
+        const auto& k0 = win.keyframes.front();
+        const auto& k1 = win.keyframes.back();
+        init_diag_.dyn_t_first = init_frames_[win.keyframe_frames.front()].timestamp;
+        init_diag_.dyn_t_last = init_frames_[win.keyframe_frames.back()].timestamp;
+        init_diag_.dyn_vision_span = static_cast<double>(math::lie::detail::norm(k1.p_world_imu - k0.p_world_imu));
         finish_init(t);
     }
 

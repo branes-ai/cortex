@@ -48,7 +48,7 @@ struct S1InitRecord {
     std::array<double, 3> velocity{};                       ///< world velocity (0 for static)
     std::array<double, 3> gyro_bias{};
     std::array<double, 3> accel_bias{};
-    double scale = 1.0;  ///< metric scale (dynamic only; 1 otherwise)
+    double scale = 1.0;  ///< metric scale of the vision units (dynamic only; 1 otherwise)
 
     // Initial covariance: the full block (for the heatmap) + per-block σ.
     std::vector<double> cov;  ///< row-major dim×dim (15×15 right after init)
@@ -69,7 +69,14 @@ struct S1InitRecord {
     double velocity_error_ms = 0.0;
     double gyro_bias_error = 0.0;
     double accel_bias_error = 0.0;
-    double scale_error_pct = 0.0;  ///< dynamic only (EuRoC is metric ⇒ true scale = 1)
+    /// Dynamic only, and only when ground truth covers the alignment window:
+    /// `|scale / true_scale − 1|`, where true_scale is the ground-truth
+    /// displacement between the window's first and last keyframes over the
+    /// same displacement in vision units. The SfM bootstrap fixes its own
+    /// unit of length, so `scale` itself is not expected to be 1 (#592).
+    bool scale_checked = false;
+    double true_scale = 0.0;
+    double scale_error_pct = 0.0;
 };
 
 [[nodiscard]] inline nlohmann::json to_json(const S1InitRecord& r) {
@@ -100,6 +107,8 @@ struct S1InitRecord {
                 {"velocity_error_ms", r.velocity_error_ms},
                 {"gyro_bias_error", r.gyro_bias_error},
                 {"accel_bias_error", r.accel_bias_error},
+                {"scale_checked", r.scale_checked},
+                {"true_scale", r.true_scale},
                 {"scale_error_pct", r.scale_error_pct}};
 }
 
@@ -113,7 +122,14 @@ public:
     using Vec3 = branes::math::lie::detail::Vec<double, 3>;
 
     /// `gt` may be null (no ground truth available) — then the *_error fields stay 0.
-    [[nodiscard]] S1InitRecord build(const InitDiagnostics& diag, const State& state, const NavSample* gt) const {
+    /// `gt_first` / `gt_last` are the ground truth at a dynamic init's first and
+    /// last keyframe (`diag.dyn_t_first`, `diag.dyn_t_last`); the scale is checked
+    /// only when both are given.
+    [[nodiscard]] S1InitRecord build(const InitDiagnostics& diag,
+                                     const State& state,
+                                     const NavSample* gt,
+                                     const NavSample* gt_first = nullptr,
+                                     const NavSample* gt_last = nullptr) const {
         S1InitRecord r;
         r.method = branes::sdk::to_string(diag.method);
         r.t_s = diag.t_s;
@@ -160,8 +176,14 @@ public:
             r.velocity_error_ms = std::abs(norm3(state.v) - norm3(gt->v));
             r.gyro_bias_error = norm3(sub(state.bg, gt->bg));
             r.accel_bias_error = norm3(sub(state.ba, gt->ba));
-            if (diag.method == branes::sdk::InitMethod::Dynamic)
-                r.scale_error_pct = std::abs(r.scale - 1.0) * 100.0;  // EuRoC GT is metric
+        }
+        if (diag.method == branes::sdk::InitMethod::Dynamic && gt_first && gt_last && diag.dyn_vision_span > 0.0) {
+            const double metric = norm3(sub(gt_last->p, gt_first->p));
+            if (metric > 0.0) {
+                r.scale_checked = true;
+                r.true_scale = metric / diag.dyn_vision_span;
+                r.scale_error_pct = std::abs(r.scale / r.true_scale - 1.0) * 100.0;
+            }
         }
         return r;
     }

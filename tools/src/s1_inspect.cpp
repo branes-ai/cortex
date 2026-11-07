@@ -137,7 +137,14 @@ Backend::CameraCalibration euroc_cam0() {
     return cal;
 }
 
-// Nearest ground-truth nav state to time `t_s` (GT is dense vs the camera rate).
+// Ground truth is compared only within this distance of the time asked for, the
+// association window of traj_eval. EuRoC's ground truth can start after the
+// sensors (by about 1 s on MH_01), and a sample a second away is not the truth
+// at the init (#592).
+constexpr double kGtTolerance_s = 0.02;
+
+// Nearest ground-truth nav state to time `t_s` (GT is dense vs the camera rate),
+// or null when none is within kGtTolerance_s.
 const ev::NavSample<T>* nearest_nav(const std::vector<bs::euroc::GroundTruthState<T>>& gt, double t_s) {
     if (gt.empty())
         return nullptr;
@@ -150,7 +157,7 @@ const ev::NavSample<T>* nearest_nav(const std::vector<bs::euroc::GroundTruthStat
             best = i;
         }
     }
-    return &gt[best].nav;
+    return bestd <= kGtTolerance_s ? &gt[best].nav : nullptr;
 }
 
 }  // namespace
@@ -220,7 +227,10 @@ int main(int argc, char** argv) {
             return false;
         const auto& diag = est.backend().init_diagnostics();
         const ev::NavSample<T>* gt_nav = nearest_nav(gt, diag.t_s > 0 ? diag.t_s : t_at);
-        record = bt::S1InitInspector().build(diag, est.backend().state(), gt_nav);
+        const bool dynamic = diag.method == bs::InitMethod::Dynamic;
+        const ev::NavSample<T>* gt_first = dynamic ? nearest_nav(gt, diag.dyn_t_first) : nullptr;
+        const ev::NavSample<T>* gt_last = dynamic ? nearest_nav(gt, diag.dyn_t_last) : nullptr;
+        record = bt::S1InitInspector().build(diag, est.backend().state(), gt_nav, gt_first, gt_last);
         captured = true;
         return true;
     };
@@ -274,9 +284,15 @@ int main(int argc, char** argv) {
               << " deg\n";
     if (record.have_gt)
         std::cout << "  vs GT:    gravity-dir err " << record.gravity_dir_error_deg << " deg, speed err "
-                  << record.velocity_error_ms << " m/s, gyro-bias err " << record.gyro_bias_error << " rad/s"
-                  << (record.scale_error_pct > 0 ? ", scale err " + std::to_string(record.scale_error_pct) + "%" : "")
-                  << "\n";
+                  << record.velocity_error_ms << " m/s, gyro-bias err " << record.gyro_bias_error << " rad/s\n";
+    else if (!gt.empty())
+        std::cout << "  vs GT:    none, ground truth does not cover the init (it starts " << gt.front().t_s - record.t_s
+                  << " s after it)\n";
+    if (record.scale_checked)
+        std::cout << "  scale:    " << record.scale << " vs " << record.true_scale << " from GT over the window, err "
+                  << record.scale_error_pct << "%\n";
+    else if (record.method == "dynamic" && !gt.empty())
+        std::cout << "  scale:    " << record.scale << ", not checked: ground truth does not cover the window\n";
     std::cout << "  seed:     initial-P is " << (record.isotropic_seed ? "ISOTROPIC σ·I" : "structured") << " (θ σ "
               << record.sigma_theta_deg << " deg, pos σ " << record.sigma_pos_m << " m)\n"
               << "  init:     " << out_path << "\n"
