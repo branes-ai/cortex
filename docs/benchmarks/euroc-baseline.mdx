@@ -19,7 +19,7 @@ The numbers come from `scripts/euroc-baseline.json`, which
 
 - **Data:** the 11 EuRoC MAV sequences, cam0 and imu0, ground truth from
   `state_groundtruth_estimate0`.
-- **cortex** (commit 472a54d, 2026-11-06; MH_03 changed from the first baseline at 348c774, see below): `vio_pipeline --source euroc` with
+- **cortex** (commit 582af5b, 2026-11-06; MH_03 and MH_01 changed from the first baseline at 348c774, see below): `vio_pipeline --source euroc` with
   its defaults, monocular, the MSCKF with double stages and a full covariance.
   Every run starts at the first frame.
 - **OpenVINS v2.7:** the unmodified upstream binary, run outside every Branes
@@ -52,7 +52,7 @@ The numbers come from `scripts/euroc-baseline.json`, which
 
 | Sequence | cortex, whole run | cortex, window | OpenVINS mono | OpenVINS stereo | cortex ÷ OV mono |
 |---|---:|---:|---:|---:|---:|
-| MH_01_easy | 3.336 | 0.869 | 0.096 | 0.072 | 9.1× |
+| MH_01_easy | 2.003 | 0.580 | 0.096 | 0.072 | 6.1× |
 | MH_02_easy | 0.822 | 0.461 | 0.168 | 0.117 | 2.7× |
 | MH_03_medium | 0.484 | 0.414 | 0.147 | 0.096 | 2.8× |
 | MH_04_difficult | 0.481 | 0.366 | 0.147 | 0.127 | 2.5× |
@@ -72,7 +72,7 @@ Over the window:
 
 | Sequence | cortex | OpenVINS mono | OpenVINS stereo |
 |---|---:|---:|---:|
-| MH_01_easy | 0.488 m / 2.01° | 0.137 m / 1.55° | 0.141 m / 1.67° |
+| MH_01_easy | 0.530 m / 2.32° | 0.137 m / 1.55° | 0.141 m / 1.67° |
 | MH_02_easy | 0.556 m / 1.80° | 0.173 m / 1.07° | 0.132 m / 0.86° |
 | MH_03_medium | 0.372 m / 0.84° | 0.178 m / 0.61° | 0.159 m / 0.62° |
 | MH_04_difficult | 0.547 m / 0.65° | 0.206 m / 0.83° | 0.213 m / 0.50° |
@@ -94,9 +94,20 @@ Over the window:
     seeded a zero gyro bias, 0.08 rad/s off. Since #591 the fallback seeds
     the bias of the stillest vibrating rest window (error 0.004 rad/s), and
     MH_03 scores 0.484 m.
-  - MH_01's whole-run ATE (3.3 m) is nearly four times its window score, because
-    the filter is seeded from a dynamic init with a 92% scale error (#592).
-  - #500 and #501 are the dynamic-init gates behind it.
+  - MH_01 starts moving, so static init cannot fire, and the first baseline
+    seeded the filter from a 5-frame (0.25 s) dynamic alignment: 3.336 m over
+    the whole run, 0.869 m over the window. Since #592 dynamic init waits for
+    10 frames and a settled scale (the window's first 2/3 must agree with the
+    whole within 5%), and a moving start waits up to 6 s for it rather than
+    fall back at 2 s to gravity alignment with zero velocity. MH_01 now
+    initializes 3.8 s after its first frame: 2.003 m over the whole run,
+    0.580 m over the window.
+  - Settled is not accurate. Measured against ground truth over 300 accepted
+    1 s alignments on the 11 sequences, the scale is about 14% off (median),
+    mostly too small. Gates on the scale's spread or the solve's residuals do
+    not separate the good windows from the bad. The rest is the
+    short-baseline SfM track and the unestimated accelerometer bias, the work
+    of #500 and #501.
 - **Rotation drift is the next gap.** In the Vicon rooms cortex's rotation
   RPE is 1.3–7× OpenVINS mono's (V1_02: 4.01° against 0.57°). That is
   consistent with the body-frame MSCKF's yaw observability leak (#212, #480).
