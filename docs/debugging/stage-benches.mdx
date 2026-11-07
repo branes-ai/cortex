@@ -207,6 +207,14 @@ crosses observation noise, window length and camera speed. It found five things:
 - **Spacing the keyframes 0.25 s apart helps only in places;** the short-baseline SfM track, with
   no refinement, is the cause.
 
+Since #500 and #501 the backend builds the window with gates from the track noise (`track_sigma` in
+the fixture, absent from older ones, which keep the fixed gates) and bundle-adjusts it. On the
+0.1 px window that halves the track error (0.77 % → 0.32 %). Its scale is then 8 % off with the
+accelerometer bias held at zero (was 21 %). Estimating the bias, as the backend does, this window
+cannot tell a bias along gravity from vertical acceleration. The scale is pulled 66 % low, and the
+settling gate declines the window. PnP's gate does not model the landmarks' triangulation error:
+on synthetic windows it needs 2–4× the true noise to place every frame.
+
 ### The MSCKF update, one sub-step at a time: S6
 
 S6 is five transformations, and each has its own bench, input and contract: the Jacobians (S6a)

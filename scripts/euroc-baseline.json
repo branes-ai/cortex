@@ -1,7 +1,7 @@
 {
  "_about": "EuRoC MAV baseline (docs/benchmarks/euroc-baseline.mdx). Aggregate metrics only, scored by tools/traj_eval: ATE in m (4-DoF and SE3 alignment), RPE as the mean over 8/16/24/32/40 m segments (m, deg), start_s and coverage_s in s after the first ground-truth stamp. scripts/euroc-baseline.sh reruns cortex and compares against cortex.run.",
  "cortex": {
-  "commit": "582af5b",
+  "commit": "181a454",
   "binary": "tools/vio_pipeline --source euroc (MSCKF, double stages, full covariance)",
   "date": "2026-11-06"
  },
@@ -15,18 +15,18 @@
    "compare_from_s": 43.823,
    "cortex": {
     "run": {
-     "ate_4dof": 2.0033,
-     "ate_se3": 1.9936,
-     "rpe_trans_m": 1.3018,
-     "rpe_rot_deg": 3.3837,
-     "start_s": 2.725,
-     "coverage_s": 179.2
+     "ate_4dof": 2.3049,
+     "ate_se3": 2.2963,
+     "rpe_trans_m": 1.3921,
+     "rpe_rot_deg": 3.3804,
+     "start_s": 0.025,
+     "coverage_s": 181.9
     },
     "window": {
-     "ate_4dof": 0.5797,
-     "ate_se3": 0.5743,
-     "rpe_trans_m": 0.5304,
-     "rpe_rot_deg": 2.3176,
+     "ate_4dof": 0.657,
+     "ate_se3": 0.6443,
+     "rpe_trans_m": 0.505,
+     "rpe_rot_deg": 2.2708,
      "start_s": 43.825,
      "coverage_s": 138.1
     }
@@ -62,18 +62,18 @@
    "compare_from_s": 38.116,
    "cortex": {
     "run": {
-     "ate_4dof": 0.8215,
-     "ate_se3": 0.8089,
-     "rpe_trans_m": 0.7159,
-     "rpe_rot_deg": 2.7682,
+     "ate_4dof": 0.8167,
+     "ate_se3": 0.8033,
+     "rpe_trans_m": 0.6817,
+     "rpe_rot_deg": 3.8147,
      "start_s": 0.015,
      "coverage_s": 149.95
     },
     "window": {
-     "ate_4dof": 0.4605,
-     "ate_se3": 0.4302,
-     "rpe_trans_m": 0.5564,
-     "rpe_rot_deg": 1.7983,
+     "ate_4dof": 0.4995,
+     "ate_se3": 0.4698,
+     "rpe_trans_m": 0.5769,
+     "rpe_rot_deg": 2.25,
      "start_s": 38.165,
      "coverage_s": 111.8
     }
