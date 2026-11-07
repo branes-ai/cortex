@@ -47,6 +47,10 @@ TEST_CASE("the backend bootstraps a moving start via dynamic VI init", "[sdk][ms
     Backend backend;  // single identity-pinhole camera at the IMU
     bs::VioConfig cfg;
     cfg.max_clones = 8;
+    // The identity pinhole's pixel is a normalized unit, so the default 1 px of
+    // track noise would be a whole normalized unit; these observations are
+    // exact (#500).
+    cfg.init_track_sigma_px = 1e-3;
     backend.initialize(cfg);
 
     const DVec3 g_world{{0.0, 0.0, -9.81}};

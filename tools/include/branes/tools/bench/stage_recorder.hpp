@@ -235,6 +235,7 @@ public:
                std::span<const Vec3> gyro,
                std::span<const Vec3> accel,
                T gravity_magnitude,
+               T track_sigma,
                double t,
                const sdk::sfm::InitWindowResult<T>& window,
                bool aligned) override {
@@ -248,6 +249,7 @@ public:
         in.keyframes = window.keyframes;  // the run's own, for the `dynamic` variant
         in.t = t;
         in.gravity_magnitude = gravity_magnitude;
+        in.track_sigma = track_sigma;
         const auto out = B::template run<T>(in, "sfm_two_view_pnp");
         if (out.window.success != window.success || out.window.status != window.status || (out.success != 0) != aligned)
             ++stats_.init_mismatches;
@@ -560,11 +562,13 @@ public:
                std::span<const Vec3> gyro,
                std::span<const Vec3> accel,
                T gravity_magnitude,
+               T track_sigma,
                double t,
                const sdk::sfm::InitWindowResult<T>& window,
                bool aligned) override {
-        each(sdk::msckf::TapStage::S1_initialization,
-             [&](Base* x) { x->on_s1(frames, extrinsics, gyro, accel, gravity_magnitude, t, window, aligned); });
+        each(sdk::msckf::TapStage::S1_initialization, [&](Base* x) {
+            x->on_s1(frames, extrinsics, gyro, accel, gravity_magnitude, track_sigma, t, window, aligned);
+        });
     }
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& p,

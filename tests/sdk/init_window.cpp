@@ -158,3 +158,110 @@ TEST_CASE("init window composes preintegration into spaced keyframes", "[sdk][sf
     const Vec3 vis = win.keyframes[1].p_world_imu - win.keyframes[0].p_world_imu;
     REQUIRE_THAT(r.scale * ld::norm(vis), Catch::Matchers::WithinRel(ld::norm(pl.p[2]), 0.05));
 }
+
+TEST_CASE("init window gates come from the track noise (#500)", "[sdk][sfm][init-window]") {
+    const T sigma = 1.0 / 458.0;  // 1 px at EuRoC's focal length
+    const auto o = sfm::init_window_options_for_noise<T>(sigma);
+    REQUIRE_THAT(o.two_view.sampson_threshold, Catch::Matchers::WithinRel(2.576 * sigma, 1e-12));  // √χ²₁(0.99)
+    REQUIRE_THAT(o.pnp.reprojection_threshold, Catch::Matchers::WithinRel(3.035 * sigma, 1e-12));  // √χ²₂(0.99)
+    REQUIRE_THAT(o.min_bootstrap_parallax, Catch::Matchers::WithinRel(20.0 * sigma, 1e-12));
+    REQUIRE(o.two_view.confidence > 0.0);
+    REQUIRE(o.refine);
+    // The defaults keep the fixed gates and build no refinement.
+    const sfm::InitWindowOptions<T> d;
+    REQUIRE_FALSE(d.refine);
+    REQUIRE(d.min_bootstrap_parallax == 0.0);
+}
+
+TEST_CASE("init window declines a bootstrap without translational parallax (#500)", "[sdk][sfm][init-window]") {
+    // The body only rotates: the frames have raw disparity but no baseline.
+    auto pl = planted();
+    const auto X = landmarks();
+    for (std::size_t f = 0; f < pl.n; ++f) {
+        pl.frames[f].ids.clear();
+        pl.frames[f].obs.clear();
+        const Mat3 Rt = pl.R[f].inverse().matrix();
+        for (std::size_t m = 0; m < X.size(); ++m) {
+            const Vec3 Xc = Rt * X[m];  // the camera stays at the origin
+            if (!(Xc[2] > 0.0))
+                continue;
+            pl.frames[f].ids.push_back(static_cast<std::uint64_t>(m));
+            pl.frames[f].obs.push_back(Vec2{{Xc[0] / Xc[2], Xc[1] / Xc[2]}});
+        }
+    }
+    const auto win = sfm::build_init_window<T>(pl.frames, {}, sfm::init_window_options_for_noise<T>(1e-3));
+    REQUIRE_FALSE(win.success);
+    REQUIRE(win.status == sfm::InitWindowStatus::NoBootstrapPair);
+    REQUIRE(win.bootstrap_parallax > 20 * 1e-3);  // the raw disparity passes the floor…
+}
+
+TEST_CASE("init window refinement lowers a noisy window's track error (#501)", "[sdk][sfm][init-window]") {
+    // Deterministic noise of amplitude 1e-3 (normalized, ~0.5 px) on every
+    // observation.
+    auto pl = planted();
+    std::uint32_t k = 0;
+    for (auto& f : pl.frames)
+        for (auto& o : f.obs) {
+            o[0] += 1e-3 * std::sin(1.7 * static_cast<T>(k++));
+            o[1] += 1e-3 * std::cos(2.3 * static_cast<T>(k++));
+        }
+    // The camera track's error after a scale-and-offset fit to the truth,
+    // relative to its spread. The window's world is camera 0 (camera == body
+    // here), so the truth is expressed in frame 0 first.
+    std::vector<Vec3> truth(pl.n);
+    for (std::size_t i = 0; i < pl.n; ++i)
+        truth[i] = pl.R[0].inverse() * (pl.p[i] - pl.p[0]);
+    const auto track_error = [&](const sfm::InitWindowResult<T>& w) {
+        Vec3 me{}, mt{};
+        for (std::size_t i = 0; i < pl.n; ++i) {
+            me = me + w.keyframes[i].p_world_imu;
+            mt = mt + truth[i];
+        }
+        me = me * (1.0 / static_cast<T>(pl.n));
+        mt = mt * (1.0 / static_cast<T>(pl.n));
+        T se = 0, st = 0;
+        for (std::size_t i = 0; i < pl.n; ++i) {
+            se += ld::dot(w.keyframes[i].p_world_imu - me, w.keyframes[i].p_world_imu - me);
+            st += ld::dot(truth[i] - mt, truth[i] - mt);
+        }
+        const T s = std::sqrt(st / se);
+        T e = 0;
+        for (std::size_t i = 0; i < pl.n; ++i) {
+            const Vec3 d = (w.keyframes[i].p_world_imu - me) * s - (truth[i] - mt);
+            e += ld::dot(d, d);
+        }
+        return std::sqrt(e / st);
+    };
+    // Gates for twice the noise amplitude: PnP's 3σ gate does not model the
+    // bootstrap landmarks' own error, and at the noise itself it rejects frame 1.
+    auto opt = sfm::init_window_options_for_noise<T>(2e-3);
+    opt.refine = false;
+    const auto raw = sfm::build_init_window<T>(pl.frames, {}, opt);
+    opt.refine = true;
+    const auto refined = sfm::build_init_window<T>(pl.frames, {}, opt);
+    REQUIRE(raw.success);
+    REQUIRE(refined.success);
+    REQUIRE(refined.refined_landmarks >= raw.landmarks);
+    REQUIRE(refined.refine_rms_after < refined.refine_rms_before);
+    CAPTURE(track_error(raw), track_error(refined));
+    REQUIRE(track_error(refined) < 0.5 * track_error(raw));
+}
+
+TEST_CASE("init window composes the accelerometer-bias Jacobians (#501)", "[sdk][sfm][init-window]") {
+    // Per frame: ∂Δv/∂ba = −Δt·I and ∂Δp/∂ba = −½Δt²·I (constant attitude).
+    // Composed over two 0.1 s frames with ΔR = I they must be −0.2·I and −0.02·I,
+    // as for one 0.2 s interval.
+    auto pl = planted();
+    for (std::size_t f = 1; f < pl.n; ++f) {
+        pl.frames[f].dR = SO3{};
+        pl.frames[f].dv_dba = Mat3::identity() * (-0.1);
+        pl.frames[f].dp_dba = Mat3::identity() * (-0.005);
+    }
+    sfm::InitWindowOptions<T> opt;
+    opt.min_keyframe_dt = 0.2;
+    const auto win = sfm::build_init_window<T>(pl.frames, {}, opt);
+    REQUIRE(win.success);
+    REQUIRE_THAT(win.keyframes[1].dv_dba(0, 0), Catch::Matchers::WithinAbs(-0.2, 1e-12));
+    REQUIRE_THAT(win.keyframes[1].dp_dba(1, 1), Catch::Matchers::WithinAbs(-0.02, 1e-12));
+    REQUIRE(win.keyframes[1].dp_dba(0, 1) == 0.0);
+}

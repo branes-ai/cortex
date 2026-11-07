@@ -21,12 +21,14 @@
 
 #include <branes/sdk/imu_init.hpp>              // DynInitKeyframe
 #include <branes/sdk/msckf/camera_updater.hpp>  // CameraExtrinsics
+#include <branes/sdk/sfm/bundle_adjust.hpp>
 #include <branes/sdk/sfm/pnp.hpp>
 #include <branes/sdk/sfm/two_view.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace branes::sdk::sfm {
@@ -45,6 +47,8 @@ struct InitFrame {
     Vec3<T> dv{};                              ///< preintegrated velocity
     Vec3<T> dp{};                              ///< preintegrated position
     math::lie::detail::Mat<T, 3, 3> dR_dbg{};  ///< ∂ΔR/∂(gyro bias)
+    math::lie::detail::Mat<T, 3, 3> dv_dba{};  ///< ∂Δv/∂(accel bias), or zero (DynInitKeyframe)
+    math::lie::detail::Mat<T, 3, 3> dp_dba{};  ///< ∂Δp/∂(accel bias), or zero
     T dt = T{0};                               ///< preintegration interval
 };
 
@@ -79,7 +83,7 @@ enum class InitWindowStatus : int {
     Ok = 0,
     TooFewFrames = 1,     ///< fewer than 3 frames
     MalformedFrame = 2,   ///< a frame's ids and obs differ in length
-    NoBootstrapPair = 3,  ///< no candidate frame shares ≥ 8 features with frame 0
+    NoBootstrapPair = 3,  ///< no frame shares ≥ 8 features with frame 0, or none has the minimum parallax
     TwoViewFailed = 4,    ///< the essential-matrix RANSAC rejected the bootstrap pair
     TooFewLandmarks = 5,  ///< the bootstrap triangulated < 6 landmarks
     PnpFailed = 6,        ///< a later frame could not be resectioned (`failed_frame`)
@@ -101,7 +105,47 @@ struct InitWindowOptions {
     /// reads metric scale from accelerations, i.e. second differences of the
     /// positions, so close keyframes amplify a position error by ~1/Δt² (#472).
     double min_keyframe_dt = 0.0;
+    /// RANSAC gates of the two-view bootstrap and of the per-frame PnP. The
+    /// defaults are fixed in normalized units; `init_window_options_for_noise`
+    /// derives them from the track noise instead (#500).
+    TwoViewOptions<T> two_view{};
+    PnpOptions<T> pnp{};
+    /// The bootstrap pair's mean disparity must reach this (normalized units),
+    /// else the build stops with `NoBootstrapPair`. Below it the essential
+    /// matrix fits pixel noise: at rest on EuRoC MH_05 the bootstrap accepted
+    /// pairs of about 1e-4 (0.05 px) and PnP then failed (#500). 0 disables it.
+    T min_bootstrap_parallax = T{0};
+    /// Refine the placed window by bundle adjustment before it is handed to the
+    /// alignment (#501): every track seen in at least `refine_min_views`
+    /// frames becomes a landmark (the bootstrap's, plus the others
+    /// triangulated from the PnP poses), and the poses and landmarks are
+    /// adjusted jointly with frame 0 held. An observation whose reprojection
+    /// exceeds `refine_gate` (normalized) after the first pass is dropped and
+    /// the adjustment rerun. Off by default.
+    bool refine = false;
+    std::size_t refine_min_views = 3;
+    T refine_gate = T{1} / T{200};
+    BundleAdjustOptions<T> bundle_adjust{};
 };
+
+/// The init window's gates for a track noise of `sigma` per image coordinate
+/// (normalized units: the pixel σ over the focal length). Each RANSAC gate is
+/// the 99 % quantile of its residual under that noise: the Sampson distance
+/// has one degree of freedom (√χ²₁ = 2.58 σ) and the PnP reprojection error
+/// two (√χ²₂ = 3.03 σ). The bootstrap needs a mean disparity of 20 σ (#500).
+template <math::Scalar T>
+[[nodiscard]] InitWindowOptions<T> init_window_options_for_noise(T sigma) {
+    InitWindowOptions<T> o;
+    o.two_view.sampson_threshold = T(2.576) * sigma;
+    o.pnp.reprojection_threshold = T(3.035) * sigma;
+    o.two_view.confidence = o.pnp.confidence = 0.999;
+    o.two_view.max_iterations = o.pnp.max_iterations = 2000;
+    o.min_bootstrap_parallax = T{20} * sigma;
+    o.refine = true;
+    o.refine_gate = o.pnp.reprojection_threshold;
+    o.bundle_adjust.huber = T{2} * sigma;
+    return o;
+}
 
 /// Result of the window assembly: the per-frame keyframes (one per input frame
 /// successfully placed) and whether enough frames were recovered for a dynamic
@@ -115,11 +159,17 @@ struct InitWindowResult {
     InitWindowStatus status = InitWindowStatus::TooFewFrames;
     std::size_t bootstrap_frame = 0;            ///< the bootstrap's second view (0 = none)
     T bootstrap_parallax = T{0};                ///< its mean disparity to frame 0 (normalized units)
+    T bootstrap_translation_parallax = T{0};    ///< …with the recovered rotation removed (TwoViewResult::parallax)
     std::size_t bootstrap_correspondences = 0;  ///< features it shares with frame 0
     std::size_t landmarks = 0;                  ///< points the bootstrap triangulated
     std::size_t failed_frame = 0;               ///< the frame PnP failed on (`PnpFailed`)
     std::vector<std::size_t> pnp_inliers;       ///< per frame (0 for frame 0 and the bootstrap view)
     std::vector<T> pnp_rms;                     ///< per frame: reprojection RMS over the PnP inliers
+    // With InitWindowOptions::refine (#501):
+    std::size_t refined_landmarks = 0;     ///< landmarks the adjustment used
+    std::size_t refined_observations = 0;  ///< observations it kept after the outlier gate
+    T refine_rms_before = T{0};            ///< RMS reprojection (normalized) of those, before
+    T refine_rms_after = T{0};             ///< …and after
 };
 
 namespace detail {
@@ -139,6 +189,116 @@ void shared(const InitFrame<T>& a,
                 ids.push_back(a.ids[i]);
                 break;
             }
+}
+
+/// Bundle-adjust the placed window in place (`InitWindowOptions::refine`). The
+/// poses are camera→world (`R_w_cam`, `p_w_cam`); `land_ids` / `land_pts` are
+/// the bootstrap's landmarks.
+template <math::Scalar T>
+void refine_window(std::span<const InitFrame<T>> frames,
+                   const std::vector<std::uint64_t>& land_ids,
+                   const std::vector<Vec3<T>>& land_pts,
+                   std::vector<math::lie::SO3<T>>& R_w_cam,
+                   std::vector<Vec3<T>>& p_w_cam,
+                   const InitWindowOptions<T>& opt,
+                   InitWindowResult<T>& out) {
+    const std::size_t n = frames.size();
+    std::vector<Mat3<T>> R(n);
+    std::vector<Vec3<T>> t(n);
+    for (std::size_t f = 0; f < n; ++f) {
+        R[f] = ld::transpose(R_w_cam[f].matrix());  // world→camera
+        t[f] = R[f] * p_w_cam[f] * (-T{1});
+    }
+    // Every track's observations, in frame order.
+    struct Track {
+        std::uint64_t id;
+        std::vector<std::pair<std::size_t, Vec2<T>>> seen;
+    };
+    std::vector<Track> tracks;
+    for (std::size_t f = 0; f < n; ++f)
+        for (std::size_t i = 0; i < frames[f].ids.size(); ++i) {
+            const std::uint64_t id = frames[f].ids[i];
+            Track* tr = nullptr;
+            for (auto& x : tracks)
+                if (x.id == id) {
+                    tr = &x;
+                    break;
+                }
+            if (tr == nullptr) {
+                tracks.push_back(Track{id, {}});
+                tr = &tracks.back();
+            }
+            tr->seen.emplace_back(f, frames[f].obs[i]);
+        }
+    // Landmarks: the bootstrap's, and every other track seen often enough that
+    // triangulates in front of its cameras within the gate in every view.
+    std::vector<Vec3<T>> pts;
+    std::vector<const Track*> owner;
+    for (const auto& tr : tracks) {
+        std::size_t b = land_ids.size();
+        for (std::size_t j = 0; j < land_ids.size(); ++j)
+            if (land_ids[j] == tr.id) {
+                b = j;
+                break;
+            }
+        Vec3<T> X;
+        if (b < land_ids.size()) {
+            X = land_pts[b];
+        } else {
+            if (tr.seen.size() < opt.refine_min_views)
+                continue;
+            std::vector<Mat3<T>> Rv;
+            std::vector<Vec3<T>> tv;
+            std::vector<Vec2<T>> xv;
+            for (const auto& [f, x] : tr.seen) {
+                Rv.push_back(R[f]);
+                tv.push_back(t[f]);
+                xv.push_back(x);
+            }
+            if (!triangulate_views<T>(Rv, tv, xv, X))
+                continue;
+            bool ok = true;
+            for (const auto& [f, x] : tr.seen) {
+                Vec2<T> r;
+                if (!reproject<T>(R[f], t[f], X, x, r) || !(ld::norm(r) <= opt.refine_gate)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok)
+                continue;
+        }
+        pts.push_back(X);
+        owner.push_back(&tr);
+    }
+    std::vector<BaObservation<T>> obs;
+    for (std::size_t p = 0; p < pts.size(); ++p)
+        for (const auto& [f, x] : owner[p]->seen)
+            obs.push_back(BaObservation<T>{f, p, x});
+    std::vector<char> fixed(n, 0);
+    fixed[0] = 1;
+    const auto first = bundle_adjust<T>(R, t, pts, obs, fixed, opt.bundle_adjust);
+    if (!first.success)
+        return;
+    // Drop what the refined geometry does not explain, and adjust again.
+    std::vector<BaObservation<T>> kept;
+    for (const auto& o : obs) {
+        Vec2<T> r;
+        if (reproject<T>(R[o.frame], t[o.frame], pts[o.point], o.x, r) && ld::norm(r) <= opt.refine_gate)
+            kept.push_back(o);
+    }
+    const auto second = bundle_adjust<T>(R, t, pts, kept, fixed, opt.bundle_adjust);
+    if (!second.success)
+        return;
+    for (std::size_t f = 0; f < n; ++f) {
+        const Mat3<T> Rt = ld::transpose(R[f]);
+        R_w_cam[f] = so3_from_matrix<T>(Rt);
+        p_w_cam[f] = Rt * t[f] * (-T{1});
+    }
+    out.refined_landmarks = pts.size();
+    out.refined_observations = kept.size();
+    out.refine_rms_before = first.initial_rms;
+    out.refine_rms_after = second.final_rms;
 }
 
 }  // namespace detail
@@ -197,14 +357,20 @@ template <math::Scalar T>
         }
     }
     out.status = InitWindowStatus::NoBootstrapPair;
-    if (b == 0)
-        return out;  // no frame shares enough features with frame 0
+    if (b == 0 || best_par < opt.min_bootstrap_parallax)
+        return out;  // no frame shares enough features with frame 0, or none moved enough
     out.bootstrap_frame = b;
     out.bootstrap_parallax = best_par;
     out.bootstrap_correspondences = ids01.size();
-    const auto tv = estimate_relative_pose<T>(x0, x1);
+    const auto tv = estimate_relative_pose<T>(x0, x1, opt.two_view);
     out.status = InitWindowStatus::TwoViewFailed;
     if (!tv.success)
+        return out;
+    out.bootstrap_translation_parallax = tv.parallax;
+    // The same floor on the parallax translation produced: a pure rotation
+    // passes the raw-disparity check above, but its baseline is noise.
+    out.status = InitWindowStatus::NoBootstrapPair;
+    if (tv.parallax < opt.min_bootstrap_parallax)
         return out;
 
     // World landmarks (cam-0 frame), keyed by track id.
@@ -248,7 +414,7 @@ template <math::Scalar T>
                     obs.push_back(frames[f].obs[i]);
                     break;
                 }
-        const auto pose = estimate_pose<T>(P, obs);
+        const auto pose = estimate_pose<T>(P, obs, opt.pnp);
         if (!pose.success) {
             out.status = InitWindowStatus::PnpFailed;
             out.failed_frame = f;
@@ -267,6 +433,10 @@ template <math::Scalar T>
         p_w_cam[f] = Rt * pose.t * (-T{1});
     }
 
+    // 2b) Refine the placed window by bundle adjustment (#501).
+    if (opt.refine)
+        detail::refine_window<T>(frames, land_ids, land_pts, R_w_cam, p_w_cam, opt, out);
+
     // 3) Compose camera→world with the camera→IMU extrinsics to body poses, and
     //    carry the preintegration deltas. T_w_imu = T_w_cam · T_cam_imu, with
     //    T_cam_imu = (R_imu_camᵀ, −R_imu_camᵀ p_imu_cam).
@@ -276,7 +446,9 @@ template <math::Scalar T>
     //    j→k) until the keyframe spacing is reached:
     //      ΔR = ΔR_ij·ΔR_jk,  Δv = Δv_ij + ΔR_ij·Δv_jk,
     //      Δp = Δp_ij + Δv_ij·Δt_jk + ΔR_ij·Δp_jk,
-    //      ∂ΔR/∂b_g = ΔR_jkᵀ·∂ΔR_ij/∂b_g + ∂ΔR_jk/∂b_g,  Δt = Δt_ij + Δt_jk.
+    //      ∂ΔR/∂b_g = ΔR_jkᵀ·∂ΔR_ij/∂b_g + ∂ΔR_jk/∂b_g,  Δt = Δt_ij + Δt_jk,
+    //      ∂Δv/∂b_a = ∂Δv_ij/∂b_a + ΔR_ij·∂Δv_jk/∂b_a,
+    //      ∂Δp/∂b_a = ∂Δp_ij/∂b_a + ∂Δv_ij/∂b_a·Δt_jk + ΔR_ij·∂Δp_jk/∂b_a.
     //    The last frame always closes a keyframe.
     const auto keyframe = [&](std::size_t f) {
         DynInitKeyframe<T> kf;
@@ -293,6 +465,8 @@ template <math::Scalar T>
             kf.dv = frames[f].dv;
             kf.dp = frames[f].dp;
             kf.dR_dbg = frames[f].dR_dbg;
+            kf.dv_dba = frames[f].dv_dba;
+            kf.dp_dba = frames[f].dp_dba;
             kf.dt = frames[f].dt;
             out.keyframe_frames.push_back(f);
         }
@@ -301,12 +475,14 @@ template <math::Scalar T>
         out.keyframe_frames.push_back(0);
         SO3 dR{};
         Vec3<T> dv{}, dp{};
-        Mat3<T> J{};
+        Mat3<T> J{}, Jv{}, Jp{};  // ∂ΔR/∂bg, ∂Δv/∂ba, ∂Δp/∂ba of the composed interval
         T dt = T{0};
         for (std::size_t f = 1; f < n; ++f) {
             const auto& fr = frames[f];
             dp = dp + dv * fr.dt + dR * fr.dp;
+            Jp = Jp + Jv * fr.dt + dR.matrix() * fr.dp_dba;
             dv = dv + dR * fr.dv;
+            Jv = Jv + dR.matrix() * fr.dv_dba;
             J = fr.dR.inverse().matrix() * J + fr.dR_dbg;
             dR = dR * fr.dR;
             dt = dt + fr.dt;
@@ -316,6 +492,8 @@ template <math::Scalar T>
                 kf.dv = dv;
                 kf.dp = dp;
                 kf.dR_dbg = J;
+                kf.dv_dba = Jv;
+                kf.dp_dba = Jp;
                 kf.dt = dt;
                 out.keyframes.push_back(kf);
                 out.keyframe_frames.push_back(f);
@@ -323,6 +501,8 @@ template <math::Scalar T>
                 dv = Vec3<T>{};
                 dp = Vec3<T>{};
                 J = Mat3<T>{};
+                Jv = Mat3<T>{};
+                Jp = Mat3<T>{};
                 dt = T{0};
             }
         }

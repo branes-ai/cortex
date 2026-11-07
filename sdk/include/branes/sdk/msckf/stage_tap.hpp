@@ -72,13 +72,16 @@ public:
 
     /// One dynamic-init attempt (before the filter is initialized): the
     /// buffered SfM window, camera 0's extrinsics, the static-init IMU window,
-    /// and what the attempt did (`window` built or not, `aligned` = try_dynamic
-    /// accepted it and the filter was seeded from it).
+    /// the track noise the window's gates came from (normalized units, as
+    /// `sfm::init_window_options_for_noise` takes it), and what the attempt did
+    /// (`window` built or not, `aligned` = try_dynamic accepted it and the
+    /// filter was seeded from it).
     virtual void on_s1(std::span<const sfm::InitFrame<T>> /*frames*/,
                        const CameraExtrinsics<T>& /*extrinsics*/,
                        std::span<const Vec3> /*gyro*/,
                        std::span<const Vec3> /*accel*/,
                        T /*gravity_magnitude*/,
+                       T /*track_sigma*/,
                        double /*t*/,
                        const sfm::InitWindowResult<T>& /*window*/,
                        bool /*aligned*/) {}

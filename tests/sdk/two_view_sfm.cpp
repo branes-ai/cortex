@@ -244,3 +244,42 @@ TEST_CASE("jacobi_eigh converges on a matrix whose squared entries overflow", "[
             REQUIRE(std::abs(base[i][j] - s) < 1e-14);
         }
 }
+
+TEST_CASE("RANSAC iteration count follows the inlier ratio (#500)", "[sdk][sfm][two-view]") {
+    // log(1 − p) / log(1 − wˢ): w = 0.5, s = 8, p = 0.99 needs 1177 hypotheses.
+    REQUIRE(sfm::detail::ransac_iterations(0.5, 8, 0.99, 5000) == 1177);
+    REQUIRE(sfm::detail::ransac_iterations(0.5, 8, 0.99, 256) == 256);  // capped
+    REQUIRE(sfm::detail::ransac_iterations(0.9, 8, 0.999, 2000) == 13);
+    REQUIRE(sfm::detail::ransac_iterations(1.0, 8, 0.999, 2000) == 1);  // all inliers: one sample
+    REQUIRE(sfm::detail::ransac_iterations(0.5, 8, 0.0, 256) == 256);   // confidence off: the cap
+    REQUIRE(sfm::detail::ransac_iterations(0.0, 8, 0.99, 256) == 256);
+}
+
+TEST_CASE("two-view parallax is the translation's, not the rotation's (#500)", "[sdk][sfm][two-view]") {
+    const Mat3 R_true = SO3::exp(Vec3{{0.03, 0.2, -0.05}}).matrix();
+    const Vec3 t_metric{{0.25, 0.05, 0.02}};
+    std::vector<Vec2> x0, x1;
+    make_correspondences(R_true, t_metric, x0, x1);
+
+    // With early stopping on, a clean set still recovers the pose.
+    sfm::TwoViewOptions<T> opt;
+    opt.confidence = 0.999;
+    opt.max_iterations = 2000;
+    const auto r = sfm::estimate_relative_pose<T>(x0, x1, opt);
+    REQUIRE(r.success);
+    REQUIRE(frob_diff(r.R_1_0, R_true) < 1e-6);
+
+    // The parallax is the mean disparity once the rotation is removed: what the
+    // truth gives, and well below the raw disparity, which the 0.2 rad yaw
+    // dominates.
+    T want = 0, raw = 0;
+    for (std::size_t k = 0; k < x0.size(); ++k) {
+        const Vec3 q = R_true * Vec3{{x0[k][0], x0[k][1], 1.0}};
+        want += ld::norm(Vec2{{x1[k][0] - q[0] / q[2], x1[k][1] - q[1] / q[2]}});
+        raw += ld::norm(Vec2{{x1[k][0] - x0[k][0], x1[k][1] - x0[k][1]}});
+    }
+    want /= static_cast<T>(x0.size());
+    raw /= static_cast<T>(x0.size());
+    REQUIRE_THAT(r.parallax, Catch::Matchers::WithinRel(want, 1e-6));
+    REQUIRE(r.parallax < 0.5 * raw);
+}

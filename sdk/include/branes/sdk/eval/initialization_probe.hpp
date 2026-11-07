@@ -220,6 +220,8 @@ make_dynamic_keyframes(const Vec3<T>& a_w, T scale_true, std::size_t n, T imu_no
         sd.kfs[i].dv = pre.delta_velocity();
         sd.kfs[i].dp = pre.delta_position();
         sd.kfs[i].dR_dbg = pre.d_rotation_d_gyro_bias();
+        sd.kfs[i].dv_dba = pre.d_velocity_d_accel_bias();
+        sd.kfs[i].dp_dba = pre.d_position_d_accel_bias();
         sd.kfs[i].dt = pre.delta_time();
     }
     return sd;

@@ -171,6 +171,60 @@ TEST_CASE("S1 SfM bench: the 0.1 px window builds and matches the truth, but its
     REQUIRE(r.scale_unsettled);
 }
 
+TEST_CASE("S1 SfM bench: refinement lowers the 0.1 px window's track error (#501)", "[tools][bench][s1][sfm][slow]") {
+    // The same window through the backend's path: gates from a track noise of
+    // 5.5e-4 (normalized; 2.5x the fixture's noise, since PnP's gate does not
+    // model the landmarks' error), and bundle adjustment.
+    auto gt = S1::ground_truth();
+    const auto fixed = bn::run_fixture<S1>({"gt", gt}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
+    auto in = S1::decode_input<double>(gt.input);
+    in.track_sigma = 5.5e-4;
+    gt.input = S1::encode_input(in);
+    const auto refined = bn::run_fixture<S1>({"gt", gt}, "sfm_two_view_pnp", bn::AllTypes{}, {"double"});
+    REQUIRE(result(refined, "sfm.window_built").pass);
+    const double before = result(fixed, "truth.sfm_position_error").value;
+    const double after = result(refined, "truth.sfm_position_error").value;
+    CAPTURE(before, after);
+    REQUIRE(after < 0.5 * before);  // 0.77 % → 0.32 %
+    REQUIRE(result(refined, "truth.sfm_position_error").pass);
+
+    const auto out = S1::run<double>(in, "sfm_two_view_pnp");
+    REQUIRE(out.window.success);
+    REQUIRE(out.window.refine_rms_after < out.window.refine_rms_before);
+    const auto align = [&](double bias_weight) {
+        branes::sdk::ImuInitConfig<double> cfg;
+        cfg.gravity_magnitude = in.gravity_magnitude;
+        cfg.accel_bias_weight = bias_weight;
+        return branes::sdk::ImuInitializer<double>(cfg).try_dynamic(
+            std::span<const branes::sdk::DynInitKeyframe<double>>{out.window.keyframes});
+    };
+    // This window cannot separate a bias along gravity from vertical
+    // acceleration: the default bias estimate puts 0.24 m/s² on body z and
+    // drags the scale down, and the settling gate declines it.
+    const auto with_bias = align(branes::sdk::ImuInitConfig<double>{}.accel_bias_weight);
+    REQUIRE_FALSE(with_bias.success);
+    REQUIRE(with_bias.scale_unsettled);
+    // With the bias held at zero it aligns, 8 % off the truth (the fixed-gate
+    // window's alignment was 21 % off): the truth is the camera track's
+    // first-to-last distance over the window's, both camera positions.
+    const auto r = align(0.0);
+    REQUIRE(r.success);
+    const auto& tp = gt.truth.at("sfm").at("cam_positions");
+    const auto& at = out.window.keyframe_frames;
+    const auto cam = [&](std::size_t i) {
+        const auto& k = out.window.keyframes[i];
+        return k.p_world_imu + k.R_world_imu * in.extrinsics.p_imu_cam;
+    };
+    double d2 = 0.0;
+    for (std::size_t c = 0; c < 3; ++c) {
+        const double d = tp[at.back()][c].get<double>() - tp[at.front()][c].get<double>();
+        d2 += d * d;
+    }
+    const double true_scale = std::sqrt(d2) / branes::math::lie::detail::norm(cam(at.size() - 1) - cam(0));
+    CAPTURE(r.scale, true_scale);
+    REQUIRE(std::abs(r.scale / true_scale - 1.0) < 0.10);
+}
+
 TEST_CASE("S1 SfM bench: a 1 px window fails the PnP inlier gate (#500)", "[tools][bench][s1][sfm]") {
     const auto f = S1::captured();
     const auto out = S1::run<double>(S1::decode_input<double>(f.input), "sfm_two_view_pnp");
@@ -206,8 +260,10 @@ TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they d
     const Case cases[] = {
         {"captured_euroc_mh05_at_rest", St::PnpFailed, false},                     // ~0.05 px of disparity
         {"captured_euroc_mh05_moving_two_view_failed", St::TwoViewFailed, false},  // > 100 px of disparity (#500)
-        // The window builds, but its scale changes 14 % between its first 2/3
-        // and the whole: the settling gate declines it (#592).
+        // The window builds (on the fixed gates: the fixture predates
+        // track_sigma). Its scale changed 14 % between its first 2/3 and the
+        // whole (#592); with the accelerometer bias estimated (#501) it
+        // resolves 3 cm, under the 5 cm observability floor.
         {"captured_euroc_mh05_unsettled_scale", St::Ok, false},
     };
     for (const auto& [name, status, aligns] : cases) {
@@ -225,13 +281,15 @@ TEST_CASE("S1 SfM bench: the captured EuRoC windows replay and stop where they d
         REQUIRE(out.window.status == status);
         REQUIRE((out.success == 1) == aligns);
         if (status == St::Ok && !aligns) {
-            // The window built, so the alignment declined it: by the settling gate.
+            // The window built, so the alignment declined it: by a gate, not
+            // a failed solve.
             const auto in = S1::decode_input<double>(nf.fixture.input);
             branes::sdk::ImuInitConfig<double> cfg;
             cfg.gravity_magnitude = in.gravity_magnitude;
             const auto r = branes::sdk::ImuInitializer<double>(cfg).try_dynamic(
                 std::span<const branes::sdk::DynInitKeyframe<double>>{out.window.keyframes});
-            REQUIRE(r.scale_unsettled);
+            REQUIRE(r.resolved_motion > 0.0);
+            REQUIRE(r.resolved_motion < cfg.min_dynamic_motion);
         }
     }
 }

@@ -85,6 +85,11 @@ struct VioConfig {
     /// dynamic-init path be exercised on sequences that happen to contain an
     /// early quiet moment. The gravity-only timeout fallback still applies.
     bool prefer_dynamic_init = false;
+    /// Feature-track noise (pixels, per image coordinate) that the dynamic
+    /// init's SfM window gates its RANSAC on (#500). Converted to normalized
+    /// units through camera 0's focal length. Unlike `camera_noise_normalized`
+    /// (the filter's R, about 4.6 px on EuRoC) this is the KLT noise itself.
+    double init_track_sigma_px = 1.0;
 };
 
 /// A single inertial sample, in the IMU frame. Timestamps are seconds.
