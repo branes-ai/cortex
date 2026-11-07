@@ -110,8 +110,11 @@ Over the window:
     positions: their noise attenuates an alignment that fits their second
     differences. Since #500 and #501 the window's gates come from the track
     noise, the window is bundle-adjusted, and the alignment estimates the
-    accelerometer bias. On the same sweep the scale is 3.6% off at the median
-    (12.8% at the 90th percentile; 60% of windows under 5%).
+    accelerometer bias. On the same sweep 133 windows are accepted, and on the
+    125 with ground truth the scale is 3.6% off at the median (12.8% at the
+    90th percentile; 60% under 5%). On the 32 windows both versions accept
+    (3 sequences), it goes from 13.5% to 2.8% (90th percentile 21.7% to
+    9.9%).
   - In the default run that changes only MH_01 and MH_02, the two sequences
     that initialize dynamically: both now initialize at 0.5 s. MH_01 scores
     2.305 m over the whole run (2.19–2.41 m for a track noise of 0.8–1.2 px),

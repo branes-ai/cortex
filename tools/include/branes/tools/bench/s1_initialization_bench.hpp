@@ -631,6 +631,10 @@ struct S1InitializationBench {
                 "kf4hz_scale_err_pct"};
     }
     template <class T>
+    /// The sweep's SfM columns use the fixed gates (`InitWindowOptions`
+    /// defaults: its inputs carry no `track_sigma`), the ones #500 measured.
+    /// The backend's noise-derived gates and refinement are covered by the
+    /// `track_sigma` fixtures and tests (#500, #501).
     [[nodiscard]] static std::vector<double> sweep_point(const Point& p) {
         const auto get = [&](const char* k, double dflt) {
             const auto it = p.find(k);

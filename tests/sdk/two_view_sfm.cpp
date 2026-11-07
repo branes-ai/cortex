@@ -272,13 +272,15 @@ TEST_CASE("two-view parallax is the translation's, not the rotation's (#500)", "
     // The parallax is the mean disparity once the rotation is removed: what the
     // truth gives, and well below the raw disparity, which the 0.2 rad yaw
     // dominates.
+    // Expected over the solver's own inliers; the raw disparity over all.
     T want = 0, raw = 0;
-    for (std::size_t k = 0; k < x0.size(); ++k) {
+    for (const std::size_t k : r.inliers) {
         const Vec3 q = R_true * Vec3{{x0[k][0], x0[k][1], 1.0}};
         want += ld::norm(Vec2{{x1[k][0] - q[0] / q[2], x1[k][1] - q[1] / q[2]}});
-        raw += ld::norm(Vec2{{x1[k][0] - x0[k][0], x1[k][1] - x0[k][1]}});
     }
-    want /= static_cast<T>(x0.size());
+    for (std::size_t k = 0; k < x0.size(); ++k)
+        raw += ld::norm(Vec2{{x1[k][0] - x0[k][0], x1[k][1] - x0[k][1]}});
+    want /= static_cast<T>(r.inliers.size());
     raw /= static_cast<T>(x0.size());
     REQUIRE_THAT(r.parallax, Catch::Matchers::WithinRel(want, 1e-6));
     REQUIRE(r.parallax < 0.5 * raw);

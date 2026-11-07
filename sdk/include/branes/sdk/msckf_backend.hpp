@@ -137,6 +137,8 @@ public:
 
         // The dynamic init's SfM gates, from the track noise in camera 0's
         // normalized units (#500).
+        if (!(config.init_track_sigma_px > 0.0))
+            throw std::invalid_argument("MsckfBackend: init_track_sigma_px must be positive");
         init_track_sigma_ = static_cast<T>(config.init_track_sigma_px) / cameras_[0].intrinsics.fx();
         init_window_opts_ = sfm::init_window_options_for_noise<T>(init_track_sigma_);
 

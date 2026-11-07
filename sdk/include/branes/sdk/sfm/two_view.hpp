@@ -164,6 +164,8 @@ namespace detail {
 /// one sample of `sample_size` inliers when a fraction `inlier_ratio` of the
 /// data are inliers: log(1 − p) / log(1 − wˢ) (Fischler & Bolles 1981;
 /// Hartley & Zisserman §4.7.1). Capped at `cap`; `confidence` ≤ 0 returns it.
+/// Both logarithms are log1p, so a sample probability wˢ below the rounding
+/// of 1 − wˢ gives +∞ (and the cap), not a cast of −∞.
 [[nodiscard]] inline std::size_t
 ransac_iterations(double inlier_ratio, std::size_t sample_size, double confidence, std::size_t cap) {
     if (!(confidence > 0.0) || !(inlier_ratio > 0.0))
@@ -173,7 +175,7 @@ ransac_iterations(double inlier_ratio, std::size_t sample_size, double confidenc
     const double all_in = std::pow(inlier_ratio, static_cast<double>(sample_size));
     if (!(all_in < 1.0))
         return 1;
-    const double n = std::ceil(std::log(1.0 - confidence) / std::log(1.0 - all_in));
+    const double n = std::ceil(std::log1p(-confidence) / std::log1p(-all_in));
     return n < static_cast<double>(cap) ? static_cast<std::size_t>(n) : cap;
 }
 
@@ -451,13 +453,18 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
     // Re-apply both support gates to the final cheirality-filtered set, not just
     // the pre-triangulation Sampson set — triangulation can shrink it below the
     // configured thresholds.
+    // The mean over the inliers whose rotated ray stays in front (a large
+    // rotation can turn one behind while its point is in front of both cameras).
+    std::size_t terms = 0;
     for (std::size_t k : out.inliers) {
         const Vec3<T> r = out.R_1_0 * Vec3<T>{{x0[k][0], x0[k][1], T{1}}};
-        if (r[2] > T{0})
+        if (r[2] > T{0}) {
             out.parallax += ld::norm(Vec2<T>{{x1[k][0] - r[0] / r[2], x1[k][1] - r[1] / r[2]}});
+            ++terms;
+        }
     }
-    if (!out.inliers.empty())
-        out.parallax /= static_cast<T>(out.inliers.size());
+    if (terms > 0)
+        out.parallax /= static_cast<T>(terms);
     out.success =
         best_count >= opt.min_inliers && static_cast<T>(best_count) >= opt.min_inlier_ratio * static_cast<T>(n);
     return out;

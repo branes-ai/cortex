@@ -191,6 +191,14 @@ TEST_CASE("S1 SfM bench: refinement lowers the 0.1 px window's track error (#501
     const auto out = S1::run<double>(in, "sfm_two_view_pnp");
     REQUIRE(out.window.success);
     REQUIRE(out.window.refine_rms_after < out.window.refine_rms_before);
+    const auto align_window = [&](const branes::sdk::sfm::InitWindowResult<double>& w, double bias_weight) {
+        branes::sdk::ImuInitConfig<double> cfg;
+        cfg.gravity_magnitude = in.gravity_magnitude;
+        cfg.accel_bias_weight = bias_weight;
+        cfg.max_scale_change = 1.0;  // the settling gate is not what is tested here
+        return branes::sdk::ImuInitializer<double>(cfg).try_dynamic(
+            std::span<const branes::sdk::DynInitKeyframe<double>>{w.keyframes});
+    };
     const auto align = [&](double bias_weight) {
         branes::sdk::ImuInitConfig<double> cfg;
         cfg.gravity_magnitude = in.gravity_magnitude;
@@ -204,25 +212,34 @@ TEST_CASE("S1 SfM bench: refinement lowers the 0.1 px window's track error (#501
     const auto with_bias = align(branes::sdk::ImuInitConfig<double>{}.accel_bias_weight);
     REQUIRE_FALSE(with_bias.success);
     REQUIRE(with_bias.scale_unsettled);
-    // With the bias held at zero it aligns, 8 % off the truth (the fixed-gate
-    // window's alignment was 21 % off): the truth is the camera track's
-    // first-to-last distance over the window's, both camera positions.
-    const auto r = align(0.0);
-    REQUIRE(r.success);
+    // With the bias held at zero it aligns. Its scale error, against the
+    // camera track's first-to-last distance, is well under the fixed-gate
+    // window's: 8 % against 21 % on Linux (10 % on MSVC, whose math library
+    // moves the RANSAC and the adjustment).
     const auto& tp = gt.truth.at("sfm").at("cam_positions");
-    const auto& at = out.window.keyframe_frames;
-    const auto cam = [&](std::size_t i) {
-        const auto& k = out.window.keyframes[i];
-        return k.p_world_imu + k.R_world_imu * in.extrinsics.p_imu_cam;
+    const auto scale_error = [&](const branes::sdk::sfm::InitWindowResult<double>& w) {
+        const auto r = align_window(w, 0.0);
+        REQUIRE(r.success);
+        const auto& at = w.keyframe_frames;
+        const auto cam = [&](std::size_t i) {
+            const auto& k = w.keyframes[i];
+            return k.p_world_imu + k.R_world_imu * in.extrinsics.p_imu_cam;
+        };
+        double d2 = 0.0;
+        for (std::size_t c = 0; c < 3; ++c) {
+            const double d = tp[at.back()][c].get<double>() - tp[at.front()][c].get<double>();
+            d2 += d * d;
+        }
+        const double truth = std::sqrt(d2) / branes::math::lie::detail::norm(cam(at.size() - 1) - cam(0));
+        return std::abs(r.scale / truth - 1.0);
     };
-    double d2 = 0.0;
-    for (std::size_t c = 0; c < 3; ++c) {
-        const double d = tp[at.back()][c].get<double>() - tp[at.front()][c].get<double>();
-        d2 += d * d;
-    }
-    const double true_scale = std::sqrt(d2) / branes::math::lie::detail::norm(cam(at.size() - 1) - cam(0));
-    CAPTURE(r.scale, true_scale);
-    REQUIRE(std::abs(r.scale / true_scale - 1.0) < 0.10);
+    REQUIRE(align(0.0).success);  // and the default settling gate accepts it
+    const auto fixed_in = S1::decode_input<double>(S1::ground_truth().input);
+    const double e_fixed = scale_error(S1::run<double>(fixed_in, "sfm_two_view_pnp").window);
+    const double e_refined = scale_error(out.window);
+    CAPTURE(e_fixed, e_refined);
+    REQUIRE(e_fixed > 0.15);
+    REQUIRE(e_refined < 0.6 * e_fixed);
 }
 
 TEST_CASE("S1 SfM bench: a 1 px window fails the PnP inlier gate (#500)", "[tools][bench][s1][sfm]") {

@@ -277,6 +277,9 @@ void refine_window(std::span<const InitFrame<T>> frames,
             obs.push_back(BaObservation<T>{f, p, x});
     std::vector<char> fixed(n, 0);
     fixed[0] = 1;
+    const auto R0 = R;
+    const auto t0 = t;
+    const auto pts0 = pts;
     const auto first = bundle_adjust<T>(R, t, pts, obs, fixed, opt.bundle_adjust);
     if (!first.success)
         return;
@@ -297,7 +300,17 @@ void refine_window(std::span<const InitFrame<T>> frames,
     }
     out.refined_landmarks = pts.size();
     out.refined_observations = kept.size();
-    out.refine_rms_before = first.initial_rms;
+    // Both RMS over the kept observations: before, at the unrefined window.
+    T sq = T{0};
+    std::size_t used = 0;
+    for (const auto& o : kept) {
+        Vec2<T> r;
+        if (reproject<T>(R0[o.frame], t0[o.frame], pts0[o.point], o.x, r)) {
+            sq += r[0] * r[0] + r[1] * r[1];
+            ++used;
+        }
+    }
+    out.refine_rms_before = used > 0 ? ld::sqrt_(sq / static_cast<T>(used)) : T{0};
     out.refine_rms_after = second.final_rms;
 }
 
