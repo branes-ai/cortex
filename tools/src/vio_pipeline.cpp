@@ -44,6 +44,7 @@
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/stage_recorder.hpp>
 #include <branes/tools/euroc_cam0.hpp>
+#include <branes/tools/ideal_tracks.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
 #include <branes/tools/observability_ledger.hpp>
 #include <branes/tools/stage_type_presets.hpp>
@@ -116,6 +117,11 @@ struct Args {
     bool observability_ledger = false;           ///< per-stage spurious yaw/position information (#480)
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
+    // Ideal tracks (#602): --tracks gt replaces the KLT front end with
+    // observations synthesized from ground truth (branes/tools/ideal_tracks.hpp).
+    bool ideal_tracks = false;
+    branes::tools::IdealTrackOptions ideal;
+    double camera_sigma_px = 0.0;  ///< the filter's visual R as a pixel σ on cam0; 0 = VioConfig's default
 };
 
 /// The estimator configuration the flags select (defaults otherwise).
@@ -129,6 +135,8 @@ VioConfig config_of(const Args& a) {
     VioConfig cfg;
     cfg.gate_alpha = a.gate_alpha;
     cfg.gate_per_dof = a.gate_per_dof;
+    if (a.camera_sigma_px > 0.0)  // in normalized units through cam0's focal length
+        cfg.camera_noise_normalized = a.camera_sigma_px / euroc_cam0().intrinsics.fx();
     return cfg;
 }
 
@@ -203,7 +211,38 @@ Args parse(int argc, char** argv) {
             }
         } else if (v == "--robot" && next_is_value())
             a.robot = argv[++i];
-        else if (v == "--capture" && next_is_value())
+        else if (v == "--tracks" || v == "--track-sigma" || v == "--camera-sigma-px" || v == "--track-seed" ||
+                 v == "--track-depth") {
+            // A missing value is an error, not a silent fall back to the KLT run.
+            if (!next_is_value())
+                throw std::invalid_argument(std::string(v) + " needs a value (see --help)");
+            const std::string_view x = argv[++i];
+            if (v == "--tracks") {
+                if (x != "gt" && x != "klt")
+                    throw std::invalid_argument("--tracks: klt or gt");
+                a.ideal_tracks = x == "gt";
+            } else if (v == "--track-sigma") {
+                a.ideal.sigma_px = std::stod(std::string(x));
+                if (!(a.ideal.sigma_px >= 0.0))
+                    throw std::invalid_argument("--track-sigma: a pixel sigma >= 0");
+            } else if (v == "--camera-sigma-px") {
+                a.camera_sigma_px = std::stod(std::string(x));
+                if (!(a.camera_sigma_px > 0.0))
+                    throw std::invalid_argument("--camera-sigma-px: a pixel sigma > 0");
+            } else if (v == "--track-seed") {
+                if (x.empty() || x.find_first_not_of("0123456789") != std::string_view::npos)
+                    throw std::invalid_argument("--track-seed: a non-negative integer");
+                a.ideal.seed = std::stoull(std::string(x));
+            } else {
+                const auto d = split_commas(x);
+                if (d.size() != 2)
+                    throw std::invalid_argument("--track-depth: MIN,MAX in metres");
+                a.ideal.min_depth_m = std::stod(d[0]);
+                a.ideal.max_depth_m = std::stod(d[1]);
+                if (!(a.ideal.min_depth_m > 0.0 && a.ideal.max_depth_m >= a.ideal.min_depth_m))
+                    throw std::invalid_argument("--track-depth: 0 < MIN <= MAX");
+            }
+        } else if (v == "--capture" && next_is_value())
             a.capture_dir = argv[++i];
         else if (v == "--capture-stages" && next_is_value())
             a.capture.stages = split_commas(argv[++i]);
@@ -785,6 +824,11 @@ bool run_euroc(const Args& args,
     est.activate();
     est.backend().set_stage_tap(tap);
 
+    std::optional<branes::tools::IdealTracks<T>> ideal;
+    if (args.ideal_tracks)
+        ideal.emplace(gt, cam0.intrinsics, branes::math::lie::SE3<T>(cam0.R_imu_cam, cam0.p_imu_cam), args.ideal);
+    std::size_t ideal_obs = 0;
+
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
     double sigma_sum = 0;
@@ -797,13 +841,19 @@ bool run_euroc(const Args& args,
             est.feed_imu(std::span<const ImuMeasurement<T>>{imu.data() + imu_idx, end - imu_idx});
             imu_idx = end;
         }
-        branes::cv::OwnedImage<std::uint8_t> img;
-        try {
-            img = branes::cv::read_png(images[f].path);
-        } catch (const std::exception&) {
-            continue;
+        if (ideal) {
+            const auto obs = ideal->observe(t);
+            ideal_obs = obs.size();
+            est.backend().process_camera(t, std::span<const FrontendObservation<T>>{obs});
+        } else {
+            branes::cv::OwnedImage<std::uint8_t> img;
+            try {
+                img = branes::cv::read_png(images[f].path);
+            } catch (const std::exception&) {
+                continue;
+            }
+            est.feed_image(t, std::as_const(img).view());
         }
-        est.feed_image(t, std::as_const(img).view());
         if (!est.backend().initialized())
             continue;  // skip pre-init frames so they don't pollute the ATE
         ev::StampedPose<T> sp;
@@ -813,7 +863,7 @@ bool run_euroc(const Args& args,
         ++n;
         sigma_sum += pos_sigma(est.backend().state().covariance(), msckf::State<T>::kPos);
         const auto tf = est.tracked_features();
-        feat_total += tf.size();
+        feat_total += ideal ? ideal_obs : tf.size();
         const double nis = safe_nis(est.backend().nis_consistency());
         if (stream && stream->is_open()) {
             const Vec3 ep = est.current_pose().translation();
@@ -970,6 +1020,13 @@ int main(int argc, char** argv) {
                "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
                "                             significance A (default 0.05)\n"
                "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
+               "  --tracks klt|gt            EuRoC MSCKF: the KLT front end (default) or ideal tracks\n"
+               "                             synthesized from ground truth (#602)\n"
+               "  --track-sigma PX           ideal tracks: Gaussian pixel noise per axis (default 1)\n"
+               "  --camera-sigma-px PX       the filter's visual measurement sigma, cam0 pixels\n"
+               "                             (default 0.01 normalized, ~4.6 px)\n"
+               "  --track-seed N             ideal tracks: landmark and noise seed (default 1)\n"
+               "  --track-depth MIN,MAX      ideal tracks: landmark depth range, m (default 2,8)\n"
                "  --detect-trackable-only    EuRoC front end: skip FAST corners in the KLT border band\n"
                "                             (#474; off by default)\n"
                "  --observability-ledger     MSCKF: attribute the spurious yaw / global-position information\n"
@@ -984,6 +1041,15 @@ int main(int argc, char** argv) {
     if (args.invariant && args.gate_flag) {
         std::cerr << "vio_pipeline: --gate-alpha and --gate-per-dof select the MSCKF gate; they do not "
                      "apply to --invariant\n";
+        return 2;
+    }
+    if (args.ideal_tracks && args.video) {
+        std::cerr << "vio_pipeline: --tracks gt does not write the per-frame tracks --video overlays\n";
+        return 2;
+    }
+    if (args.ideal_tracks && (args.invariant || args.source != "euroc")) {
+        std::cerr << "vio_pipeline: --tracks gt replaces the EuRoC front end of the MSCKF run; it needs "
+                     "--source euroc and no --invariant\n";
         return 2;
     }
     if (args.invariant && args.sqrt_covariance) {
