@@ -193,19 +193,20 @@ inline const StageInfo kS7{"S7",
                            ""};
 
 // ── S8  Zero-velocity update (optional) ────────────────────────────────────
-inline const StageInfo kS8{"S8",
-                           "Zero-velocity update (robustness)",
-                           "detect stationarity (IMU + visual disparity) → apply v=0 pseudo-measurement",
-                           {"stationarity detector tuned; not firing during slow motion"},
-                           {"prevents spurious motion / feature-starved drift while static",
-                            "detector does not false-positive during slow motion (would inject wrong v=0)"},
-                           {{"detector ROC (true/false positive)", "%", "stationary correctly detected, motion not"},
-                            {"static-segment drift with/without ZUPT", "mm", "ZUPT actually arrests stationary drift"},
-                            {"false-ZUPT-induced bias", "mm/s", "cost of a wrongly-fired v=0 constraint"}},
-                           {"zupt_roc.csv", "zupt_static_drift.csv"},
-                           "(not yet present in cortex)",
-                           "scaffold",
-                           ""};
+inline const StageInfo kS8{
+    "S8",
+    "Zero-velocity update (robustness)",
+    "detect stationarity (IMU + visual disparity) → apply v=0 pseudo-measurement",
+    {"stationarity detector tuned; not firing during slow motion"},
+    {"prevents spurious motion / feature-starved drift while static",
+     "detector does not false-positive during slow motion (would inject wrong v=0)"},
+    {{"detector ROC (true/false positive)", "%", "stationary correctly detected, motion not"},
+     {"static-segment drift with/without ZUPT", "mm", "ZUPT actually arrests stationary drift"},
+     {"false-ZUPT-induced bias", "mm/s", "cost of a wrongly-fired v=0 constraint"}},
+    {"zupt_roc.csv", "zupt_static_drift.csv"},
+    "sdk/msckf/stages/s8_zero_velocity.hpp (#600)",
+    "scaffold",
+    "stages::s8_zero_velocity::apply(state, σ_v) → state′  [sdk/msckf/stages/s8_zero_velocity.hpp]"};
 
 // ── S9  Marginalization / clone management ─────────────────────────────────
 inline const StageInfo kS9{

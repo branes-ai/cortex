@@ -90,6 +90,22 @@ struct VioConfig {
     /// units through camera 0's focal length. Unlike `camera_noise_normalized`
     /// (the filter's R, about 4.6 px on EuRoC) this is the KLT noise itself.
     double init_track_sigma_px = 1.0;
+    /// S8: while the IMU and the image both say the platform is at rest, apply
+    /// a v = 0 pseudo-measurement each frame, and a gyro-bias one per 0.25 s IMU
+    /// window, instead of cloning the frame and updating with its features (#600). At rest a monocular MSCKF has no
+    /// parallax to hold the velocity: on EuRoC MH_01 it drifted to 1.6 m/s
+    /// over a 22 s rest on the ground.
+    bool zero_velocity_update = true;
+    double zupt_velocity_sigma = 0.01;  ///< m/s, the v = 0 pseudo-measurement's σ per axis
+    /// The image test: the median feature displacement over 5 frames must stay
+    /// within this many pixels (camera 0). It is what tells rest from motion at
+    /// a constant velocity, which the IMU cannot; a camera whose pixel is a
+    /// normalized unit needs it scaled to match.
+    double zupt_max_disparity_px = 1.0;
+    /// rad/s: σ of the companion gyro-bias pseudo-measurement, the mean rate
+    /// over the rest window. It holds the heading still at rest; without it
+    /// EuRoC MH_02's rotation RPE is 2.94° rather than 0.95°.
+    double zupt_gyro_bias_sigma = 0.001;
 };
 
 /// A single inertial sample, in the IMU frame. Timestamps are seconds.

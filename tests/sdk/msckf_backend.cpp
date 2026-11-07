@@ -40,6 +40,10 @@ bs::ImuMeasurement<T> imu_sample(double t, const DVec3& gyro, const DVec3& accel
 bs::VioConfig default_config() {
     bs::VioConfig c;
     c.max_clones = 8;
+    // These tests use the identity pinhole, whose pixel is a normalized unit:
+    // S8's 1 px stillness bound would be ~45°. 2e-3 is ~1 px at EuRoC's focal
+    // length (#600).
+    c.zupt_max_disparity_px = 2e-3;
     return c;
 }
 
@@ -176,6 +180,7 @@ TEST_CASE("the backend runs end-to-end and stays stable under motion", "[sdk][ms
     }
 
     REQUIRE(frames > 0);
+    REQUIRE(backend.zero_velocity_frames() == 0);  // accelerating: S8 must not fire
     // The estimator should have moved forward along +x (it produces poses,
     // not a frozen state).
     const double p1x = backend.current_state().T_world_imu.translation()[0];

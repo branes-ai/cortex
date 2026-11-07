@@ -51,6 +51,7 @@ TEST_CASE("the backend bootstraps a moving start via dynamic VI init", "[sdk][ms
     // track noise would be a whole normalized unit; these observations are
     // exact (#500).
     cfg.init_track_sigma_px = 1e-3;
+    cfg.zupt_max_disparity_px = 2e-3;  // likewise S8's stillness bound (#600)
     backend.initialize(cfg);
 
     const DVec3 g_world{{0.0, 0.0, -9.81}};

@@ -503,7 +503,8 @@ struct RunResult {
     double nis_normalized = 0;
     std::size_t frames = 0;
     double mean_features = 0;
-    double mean_pos_sigma_m = 0;  ///< mean filter-reported position σ (√trace/3 of the P pos block)
+    double mean_pos_sigma_m = 0;           ///< mean filter-reported position σ (√trace/3 of the P pos block)
+    std::size_t zero_velocity_frames = 0;  ///< frames S8 held the velocity at zero (#600; MSCKF EuRoC runs)
 };
 
 ev::SyntheticConfig<T> robot_preset(const std::string& r) {
@@ -836,6 +837,7 @@ bool run_euroc(const Args& args,
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.nis_normalized = safe_nis(est.backend().nis_consistency());
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
+    out.zero_velocity_frames = est.backend().zero_velocity_frames();
     write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
@@ -1062,7 +1064,8 @@ int main(int argc, char** argv) {
                   // Divide whenever σ is usable; let a non-finite σ propagate (don't mask a poisoned covariance as 0).
                   << (r.mean_pos_sigma_m != 0.0 ? r.ate_rms_m / r.mean_pos_sigma_m : 0.0) << ")";
         if (!args.invariant)
-            std::cout << "\n  NIS (normalized): " << r.nis_normalized;
+            std::cout << "\n  NIS (normalized): " << r.nis_normalized
+                      << "\n  zero-velocity   : " << r.zero_velocity_frames << " frames held at rest (S8)";
         std::cout << "\n";
         if (args.video && !args.invariant)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
