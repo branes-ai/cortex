@@ -141,6 +141,14 @@ public:
             throw std::invalid_argument("MsckfBackend: init_track_sigma_px must be positive");
         init_track_sigma_ = static_cast<T>(config.init_track_sigma_px) / cameras_[0].intrinsics.fx();
         init_window_opts_ = sfm::init_window_options_for_noise<T>(init_track_sigma_);
+        if (!(config.zupt_velocity_sigma > 0.0) || !(config.zupt_gyro_bias_sigma > 0.0))
+            throw std::invalid_argument("MsckfBackend: zupt_velocity_sigma and zupt_gyro_bias_sigma must be positive");
+        if (!(config.zupt_max_disparity_px > 0.0))
+            throw std::invalid_argument("MsckfBackend: zupt_max_disparity_px must be positive");
+        msckf::stages::s8_zero_velocity::Options<T> zopt;
+        zopt.max_disparity_px = static_cast<T>(config.zupt_max_disparity_px);
+        zupt_ = msckf::stages::s8_zero_velocity::Detector<T>{zopt};
+        zupt_frames_ = 0;
 
         rebind_operators();
 
@@ -190,6 +198,7 @@ public:
                 return;  // drop out-of-order / duplicate samples — don't touch filter time
             propagate(gyro, accel, static_cast<T>(dt));
         }
+        zupt_.push_imu(gyro);
         last_imu_time_ = imu.timestamp_s;
         have_last_time_ = true;
         state_.timestamp = imu.timestamp_s;
@@ -226,6 +235,19 @@ public:
 
         if (stage_tap_)
             stage_tap_->on_frame(timestamp_s);
+
+        // S8: at rest, hold the velocity at zero and leave the frame out of
+        // the window: a clone without parallax adds no information, and its
+        // features would triangulate on a zero baseline (#600). The tracks
+        // resume when the platform moves.
+        zupt_.push_frame(obs);
+        if (config_.zero_velocity_update && zupt_.check().still) {
+            namespace s8 = msckf::stages::s8_zero_velocity;
+            (void)s8::apply(state_, static_cast<T>(config_.zupt_velocity_sigma));
+            (void)s8::apply_gyro_bias(state_, zupt_.mean_rate(), static_cast<T>(config_.zupt_gyro_bias_sigma));
+            ++zupt_frames_;
+            return;
+        }
 
         // S6 + S9: keep the window bounded — update with, then marginalize, the
         // oldest clone(s) before adding the new one.
@@ -291,6 +313,11 @@ public:
     /// an observability/linearization inconsistency.
     [[nodiscard]] const eval::InnovationWhitenessAccumulator& innovation_whiteness() const noexcept {
         return innov_;
+    }
+
+    /// Frames at which S8 found the platform at rest and applied v = 0 (#600).
+    [[nodiscard]] std::size_t zero_velocity_frames() const noexcept {
+        return zupt_frames_;
     }
 
     /// Read-only view of the full filter state (covariance, clone window,
@@ -833,8 +860,10 @@ private:
     // Dynamic-init state: a bounded buffer of init-window camera frames and the
     // IMU preintegrator accumulating the deltas between them.
     std::vector<sfm::InitFrame<T>> init_frames_;
-    T init_track_sigma_{};                          ///< init_track_sigma_px in camera 0's normalized units
-    sfm::InitWindowOptions<T> init_window_opts_{};  ///< SfM gates from it (#500)
+    msckf::stages::s8_zero_velocity::Detector<T> zupt_{};  ///< S8 stillness detector (#600)
+    std::size_t zupt_frames_ = 0;                          ///< frames S8 applied v = 0 at
+    T init_track_sigma_{};                                 ///< init_track_sigma_px in camera 0's normalized units
+    sfm::InitWindowOptions<T> init_window_opts_{};         ///< SfM gates from it (#500)
     ImuPreintegrator<T> init_preint_{};
     bool init_have_imu_t_ = false;
     double init_last_imu_t_ = 0.0;

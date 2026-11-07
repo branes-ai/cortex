@@ -34,6 +34,7 @@
 #include <branes/sdk/msckf/stages/s4_frontend.hpp>
 #include <branes/sdk/msckf/stages/s5_triangulation.hpp>
 #include <branes/sdk/msckf/stages/s6_msckf_update.hpp>
+#include <branes/sdk/msckf/stages/s8_zero_velocity.hpp>
 #include <branes/sdk/msckf/stages/s9_marginalization.hpp>
 
 #endif  // BRANES_SDK_MSCKF_STAGES_HPP

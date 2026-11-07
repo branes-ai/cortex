@@ -533,8 +533,13 @@ the running filter is pure-MSCKF. Listed for pipeline completeness.
 **Post / invariants.** prevents spurious motion / feature-starved drift while static; the detector
 must not false-positive during slow motion (would inject a wrong `v=0` constraint → bias).
 
-**cortex.** not present in the map; a known canonical robustness layer. Relevant to deployment,
-not to the EuRoC over-confidence directly.
+**cortex.** `msckf/stages/s8_zero_velocity.hpp` (#600), on by default
+(`VioConfig::zero_velocity_update`). The detector requires both the IMU's test (the gyro rate
+variation below a 20 Hz low-pass, ≤ 0.008 rad/s over 0.25 s) and the image's (median feature
+displacement over 5 frames ≤ 1 px). At rest the backend applies `v = 0` (σ 0.01 m/s) and
+`b_g = ω̄` (σ 0.001 rad/s) each frame and adds no clone. On EuRoC it fires at no frame moving
+faster than 0.05 m/s and at 47–78 % of the frames at rest. The ROC and static-drift probes listed
+above are not yet written.
 
 ---
 

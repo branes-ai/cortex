@@ -48,6 +48,7 @@ bs::ImuMeasurement<T> imu_sample(double t, const DVec3& gyro, const DVec3& accel
 
 bs::VioConfig default_config() {
     bs::VioConfig c;
+    c.zupt_max_disparity_px = 2e-3;  // identity pinhole: a pixel is a normalized unit (#600)
     c.max_clones = 8;
     return c;
 }
