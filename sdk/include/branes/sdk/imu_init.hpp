@@ -91,6 +91,17 @@ struct ImuInitConfig {
     /// convergence, not accuracy: on EuRoC, settled 1 s windows are still
     /// about 14 % off (median), a bias of the short-baseline SfM track (#501).
     T max_scale_change = T{5} / T{100};  ///< 5 %
+    /// Estimate the accelerometer bias in the dynamic alignment, held toward
+    /// zero by a prior row of this weight per component (#501). The
+    /// alignment's rows are unweighted (metres for the position rows, m/s for
+    /// the velocity rows), so the weight is in those units per m/s². A bias the
+    /// alignment ignores is read as acceleration and biases the scale: on
+    /// EuRoC windows with ground-truth poses, estimating it brings the median
+    /// scale error from 5–18 % to about 2 %. Over a 1 s window the bias is
+    /// weakly observable, and estimated freely it absorbs the vision noise
+    /// instead; 0.01 was best on the refined EuRoC windows. 0 does not
+    /// estimate it.
+    T accel_bias_weight = T{1} / T{100};
 };
 
 /// What initialization recovers. `R_world_imu` is gravity-aligned with
@@ -132,7 +143,10 @@ struct ImuInitResult {
 /// vision-estimated IMU pose in the world frame (camera poses already
 /// composed with the camera→IMU extrinsics, so these are *body* poses),
 /// plus the IMU preintegration accumulated from the previous keyframe.
-/// `dt` is the preintegration interval. `dR_dbg` is ∂ΔR/∂bg.
+/// `dt` is the preintegration interval. `dR_dbg` is ∂ΔR/∂bg; `dv_dba` and
+/// `dp_dba` are ∂Δv/∂ba and ∂Δp/∂ba, for the accelerometer-bias estimate (both
+/// zero: not supplied, and the alignment takes −Δt·I and −½Δt²·I, exact for a
+/// constant attitude over the interval).
 template <math::Scalar T>
 struct DynInitKeyframe {
     using Vec3 = math::lie::detail::Vec<T, 3>;
@@ -145,6 +159,8 @@ struct DynInitKeyframe {
     Vec3 dv{};           ///< preintegrated velocity
     Vec3 dp{};           ///< preintegrated position
     Mat3 dR_dbg{};       ///< ∂ΔR/∂(gyro bias)
+    Mat3 dv_dba{};       ///< ∂Δv/∂(accel bias), or zero
+    Mat3 dp_dba{};       ///< ∂Δp/∂(accel bias), or zero
     T dt = T{0};         ///< interval covered by the preintegration
 };
 
@@ -336,8 +352,7 @@ public:
             vel = R_align * vel;
         r.gravity_world = R_align * r.gravity_world;  // now (0,0,−g_norm)
         r.R_world_imu = R_align * kfs[0].R_world_imu;
-        r.accel_bias = Vec3{};
-        r.success = true;
+        r.success = true;  // accel_bias is the alignment's (body frame), or zero when not estimated
         return r;
     }
 
@@ -511,7 +526,10 @@ private:
         const std::size_t g0 = 3 * n;
         const std::size_t gw = constrained ? 2 : 3;  // gravity unknown width
         const std::size_t s0 = g0 + gw;
-        const std::size_t dim = s0 + 1;
+        // The accelerometer bias (body frame), when estimated (#501).
+        const bool with_ba = cfg_.accel_bias_weight > T{0};
+        const std::size_t b0 = s0 + 1;
+        const std::size_t dim = b0 + (with_ba ? 3 : 0);
 
         Vec3 w1{}, w2{}, base{};
         if (constrained) {
@@ -557,6 +575,13 @@ private:
             // mismatch here inverts the recovered gravity (#247).
             diag(vi, dt);
             col(s0, dp_world * (-T{1}));
+            // The preintegration ran with a zero accelerometer bias, so the true
+            // Δp is Δp + (∂Δp/∂b_a)·b_a and −Rᵢ Δp_true = −Rᵢ Δp − Rᵢ (∂Δp/∂b_a) b_a.
+            if (with_ba) {
+                const Mat3 RJ = R_i * dp_dba(kfs[i]);
+                for (std::size_t k = 0; k < 3; ++k)
+                    col(b0 + k, Vec3{{RJ(0, k), RJ(1, k), RJ(2, k)}});
+            }
             if (constrained) {
                 col(g0, w1 * (T{0.5} * dt * dt));
                 col(g0 + 1, w2 * (T{0.5} * dt * dt));
@@ -570,6 +595,12 @@ private:
             // Rᵢ Δv = vⱼ − vᵢ − g Δt (predict() convention).
             diag(vj, T{1});
             diag(vi, -T{1});
+            // Likewise Rᵢ Δv_true = Rᵢ Δv + Rᵢ (∂Δv/∂b_a) b_a.
+            if (with_ba) {
+                const Mat3 RJ = R_i * dv_dba(kfs[i]);
+                for (std::size_t k = 0; k < 3; ++k)
+                    col(b0 + k, Vec3{{-RJ(0, k), -RJ(1, k), -RJ(2, k)}});
+            }
             if (constrained) {
                 col(g0, w1 * (-dt));
                 col(g0 + 1, w2 * (-dt));
@@ -607,6 +638,9 @@ private:
         // See docs-site …/debugging/numerical-thresholds.mdx.
         for (std::size_t i = 0; i < dim; ++i)
             H(i, i) += T(1e-9);
+        if (with_ba)  // the zero-bias prior rows, w·b_a = 0
+            for (std::size_t k = 0; k < 3; ++k)
+                H(b0 + k, b0 + k) += cfg_.accel_bias_weight * cfg_.accel_bias_weight;
         DynMat<T> L;
         if (!cholesky(H, L))
             return false;
@@ -616,8 +650,24 @@ private:
         for (std::size_t i = 0; i < n; ++i)
             r.velocities_world[i] = Vec3{{x(3 * i, 0), x(3 * i + 1, 0), x(3 * i + 2, 0)}};
         r.scale = x(s0, 0);
+        r.accel_bias = with_ba ? Vec3{{x(b0, 0), x(b0 + 1, 0), x(b0 + 2, 0)}} : Vec3{};
         g_out = constrained ? base + w1 * x(g0, 0) + w2 * x(g0 + 1, 0) : Vec3{{x(g0, 0), x(g0 + 1, 0), x(g0 + 2, 0)}};
         return true;
+    }
+
+    // The keyframe's accelerometer-bias Jacobians, or the constant-attitude
+    // ones (−½Δt²·I, −Δt·I) when it carries none.
+    static bool has_dba(const DynInitKeyframe<T>& k) {
+        for (std::size_t i = 0; i < 9; ++i)
+            if (k.dv_dba.e[i] != T{0} || k.dp_dba.e[i] != T{0})
+                return true;
+        return false;
+    }
+    static Mat3 dp_dba(const DynInitKeyframe<T>& k) {
+        return has_dba(k) ? k.dp_dba : Mat3::identity() * (-T{0.5} * k.dt * k.dt);
+    }
+    static Mat3 dv_dba(const DynInitKeyframe<T>& k) {
+        return has_dba(k) ? k.dv_dba : Mat3::identity() * (-k.dt);
     }
 
     // Two orthonormal vectors spanning the tangent plane of the unit `g_hat`.

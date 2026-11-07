@@ -52,7 +52,11 @@ TEST_CASE("S1 stationarity gate rejects an over-noisy 'static' window", "[sdk][s
 TEST_CASE("S1 dynamic init recovers the metric scale under excitation", "[sdk][s1][init]") {
     const auto r = ev::dynamic_init<T>(/*excitation=*/1.5, /*scale_true=*/2.0);
     REQUIRE(r.success);
-    REQUIRE(r.scale_error_pct < 1.0);        // metric scale recovered to <1%
+    // Metric scale recovered to < 2 %. The alignment estimates the
+    // accelerometer bias (#501); this window has none, so the estimate only
+    // absorbs IMU noise, and costs precision: 1.5 % here, < 1 % with the bias
+    // held at zero.
+    REQUIRE(r.scale_error_pct < 2.0);
     REQUIRE(r.gravity_dir_error_deg < 1.0);  // gravity direction recovered
     REQUIRE(r.gravity_mag_error_ms2 < 1e-3);
 }

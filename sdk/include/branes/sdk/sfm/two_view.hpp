@@ -24,6 +24,7 @@
 #include <mtl/operation/eigenvalue_symmetric_jacobi.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -126,9 +127,13 @@ template <math::Scalar T>
 template <math::Scalar T>
 struct TwoViewOptions {
     T sampson_threshold = T{1} / T{500};  ///< inlier gate on the Sampson distance (normalized coords)
-    std::size_t max_iterations = 256;     ///< RANSAC hypotheses
+    std::size_t max_iterations = 256;     ///< RANSAC hypotheses (the cap, with `confidence`)
     std::size_t min_inliers = 12;         ///< reject the solution below this many inliers
     T min_inlier_ratio = T{1} / T{2};     ///< …and below this fraction of correspondences
+    /// Stop early once a hypothesis this likely drawn from inliers alone has
+    /// been tried (the standard RANSAC count for the best inlier ratio so
+    /// far). 0 runs all `max_iterations` (#500).
+    double confidence = 0.0;
 };
 
 /// Recovered two-view geometry. `R_1_0` and `t_1_0_unit` give the second
@@ -146,9 +151,33 @@ struct TwoViewResult {
     Vec3<T> t_1_0_unit{};
     std::vector<Vec3<T>> points_cam0;
     std::vector<std::size_t> inliers;
+    /// Mean disparity of the kept inliers once the recovered rotation is
+    /// removed, ‖x₁ − π(R_1_0·x₀)‖ (normalized units): the parallax that
+    /// translation produced. A pure rotation has a large raw disparity and
+    /// none of this (#500).
+    T parallax = T{0};
 };
 
 namespace detail {
+
+/// RANSAC hypotheses needed to draw, with probability `confidence`, at least
+/// one sample of `sample_size` inliers when a fraction `inlier_ratio` of the
+/// data are inliers: log(1 − p) / log(1 − wˢ) (Fischler & Bolles 1981;
+/// Hartley & Zisserman §4.7.1). Capped at `cap`; `confidence` ≤ 0 returns it.
+/// Both logarithms are log1p, so a sample probability wˢ below the rounding
+/// of 1 − wˢ gives +∞ (and the cap), not a cast of −∞.
+[[nodiscard]] inline std::size_t
+ransac_iterations(double inlier_ratio, std::size_t sample_size, double confidence, std::size_t cap) {
+    if (!(confidence > 0.0) || !(inlier_ratio > 0.0))
+        return cap;
+    if (!(confidence < 1.0))
+        return cap;
+    const double all_in = std::pow(inlier_ratio, static_cast<double>(sample_size));
+    if (!(all_in < 1.0))
+        return 1;
+    const double n = std::ceil(std::log1p(-confidence) / std::log1p(-all_in));
+    return n < static_cast<double>(cap) ? static_cast<std::size_t>(n) : cap;
+}
 
 /// Hartley isotropic normalization: translate to centroid, scale so the mean
 /// distance to the origin is √2. Returns the 3×3 similarity T such that the
@@ -350,7 +379,8 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
     std::vector<std::size_t> best_inliers;
     Mat3<T> best_E{};
     std::array<std::size_t, 8> sample{};
-    for (std::size_t it = 0; it < opt.max_iterations; ++it) {
+    std::size_t needed = opt.max_iterations;
+    for (std::size_t it = 0; it < needed; ++it) {
         // Draw 8 distinct indices.
         for (std::size_t s = 0; s < 8; ++s) {
             bool dup = true;
@@ -372,6 +402,10 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
         if (inliers.size() > best_inliers.size()) {
             best_inliers = std::move(inliers);
             best_E = E;
+            needed = detail::ransac_iterations(static_cast<double>(best_inliers.size()) / static_cast<double>(n),
+                                               8,
+                                               opt.confidence,
+                                               opt.max_iterations);
         }
     }
 
@@ -419,6 +453,18 @@ estimate_relative_pose(std::span<const Vec2<T>> x0, std::span<const Vec2<T>> x1,
     // Re-apply both support gates to the final cheirality-filtered set, not just
     // the pre-triangulation Sampson set — triangulation can shrink it below the
     // configured thresholds.
+    // The mean over the inliers whose rotated ray stays in front (a large
+    // rotation can turn one behind while its point is in front of both cameras).
+    std::size_t terms = 0;
+    for (std::size_t k : out.inliers) {
+        const Vec3<T> r = out.R_1_0 * Vec3<T>{{x0[k][0], x0[k][1], T{1}}};
+        if (r[2] > T{0}) {
+            out.parallax += ld::norm(Vec2<T>{{x1[k][0] - r[0] / r[2], x1[k][1] - r[1] / r[2]}});
+            ++terms;
+        }
+    }
+    if (terms > 0)
+        out.parallax /= static_cast<T>(terms);
     out.success =
         best_count >= opt.min_inliers && static_cast<T>(best_count) >= opt.min_inlier_ratio * static_cast<T>(n);
     return out;

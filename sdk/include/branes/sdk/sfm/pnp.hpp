@@ -39,6 +39,7 @@ struct PnpOptions {
     std::size_t max_iterations = 256;          ///< RANSAC hypotheses
     std::size_t min_inliers = 8;               ///< reject the solution below this many inliers
     T min_inlier_ratio = T{1} / T{2};          ///< …and below this fraction of correspondences
+    double confidence = 0.0;                   ///< early RANSAC stop, as TwoViewOptions::confidence (#500)
 };
 
 /// Recovered camera pose: the new frame sees a landmark X (in the landmark
@@ -170,7 +171,8 @@ estimate_pose(std::span<const Vec3<T>> pts3d, std::span<const Vec2<T>> obs2d, co
 
     std::vector<std::size_t> best_inliers;
     std::array<std::size_t, 6> sample{};
-    for (std::size_t it = 0; it < opt.max_iterations; ++it) {
+    std::size_t needed = opt.max_iterations;
+    for (std::size_t it = 0; it < needed; ++it) {
         for (std::size_t s = 0; s < 6; ++s) {
             bool dup = true;
             while (dup) {
@@ -189,8 +191,13 @@ estimate_pose(std::span<const Vec3<T>> pts3d, std::span<const Vec2<T>> obs2d, co
         for (std::size_t k = 0; k < n; ++k)
             if (detail::reprojection_error<T>(R, t, pts3d[k], obs2d[k]) < opt.reprojection_threshold)
                 inliers.push_back(k);
-        if (inliers.size() > best_inliers.size())
+        if (inliers.size() > best_inliers.size()) {
             best_inliers = std::move(inliers);
+            needed = detail::ransac_iterations(static_cast<double>(best_inliers.size()) / static_cast<double>(n),
+                                               6,
+                                               opt.confidence,
+                                               opt.max_iterations);
+        }
     }
 
     if (best_inliers.size() < opt.min_inliers ||

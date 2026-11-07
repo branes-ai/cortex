@@ -135,6 +135,13 @@ public:
         uopts.calib_rot_sigma = static_cast<T>(config.calib_ext_rot_sigma_deg * kDegToRad);
         updater_ = msckf::CameraUpdater<T>(extrinsics_of(cameras_), uopts);
 
+        // The dynamic init's SfM gates, from the track noise in camera 0's
+        // normalized units (#500).
+        if (!(config.init_track_sigma_px > 0.0))
+            throw std::invalid_argument("MsckfBackend: init_track_sigma_px must be positive");
+        init_track_sigma_ = static_cast<T>(config.init_track_sigma_px) / cameras_[0].intrinsics.fx();
+        init_window_opts_ = sfm::init_window_options_for_noise<T>(init_track_sigma_);
+
         rebind_operators();
 
         ImuInitConfig<T> icfg;
@@ -626,6 +633,8 @@ private:
             frame.dv = init_preint_.delta_velocity();
             frame.dp = init_preint_.delta_position();
             frame.dR_dbg = init_preint_.d_rotation_d_gyro_bias();
+            frame.dv_dba = init_preint_.d_velocity_d_accel_bias();
+            frame.dp_dba = init_preint_.d_position_d_accel_bias();
             frame.dt = init_preint_.delta_time();
         }
         init_preint_ = ImuPreintegrator<T>{};  // start the next interval
@@ -642,8 +651,8 @@ private:
         if (init_frames_.size() < kMinDynFrames)
             return;
         ++init_diag_.dyn_attempts;
-        const auto win =
-            sfm::build_init_window<T>(std::span<const sfm::InitFrame<T>>{init_frames_}, cameras_[0].extrinsics);
+        const auto win = sfm::build_init_window<T>(
+            std::span<const sfm::InitFrame<T>>{init_frames_}, cameras_[0].extrinsics, init_window_opts_);
         // The attempt, as the S1 tap sees it: reported before a successful
         // alignment seeds the filter (which clears the init buffers).
         const auto report = [&](bool aligned) {
@@ -653,6 +662,7 @@ private:
                                   std::span<const DVec3>{init_gyro_},
                                   std::span<const DVec3>{init_accel_},
                                   static_cast<T>(config_.gravity_magnitude),
+                                  init_track_sigma_,
                                   t,
                                   win,
                                   aligned);
@@ -823,6 +833,8 @@ private:
     // Dynamic-init state: a bounded buffer of init-window camera frames and the
     // IMU preintegrator accumulating the deltas between them.
     std::vector<sfm::InitFrame<T>> init_frames_;
+    T init_track_sigma_{};                          ///< init_track_sigma_px in camera 0's normalized units
+    sfm::InitWindowOptions<T> init_window_opts_{};  ///< SfM gates from it (#500)
     ImuPreintegrator<T> init_preint_{};
     bool init_have_imu_t_ = false;
     double init_last_imu_t_ = 0.0;

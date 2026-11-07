@@ -400,6 +400,63 @@ std::vector<bs::DynInitKeyframe<T>> late_excitation_window(std::size_t n, std::s
 
 }  // namespace
 
+TEST_CASE("dynamic init estimates the accelerometer bias (#501)", "[sdk][imu_init]") {
+    // The excited up-to-scale window, with a bias in the accelerometer: the
+    // preintegration (run at zero bias) is off by −(∂Δ/∂ba)·ba, here with the
+    // constant-attitude Jacobians −Δt·I and −½Δt²·I.
+    auto kfs = scaled_window(9, 4.0, 0.0);
+    const Vec3 ba{{0.12, -0.08, 0.15}};
+    for (std::size_t i = 1; i < kfs.size(); ++i) {
+        const T dt = kfs[i].dt;
+        kfs[i].dv_dba = bs::ImuInitializer<T>::Mat3::identity() * (-dt);
+        kfs[i].dp_dba = bs::ImuInitializer<T>::Mat3::identity() * (-0.5 * dt * dt);
+        kfs[i].dv = kfs[i].dv - kfs[i].dv_dba * ba;
+        kfs[i].dp = kfs[i].dp - kfs[i].dp_dba * ba;
+    }
+    // Ignored, the bias is read as acceleration and the scale is off.
+    bs::ImuInitConfig<T> off;
+    off.accel_bias_weight = 0.0;
+    off.max_scale_change = 1.0;
+    const auto r0 = bs::ImuInitializer<T>{off}.try_dynamic(kfs);
+    REQUIRE(r0.success);
+    REQUIRE(r0.accel_bias[0] == 0.0);
+    REQUIRE(std::abs(r0.scale / 4.0 - 1.0) > 2e-3);  // 0.4 % on this strongly excited window
+    // Estimated under a negligible prior, it and the scale are recovered.
+    bs::ImuInitConfig<T> weak;
+    weak.accel_bias_weight = 1e-6;
+    const auto r = bs::ImuInitializer<T>{weak}.try_dynamic(kfs);
+    REQUIRE(r.success);
+    REQUIRE_THAT(r.scale, Catch::Matchers::WithinRel(4.0, 1e-4));
+    for (std::size_t k = 0; k < 3; ++k)
+        REQUIRE_THAT(r.accel_bias[k], Catch::Matchers::WithinAbs(ba[k], 1e-3));
+    // The default prior holds it a little toward zero.
+    const auto d = bs::ImuInitializer<T>{}.try_dynamic(kfs);
+    REQUIRE(d.success);
+    REQUIRE(std::abs(d.scale / 4.0 - 1.0) < std::abs(r0.scale / 4.0 - 1.0));
+}
+
+TEST_CASE("dynamic init falls back to constant-attitude bias Jacobians", "[sdk][imu_init]") {
+    // The same bias, but the keyframes carry no Jacobians: the alignment takes
+    // −Δt·I and −½Δt²·I itself, so the answer is the same.
+    auto with = scaled_window(9, 4.0, 0.0);
+    auto without = with;
+    const Vec3 ba{{0.12, -0.08, 0.15}};
+    for (std::size_t i = 1; i < with.size(); ++i) {
+        const T dt = with[i].dt;
+        with[i].dv_dba = bs::ImuInitializer<T>::Mat3::identity() * (-dt);
+        with[i].dp_dba = bs::ImuInitializer<T>::Mat3::identity() * (-0.5 * dt * dt);
+        with[i].dv = with[i].dv - with[i].dv_dba * ba;
+        with[i].dp = with[i].dp - with[i].dp_dba * ba;
+        without[i].dv = with[i].dv;
+        without[i].dp = with[i].dp;
+    }
+    const auto a = bs::ImuInitializer<T>{}.try_dynamic(with);
+    const auto b = bs::ImuInitializer<T>{}.try_dynamic(without);
+    REQUIRE(a.success);
+    REQUIRE(b.success);
+    REQUIRE_THAT(b.scale, Catch::Matchers::WithinRel(a.scale, 1e-12));
+}
+
 TEST_CASE("dynamic init: a settled scale passes the settling gate", "[sdk][imu_init]") {
     const auto kfs = scaled_window(9, 4.0, 0.0);
     const auto r = bs::ImuInitializer<T>{}.try_dynamic(kfs);

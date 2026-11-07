@@ -141,7 +141,8 @@ void seed_from_imu(State<T, Cov>& s,
 /// gravity, metric per-keyframe velocity, scale, and the gravity-aligned
 /// attitude of the *first* keyframe; the vision relative rotation carries it to
 /// the last keyframe (the current pose), whose velocity seeds the filter. The
-/// accel bias is not observable from the alignment and starts at zero. Records
+/// alignment's accelerometer-bias estimate is recorded, not seeded: the bias
+/// starts at zero. Records
 /// the seed in `diag`, including the roll/pitch sanity check against the mean
 /// specific force over `accel_window` (#247).
 template <math::Scalar T, class Cov>
@@ -157,7 +158,12 @@ void seed_from_alignment(State<T, Cov>& s,
     s.R = r.R_world_imu * rel;
     s.v = r.velocities_world.empty() ? DVec3{} : r.velocities_world.back();
     s.bg = r.gyro_bias;
-    s.ba = DVec3{};  // accel bias is not observable from the dynamic alignment
+    // The alignment estimates an accelerometer bias so that it does not leak
+    // into the scale (#501), but over a 1 s window it is weakly observable and
+    // held toward zero by a prior. The filter starts from zero and its own
+    // bias covariance: seeding the estimate moved EuRoC MH_01 / MH_02 by
+    // +6 % / −0.5 % in ATE. The estimate is kept in the diagnostics.
+    s.ba = DVec3{};
     s.timestamp = t;
 
     const T g_norm = math::lie::detail::norm(r.gravity_world);
@@ -170,7 +176,7 @@ void seed_from_alignment(State<T, Cov>& s,
     diag.gravity_residual =
         static_cast<double>((g_norm > T{0} && g_cfg > T{0}) ? math::lie::detail::abs_(g_norm - g_cfg) / g_cfg : T{1});
     diag.gyro_bias = r.gyro_bias;
-    diag.accel_bias = DVec3{};
+    diag.accel_bias = r.accel_bias;  // the alignment's estimate, not seeded (above)
     // Roll/pitch sanity: how far the seed's up disagrees with the mean
     // accelerometer up over the init window (gravity-dominated). Large ⇒
     // the VI-solved gravity direction is wrong → divergence (#247).

@@ -93,6 +93,11 @@ struct S1InitializationBench {
         sdk::msckf::CameraExtrinsics<T> extrinsics{};  ///< camera 0 → IMU, for the SfM window
         double t = 0.0;                                ///< time the init completes
         T gravity_magnitude = T{981} / T{100};
+        /// Track noise of the SfM window's gates (normalized units): the
+        /// window is built with `sfm::init_window_options_for_noise` of it,
+        /// as the backend does (#500). 0, and fixtures without it, use the
+        /// fixed `InitWindowOptions` defaults.
+        T track_sigma = T{0};
     };
     template <class T>
     struct Output {
@@ -138,6 +143,32 @@ struct S1InitializationBench {
             v.push_back(unpack_fixed<T, 3>(x));
         return v;
     }
+    // The accelerometer-bias Jacobians of a keyframe or frame (#501), written
+    // only when nonzero; fixtures from before them have none, and the
+    // alignment then takes the constant-attitude ones.
+    template <class K>
+    static void pack_dba(json& j, const K& k) {
+        bool any = false;
+        for (std::size_t i = 0; i < 9; ++i)
+            any = any || k.dv_dba.e[i] != decltype(k.dt){0} || k.dp_dba.e[i] != decltype(k.dt){0};
+        if (!any)
+            return;
+        j["dv_dba"] = pack_vec<decltype(k.dt)>(std::span<const decltype(k.dt)>(k.dv_dba.e));
+        j["dp_dba"] = pack_vec<decltype(k.dt)>(std::span<const decltype(k.dt)>(k.dp_dba.e));
+    }
+    template <class T, class K>
+    static void unpack_dba(const json& j, K& k) {
+        if (!j.contains("dv_dba"))
+            return;
+        const auto v = unpack_vec<T>(j.at("dv_dba"));
+        const auto p = unpack_vec<T>(j.at("dp_dba"));
+        if (v.size() != 9 || p.size() != 9)
+            throw std::invalid_argument("s1 bench: dv_dba and dp_dba must have 9 entries");
+        for (std::size_t i = 0; i < 9; ++i) {
+            k.dv_dba.e[i] = v[i];
+            k.dp_dba.e[i] = p[i];
+        }
+    }
     template <class T>
     [[nodiscard]] static json encode_input(const Input<T>& in) {
         json kfs = json::array();
@@ -149,11 +180,15 @@ struct S1InitializationBench {
                            {"dp", pack(k.dp)},
                            {"dR_dbg", pack_vec<T>(std::span<const T>(k.dR_dbg.e))},
                            {"dt", pack(k.dt)}});
+        for (std::size_t i = 0; i < in.keyframes.size(); ++i)
+            pack_dba(kfs[i], in.keyframes[i]);
         json j{{"gyro", pack_vecs(in.gyro)},
                {"accel", pack_vecs(in.accel)},
                {"keyframes", kfs},
                {"t", pack_num(in.t)},
                {"gravity_magnitude", pack(in.gravity_magnitude)}};
+        if (in.track_sigma > T{0})
+            j["track_sigma"] = pack(in.track_sigma);
         if (!in.frames.empty()) {
             json fr = json::array();
             for (const auto& f : in.frames) {
@@ -168,6 +203,7 @@ struct S1InitializationBench {
                               {"dp", pack(f.dp)},
                               {"dR_dbg", pack_vec<T>(std::span<const T>(f.dR_dbg.e))},
                               {"dt", pack(f.dt)}});
+                pack_dba(fr.back(), f);
             }
             j["frames"] = fr;
             j["extrinsics"] = {{"R_imu_cam", pack(in.extrinsics.R_imu_cam)},
@@ -193,6 +229,7 @@ struct S1InitializationBench {
             for (std::size_t i = 0; i < 9; ++i)
                 kf.dR_dbg.e[i] = m[i];
             kf.dt = unpack_scalar<T>(k.at("dt"));
+            unpack_dba<T>(k, kf);
             in.keyframes.push_back(kf);
         }
         if (j.contains("frames")) {  // fixtures from before #472 have no SfM window
@@ -213,6 +250,7 @@ struct S1InitializationBench {
                 for (std::size_t i = 0; i < 9; ++i)
                     f.dR_dbg.e[i] = m[i];
                 f.dt = unpack_scalar<T>(fj.at("dt"));
+                unpack_dba<T>(fj, f);
                 in.frames.push_back(std::move(f));
             }
             const auto& e = j.at("extrinsics");
@@ -221,6 +259,8 @@ struct S1InitializationBench {
         }
         in.t = unpack_num(j.at("t"));
         in.gravity_magnitude = unpack_scalar<T>(j.at("gravity_magnitude"));
+        if (j.contains("track_sigma"))
+            in.track_sigma = unpack_scalar<T>(j.at("track_sigma"));
         return in;
     }
     template <class T>
@@ -312,7 +352,8 @@ struct S1InitializationBench {
         const std::span<const Vec3<T>> g{in.gyro}, a{in.accel};
         Output<T> out;
         if (variant.starts_with("sfm_")) {
-            sdk::sfm::InitWindowOptions<T> opt;
+            auto opt = in.track_sigma > T{0} ? sdk::sfm::init_window_options_for_noise<T>(in.track_sigma)
+                                             : sdk::sfm::InitWindowOptions<T>{};
             if (variant == "sfm_adjacent_bootstrap")
                 opt.bootstrap = sdk::sfm::InitBootstrap::Adjacent;
             else if (variant == "sfm_keyframes_4hz")
@@ -590,6 +631,10 @@ struct S1InitializationBench {
                 "kf4hz_scale_err_pct"};
     }
     template <class T>
+    /// The sweep's SfM columns use the fixed gates (`InitWindowOptions`
+    /// defaults: its inputs carry no `track_sigma`), the ones #500 measured.
+    /// The backend's noise-derived gates and refinement are covered by the
+    /// `track_sigma` fixtures and tests (#500, #501).
     [[nodiscard]] static std::vector<double> sweep_point(const Point& p) {
         const auto get = [&](const char* k, double dflt) {
             const auto it = p.find(k);
@@ -817,6 +862,8 @@ private:
                 fr.dv = pre.delta_velocity();
                 fr.dp = pre.delta_position();
                 fr.dR_dbg = pre.d_rotation_d_gyro_bias();
+                fr.dv_dba = pre.d_velocity_d_accel_bias();
+                fr.dp_dba = pre.d_position_d_accel_bias();
                 fr.dt = pre.delta_time();
             }
             w.frames.push_back(std::move(fr));

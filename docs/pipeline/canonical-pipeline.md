@@ -233,8 +233,10 @@ directions.
   where init *should* refuse to fire (and whether yours refuses or returns a confident wrong answer).
 
 **cortex.** `imu_init.hpp` (`try_static`, `try_gravity_align`, `try_dynamic`); SfM bootstrap in
-`sfm/two_view.hpp`, `sfm/pnp.hpp`, `sfm/init_window.hpp`. Per memory, dynamic init won't fire on
-real EuRoC (SfM robustness, #247/#211). **Candidate divergence:** verify initial `P` carries large
+`sfm/two_view.hpp`, `sfm/pnp.hpp`, `sfm/init_window.hpp`, refined by `sfm/bundle_adjust.hpp`. The
+window's RANSAC gates come from `VioConfig::init_track_sigma_px` (#500) and the alignment estimates
+the accelerometer bias (#501); with `prefer_dynamic_init` over the first 30 s of EuRoC it aligns on
+9 of 11 sequences, with a median scale error of 3.6% against ground truth. **Candidate divergence:** verify initial `P` carries large
 yaw / accel-bias / scale variance; an over-tight init `P` is a first-frame over-confidence source.
 
 ---
