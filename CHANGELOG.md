@@ -56,6 +56,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.85.0](https://github.com/branes-ai/cortex/compare/v0.84.1...v0.85.0) (2026-11-07)
+
+
+### Features
+
+* **sdk:** hold the velocity at zero while the platform rests (s8) ([#601](https://github.com/branes-ai/cortex/issues/601)) ([b4de9f1](https://github.com/branes-ai/cortex/commit/b4de9f11d3346c6c6568eee3ab30199260482e22))
+* **tools:** split the euroc error between front end and estimator with ideal tracks ([#603](https://github.com/branes-ai/cortex/issues/603)) ([4654b1d](https://github.com/branes-ai/cortex/commit/4654b1dc44e0c6b3a114fe8e2e68e9d531b0767a))
+
 ## [0.84.1](https://github.com/branes-ai/cortex/compare/v0.84.0...v0.84.1) (2026-11-07)
 
 
