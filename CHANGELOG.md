@@ -56,6 +56,14 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.84.1](https://github.com/branes-ai/cortex/compare/v0.84.0...v0.84.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **sdk:** gate the dynamic-init window on track noise and refine it ([#599](https://github.com/branes-ai/cortex/issues/599)) ([f0afd0e](https://github.com/branes-ai/cortex/commit/f0afd0e21307656d4fba2c738678c1a91c9460fc))
+* **sdk:** wait for a settled scale before seeding from a dynamic init ([#597](https://github.com/branes-ai/cortex/issues/597)) ([b9f8326](https://github.com/branes-ai/cortex/commit/b9f8326ce425852873794d0875b0498ccc4ffc77))
+
 ## [0.84.0](https://github.com/branes-ai/cortex/compare/v0.83.13...v0.84.0) (2026-11-06)
 
 
