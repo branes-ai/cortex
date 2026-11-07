@@ -110,6 +110,37 @@ TEST_CASE("ideal tracks need ground truth at the stamp", "[tools][ideal_tracks]"
     REQUIRE(tr.observe(-0.01).empty());
     REQUIRE(tr.observe(1.5).empty());
     REQUIRE_FALSE(tr.pose_at(1.5).has_value());
-    // With noise the pixels move but the count does not.
-    REQUIRE(tr.observe(0.5).size() == 150);
+}
+
+TEST_CASE("ideal tracks add the noise and only the noise", "[tools][ideal_tracks]") {
+    // The same seed with and without noise: the same landmarks over several
+    // frames (σ does not change the layout), and pixel offsets of σ.
+    const auto cam = branes::tools::euroc_cam0<T>();
+    const SE3 T_ic(cam.R_imu_cam, cam.p_imu_cam);
+    auto noisy = clean();
+    noisy.sigma_px = 1.0;
+    Tracks a(gt(0.3, 0.5), cam.intrinsics, T_ic, clean());
+    Tracks b(gt(0.3, 0.5), cam.intrinsics, T_ic, noisy);
+    double sum = 0, sum2 = 0;
+    std::size_t n = 0;
+    for (const double t : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+        const auto oa = a.observe(t);
+        const auto ob = b.observe(t);
+        REQUIRE(oa.size() == ob.size());
+        for (std::size_t i = 0; i < oa.size(); ++i) {
+            REQUIRE(oa[i].feature_id == ob[i].feature_id);
+            for (const double d : {ob[i].u - oa[i].u, ob[i].v - oa[i].v}) {
+                sum += d;
+                sum2 += d * d;
+                ++n;
+            }
+        }
+    }
+    REQUIRE(a.tracks() == b.tracks());
+    REQUIRE(n > 1000);
+    const double mean = sum / static_cast<double>(n);
+    const double sd = std::sqrt(sum2 / static_cast<double>(n) - mean * mean);
+    CAPTURE(mean, sd, n);
+    REQUIRE(std::abs(mean) < 0.1);
+    REQUIRE(std::abs(sd - 1.0) < 0.1);
 }

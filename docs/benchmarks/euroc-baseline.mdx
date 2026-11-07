@@ -163,27 +163,30 @@ OpenVINS mono's, with track seed 1:
 
 | Sequence | Real KLT, R 4.6 px | 0 px, R 0.5 px | 1 px, R 4.6 px | 1 px, R 1 px |
 |---|---:|---:|---:|---:|
-| MH_01_easy | 3.5× | 1.3× | 7.9× | 39.6× |
-| MH_02_easy | 2.2× | 0.6× | 2.2× | 3.0× |
-| MH_03_medium | 3.0× | 2.1× | 2.1× | 2.1× |
-| MH_04_difficult | 2.7× | 1.4× | 2.1× | 127× |
-| MH_05_difficult | 1.4× | 0.7× | 1.0× | 0.7× |
-| V1_01_easy | 3.1× | 2.3× | 4.9× | 4.3× |
-| V1_02_medium | 3.1× | 1.7× | 4.0× | 2.3× |
-| V1_03_difficult | 2.8× | 2.0× | 3.2× | 166× |
-| V2_01_easy | 1.7× | 0.6× | 1.2× | 1.2× |
-| V2_02_medium | 4.5× | 1.6× | 3.7× | 4.7× |
-| V2_03_difficult | 1.0× | 8.2× | 1.5× | 14.8× |
-| **Median (seeds 1–3)** | **2.8×** | **1.5–1.6×** | **2.2–2.8×** | **3.3–4.3×** |
+| MH_01_easy | 3.5× | 1.3× | 7.9× | 11.3× |
+| MH_02_easy | 2.2× | 0.6× | 2.8× | 5.9× |
+| MH_03_medium | 3.0× | 2.1× | 2.4× | 2.7× |
+| MH_04_difficult | 2.7× | 1.4× | 1.8× | 15.7× |
+| MH_05_difficult | 1.4× | 0.7× | 1.1× | 0.8× |
+| V1_01_easy | 3.1× | 2.3× | 4.5× | 3.7× |
+| V1_02_medium | 3.1× | 1.7× | 4.3× | 3.0× |
+| V1_03_difficult | 2.8× | 2.0× | 3.1× | 4.3× |
+| V2_01_easy | 1.7× | 0.6× | 1.4× | 1.0× |
+| V2_02_medium | 4.5× | 1.6× | 3.2× | 2.8× |
+| V2_03_difficult | 1.0× | 8.2× | 1.6× | 19.7× |
+| **Median (seeds 1–3)** | **2.8×** | **1.5–1.6×** | **2.4–2.8×** | **3.8–4.4×** |
 
-- **The estimator owns the gap.** With 1 px ideal tracks and the default `R`,
-  the median is 2.2–2.8× over three seeds, the same as the real front end's
-  2.8×. A perfect front end would buy little.
+- **The estimator owns the gap.** The comparison that isolates the front end
+  keeps the filter's `R` at its default: with 1 px ideal tracks the median is
+  2.4–2.8× over three seeds, against 2.8× for the real front end. A perfect
+  front end at that noise would buy little. The noise-free column also
+  changes `R`, so it is not a front-end comparison: it shows what the
+  estimator reaches with perfect measurements.
 - **The filter does not survive being told the truth.** With `R` matched to
-  1 px ideal tracks, 3–4 of the 11 sequences diverge (worse than 10×),
-  depending on the seed. With 0.5 px tracks and a matching `R`, 4 diverge
-  (MH_03 reaches 1,068 m). A consistent filter improves when its measurements
-  and its model of them both improve. This one gets worse: it takes in more
+  1 px ideal tracks, 3–5 of the 11 sequences diverge (worse than 10×),
+  depending on the seed; with 0.5 px tracks and a matching `R`, 3–4 do (V1_01
+  reaches 59–326×). A consistent filter improves when its measurements and
+  its model of them both improve. This one gets worse: it takes in more
   information than the tracks carry and becomes over-confident. The default
   `R`, about 4.6× the KLT noise, is what keeps it stable. That points at the
   over-confidence described in #212 and in the rotation-drift finding above,
@@ -197,8 +200,9 @@ OpenVINS mono's, with track seed 1:
     differentiated rotation is 0.
   - Two real-image runs of V1_01 are bit-identical, so repeating a run
     measures no variation at all.
-  - The spread across the three track seeds (medians of 2.2–2.8× at 1 px)
-    shows how large a change a small perturbation alone produces.
+  - The spread across the three track seeds (medians of 2.4–2.8× at 1 px and
+    the default `R`) shows how large a change a small perturbation alone
+    produces.
 
 ## The regression benchmark
 

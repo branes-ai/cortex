@@ -211,29 +211,37 @@ Args parse(int argc, char** argv) {
             }
         } else if (v == "--robot" && next_is_value())
             a.robot = argv[++i];
-        else if (v == "--tracks" && next_is_value()) {
-            const std::string_view m = argv[++i];
-            if (m != "gt" && m != "klt")
-                throw std::invalid_argument("--tracks: klt or gt");
-            a.ideal_tracks = m == "gt";
-        } else if (v == "--track-sigma" && next_is_value()) {
-            a.ideal.sigma_px = std::stod(argv[++i]);
-            if (!(a.ideal.sigma_px >= 0.0))
-                throw std::invalid_argument("--track-sigma: a pixel sigma >= 0");
-        } else if (v == "--camera-sigma-px" && next_is_value()) {
-            a.camera_sigma_px = std::stod(argv[++i]);
-            if (!(a.camera_sigma_px > 0.0))
-                throw std::invalid_argument("--camera-sigma-px: a pixel sigma > 0");
-        } else if (v == "--track-seed" && next_is_value())
-            a.ideal.seed = std::stoull(argv[++i]);
-        else if (v == "--track-depth" && next_is_value()) {
-            const auto d = split_commas(argv[++i]);
-            if (d.size() != 2)
-                throw std::invalid_argument("--track-depth: MIN,MAX in metres");
-            a.ideal.min_depth_m = std::stod(d[0]);
-            a.ideal.max_depth_m = std::stod(d[1]);
-            if (!(a.ideal.min_depth_m > 0.0 && a.ideal.max_depth_m >= a.ideal.min_depth_m))
-                throw std::invalid_argument("--track-depth: 0 < MIN <= MAX");
+        else if (v == "--tracks" || v == "--track-sigma" || v == "--camera-sigma-px" || v == "--track-seed" ||
+                 v == "--track-depth") {
+            // A missing value is an error, not a silent fall back to the KLT run.
+            if (!next_is_value())
+                throw std::invalid_argument(std::string(v) + " needs a value (see --help)");
+            const std::string_view x = argv[++i];
+            if (v == "--tracks") {
+                if (x != "gt" && x != "klt")
+                    throw std::invalid_argument("--tracks: klt or gt");
+                a.ideal_tracks = x == "gt";
+            } else if (v == "--track-sigma") {
+                a.ideal.sigma_px = std::stod(std::string(x));
+                if (!(a.ideal.sigma_px >= 0.0))
+                    throw std::invalid_argument("--track-sigma: a pixel sigma >= 0");
+            } else if (v == "--camera-sigma-px") {
+                a.camera_sigma_px = std::stod(std::string(x));
+                if (!(a.camera_sigma_px > 0.0))
+                    throw std::invalid_argument("--camera-sigma-px: a pixel sigma > 0");
+            } else if (v == "--track-seed") {
+                if (x.empty() || x.find_first_not_of("0123456789") != std::string_view::npos)
+                    throw std::invalid_argument("--track-seed: a non-negative integer");
+                a.ideal.seed = std::stoull(std::string(x));
+            } else {
+                const auto d = split_commas(x);
+                if (d.size() != 2)
+                    throw std::invalid_argument("--track-depth: MIN,MAX in metres");
+                a.ideal.min_depth_m = std::stod(d[0]);
+                a.ideal.max_depth_m = std::stod(d[1]);
+                if (!(a.ideal.min_depth_m > 0.0 && a.ideal.max_depth_m >= a.ideal.min_depth_m))
+                    throw std::invalid_argument("--track-depth: 0 < MIN <= MAX");
+            }
         } else if (v == "--capture" && next_is_value())
             a.capture_dir = argv[++i];
         else if (v == "--capture-stages" && next_is_value())
@@ -1033,6 +1041,10 @@ int main(int argc, char** argv) {
     if (args.invariant && args.gate_flag) {
         std::cerr << "vio_pipeline: --gate-alpha and --gate-per-dof select the MSCKF gate; they do not "
                      "apply to --invariant\n";
+        return 2;
+    }
+    if (args.ideal_tracks && args.video) {
+        std::cerr << "vio_pipeline: --tracks gt does not write the per-frame tracks --video overlays\n";
         return 2;
     }
     if (args.ideal_tracks && (args.invariant || args.source != "euroc")) {

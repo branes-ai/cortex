@@ -67,7 +67,8 @@ public:
                 const math::cameras::PinholeRadtanCamera<T>& camera,
                 const math::lie::SE3<T>& T_imu_cam,
                 const IdealTrackOptions& opt = {})
-        : gt_(std::move(gt)), cam_(camera), T_imu_cam_(T_imu_cam), opt_(opt), rng_(opt.seed) {}
+        : gt_(std::move(gt)), cam_(camera), T_imu_cam_(T_imu_cam), opt_(opt), rng_(opt.seed),
+          noise_rng_(opt.seed ^ 0x9E3779B97F4A7C15ULL) {}
 
     /// The observations at image stamp `t_s`: empty where the ground truth does
     /// not cover `t_s`.
@@ -110,14 +111,19 @@ public:
             px.emplace_back(u, v);
         }
 
-        std::normal_distribution<double> noise(0.0, opt_.sigma_px);
+        // A unit normal scaled by σ: normal_distribution needs a positive σ,
+        // and σ = 0 draws nothing.
         obs.reserve(live_.size());
         for (std::size_t i = 0; i < live_.size(); ++i) {
             sdk::FrontendObservation<T> o;
             o.feature_id = live_[i].id;
             o.camera_id = 0;
-            o.u = px[i].first + static_cast<T>(opt_.sigma_px > 0 ? noise(rng_) : 0.0);
-            o.v = px[i].second + static_cast<T>(opt_.sigma_px > 0 ? noise(rng_) : 0.0);
+            o.u = px[i].first;
+            o.v = px[i].second;
+            if (opt_.sigma_px > 0) {
+                o.u += static_cast<T>(opt_.sigma_px * unit_(noise_rng_));
+                o.v += static_cast<T>(opt_.sigma_px * unit_(noise_rng_));
+            }
             obs.push_back(o);
         }
         return obs;
@@ -179,7 +185,9 @@ private:
     math::cameras::PinholeRadtanCamera<T> cam_;
     math::lie::SE3<T> T_imu_cam_;
     IdealTrackOptions opt_;
-    std::mt19937_64 rng_;
+    std::mt19937_64 rng_;        ///< landmark geometry only
+    std::mt19937_64 noise_rng_;  ///< pixel noise only, so σ does not change the layout of a seed
+    std::normal_distribution<double> unit_{0.0, 1.0};
     std::vector<Landmark> live_;
     std::uint64_t next_id_ = 0;
 };
