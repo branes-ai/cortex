@@ -22,6 +22,8 @@
 #                         and ~1.5 GB of images read from disk)
 #   CORTEX_BASELINE_OUT   output directory (default build/euroc-baseline)
 #   CORTEX_BASELINE_TOL   relative tolerance before a change counts (default 0.10)
+#   CORTEX_VIO_ARGS       extra vio_pipeline flags, e.g. "--tracks gt --track-sigma 0.5"
+#                         for the ideal-tracks experiment (#602); not with --update
 #
 # A full serial run takes ~25 minutes on the development station.
 #
@@ -63,6 +65,10 @@ if [ -n "$unknown" ]; then
     echo "euroc-baseline: not in $BASELINE: $unknown" >&2
     exit 2
 fi
+if [ "$update" = 1 ] && [ -n "${CORTEX_VIO_ARGS:-}" ]; then
+    echo "euroc-baseline: --update records the default pipeline; unset CORTEX_VIO_ARGS" >&2
+    exit 2
+fi
 if [ "$update" = 1 ] && [ "$named" -gt 0 ]; then
     echo "euroc-baseline: --update records a full run; drop the sequence names" >&2
     exit 2
@@ -92,7 +98,7 @@ run_one() {
         return 0
     fi
     start=$(date +%s)
-    "$BIN/vio_pipeline" --source euroc --dataset "$mav0" --out "$OUT/$seq" > "$OUT/$seq/vio_pipeline.log" 2>&1 || true
+    "$BIN/vio_pipeline" --source euroc --dataset "$mav0" --out "$OUT/$seq" ${CORTEX_VIO_ARGS:-} > "$OUT/$seq/vio_pipeline.log" 2>&1 || true
     from="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sequences"][sys.argv[2]]["compare_from_s"])' "$BASELINE" "$seq")"
     "$BIN/traj_eval" --dataset "$mav0" --est "$OUT/$seq/trajectory.tum" --json > "$OUT/$seq/score.json" 2>> "$OUT/$seq/vio_pipeline.log" || true
     "$BIN/traj_eval" --dataset "$mav0" --est "$OUT/$seq/trajectory.tum" --from "$from" --json \
@@ -100,7 +106,7 @@ run_one() {
     echo "$seq: $(( $(date +%s) - start )) s"
 }
 export -f run_one
-export OUT BIN BASELINE DATASET_ROOT
+export OUT BIN BASELINE DATASET_ROOT CORTEX_VIO_ARGS
 
 printf '%s\n' "${seqs[@]}" | xargs -P "$JOBS" -I{} bash -c 'run_one "$1"' _ {}
 
