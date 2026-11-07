@@ -1,9 +1,9 @@
 {
  "_about": "EuRoC MAV baseline (docs/benchmarks/euroc-baseline.mdx). Aggregate metrics only, scored by tools/traj_eval: ATE in m (4-DoF and SE3 alignment), RPE as the mean over 8/16/24/32/40 m segments (m, deg), start_s and coverage_s in s after the first ground-truth stamp. scripts/euroc-baseline.sh reruns cortex and compares against cortex.run.",
  "cortex": {
-  "commit": "181a454",
+  "commit": "0e12a16",
   "binary": "tools/vio_pipeline --source euroc (MSCKF, double stages, full covariance)",
-  "date": "2026-11-06"
+  "date": "2026-11-07"
  },
  "openvins": {
   "release": "v2.7",
@@ -15,18 +15,18 @@
    "compare_from_s": 43.823,
    "cortex": {
     "run": {
-     "ate_4dof": 2.3049,
-     "ate_se3": 2.2963,
-     "rpe_trans_m": 1.3921,
-     "rpe_rot_deg": 3.3804,
+     "ate_4dof": 0.342,
+     "ate_se3": 0.3372,
+     "rpe_trans_m": 0.3255,
+     "rpe_rot_deg": 2.2198,
      "start_s": 0.025,
      "coverage_s": 181.9
     },
     "window": {
-     "ate_4dof": 0.657,
-     "ate_se3": 0.6443,
-     "rpe_trans_m": 0.505,
-     "rpe_rot_deg": 2.2708,
+     "ate_4dof": 0.3416,
+     "ate_se3": 0.3351,
+     "rpe_trans_m": 0.373,
+     "rpe_rot_deg": 1.8717,
      "start_s": 43.825,
      "coverage_s": 138.1
     }
@@ -62,18 +62,18 @@
    "compare_from_s": 38.116,
    "cortex": {
     "run": {
-     "ate_4dof": 0.8167,
-     "ate_se3": 0.8033,
-     "rpe_trans_m": 0.6817,
-     "rpe_rot_deg": 3.8147,
+     "ate_4dof": 0.3712,
+     "ate_se3": 0.3524,
+     "rpe_trans_m": 0.4367,
+     "rpe_rot_deg": 0.953,
      "start_s": 0.015,
      "coverage_s": 149.95
     },
     "window": {
-     "ate_4dof": 0.4995,
-     "ate_se3": 0.4698,
-     "rpe_trans_m": 0.5769,
-     "rpe_rot_deg": 2.25,
+     "ate_4dof": 0.3291,
+     "ate_se3": 0.3032,
+     "rpe_trans_m": 0.4254,
+     "rpe_rot_deg": 0.7358,
      "start_s": 38.165,
      "coverage_s": 111.8
     }
@@ -109,18 +109,18 @@
    "compare_from_s": 17.401,
    "cortex": {
     "run": {
-     "ate_4dof": 0.484,
-     "ate_se3": 0.4833,
-     "rpe_trans_m": 0.4535,
-     "rpe_rot_deg": 1.603,
+     "ate_4dof": 0.4789,
+     "ate_se3": 0.4787,
+     "rpe_trans_m": 0.4509,
+     "rpe_rot_deg": 1.2824,
      "start_s": 0.0,
      "coverage_s": 131.5
     },
     "window": {
-     "ate_4dof": 0.4143,
-     "ate_se3": 0.4138,
-     "rpe_trans_m": 0.3722,
-     "rpe_rot_deg": 0.8385,
+     "ate_4dof": 0.4493,
+     "ate_se3": 0.4488,
+     "rpe_trans_m": 0.3974,
+     "rpe_rot_deg": 0.6985,
      "start_s": 17.45,
      "coverage_s": 114.05
     }
@@ -156,18 +156,18 @@
    "compare_from_s": 19.153,
    "cortex": {
     "run": {
-     "ate_4dof": 0.4815,
-     "ate_se3": 0.4803,
-     "rpe_trans_m": 0.7247,
-     "rpe_rot_deg": 1.9979,
+     "ate_4dof": 0.4255,
+     "ate_se3": 0.4225,
+     "rpe_trans_m": 0.7434,
+     "rpe_rot_deg": 1.6173,
      "start_s": 0.005,
      "coverage_s": 98.75
     },
     "window": {
-     "ate_4dof": 0.3661,
-     "ate_se3": 0.3606,
-     "rpe_trans_m": 0.547,
-     "rpe_rot_deg": 0.6538,
+     "ate_4dof": 0.4411,
+     "ate_se3": 0.4361,
+     "rpe_trans_m": 0.6417,
+     "rpe_rot_deg": 1.2949,
      "start_s": 19.155,
      "coverage_s": 79.6
     }
@@ -203,18 +203,18 @@
    "compare_from_s": 19.734,
    "cortex": {
     "run": {
-     "ate_4dof": 0.732,
-     "ate_se3": 0.7308,
-     "rpe_trans_m": 0.8135,
-     "rpe_rot_deg": 1.0675,
+     "ate_4dof": 0.6821,
+     "ate_se3": 0.681,
+     "rpe_trans_m": 0.8515,
+     "rpe_rot_deg": 1.7112,
      "start_s": -0.015,
      "coverage_s": 111.05
     },
     "window": {
-     "ate_4dof": 0.6096,
-     "ate_se3": 0.6083,
-     "rpe_trans_m": 0.6953,
-     "rpe_rot_deg": 0.7592,
+     "ate_4dof": 0.6406,
+     "ate_se3": 0.6385,
+     "rpe_trans_m": 0.727,
+     "rpe_rot_deg": 0.7822,
      "start_s": 19.735,
      "coverage_s": 91.3
     }
@@ -250,18 +250,18 @@
    "compare_from_s": 4.559,
    "cortex": {
     "run": {
-     "ate_4dof": 0.216,
-     "ate_se3": 0.215,
-     "rpe_trans_m": 0.4339,
-     "rpe_rot_deg": 5.4172,
+     "ate_4dof": 0.219,
+     "ate_se3": 0.2176,
+     "rpe_trans_m": 0.3619,
+     "rpe_rot_deg": 3.8381,
      "start_s": 0.01,
      "coverage_s": 143.55
     },
     "window": {
-     "ate_4dof": 0.2173,
-     "ate_se3": 0.2162,
-     "rpe_trans_m": 0.4279,
-     "rpe_rot_deg": 5.356,
+     "ate_4dof": 0.2171,
+     "ate_se3": 0.216,
+     "rpe_trans_m": 0.3497,
+     "rpe_rot_deg": 3.9208,
      "start_s": 4.56,
      "coverage_s": 139.0
     }
@@ -297,18 +297,18 @@
    "compare_from_s": 3.955,
    "cortex": {
     "run": {
-     "ate_4dof": 0.2065,
-     "ate_se3": 0.2032,
-     "rpe_trans_m": 0.2418,
-     "rpe_rot_deg": 4.003,
+     "ate_4dof": 0.1841,
+     "ate_se3": 0.182,
+     "rpe_trans_m": 0.2355,
+     "rpe_rot_deg": 3.0457,
      "start_s": 0.005,
      "coverage_s": 83.5
     },
     "window": {
-     "ate_4dof": 0.201,
-     "ate_se3": 0.199,
-     "rpe_trans_m": 0.2405,
-     "rpe_rot_deg": 4.0082,
+     "ate_4dof": 0.1837,
+     "ate_se3": 0.1822,
+     "rpe_trans_m": 0.2344,
+     "rpe_rot_deg": 2.7266,
      "start_s": 4.005,
      "coverage_s": 79.5
     }
@@ -344,18 +344,18 @@
    "compare_from_s": 5.405,
    "cortex": {
     "run": {
-     "ate_4dof": 0.1941,
-     "ate_se3": 0.1885,
-     "rpe_trans_m": 0.2707,
-     "rpe_rot_deg": 3.2861,
+     "ate_4dof": 0.1931,
+     "ate_se3": 0.1873,
+     "rpe_trans_m": 0.2941,
+     "rpe_rot_deg": 3.4179,
      "start_s": 0.005,
      "coverage_s": 104.65
     },
     "window": {
-     "ate_4dof": 0.1766,
-     "ate_se3": 0.1728,
-     "rpe_trans_m": 0.2598,
-     "rpe_rot_deg": 2.5851,
+     "ate_4dof": 0.1952,
+     "ate_se3": 0.1899,
+     "rpe_trans_m": 0.2883,
+     "rpe_rot_deg": 2.8245,
      "start_s": 5.405,
      "coverage_s": 99.25
     }
@@ -391,18 +391,18 @@
    "compare_from_s": 3.725,
    "cortex": {
     "run": {
-     "ate_4dof": 0.3183,
-     "ate_se3": 0.3172,
-     "rpe_trans_m": 0.6571,
-     "rpe_rot_deg": 5.3896,
+     "ate_4dof": 0.2057,
+     "ate_se3": 0.2046,
+     "rpe_trans_m": 0.4088,
+     "rpe_rot_deg": 2.8846,
      "start_s": 0.025,
      "coverage_s": 111.95
     },
     "window": {
-     "ate_4dof": 0.3037,
-     "ate_se3": 0.3023,
-     "rpe_trans_m": 0.6411,
-     "rpe_rot_deg": 5.4197,
+     "ate_4dof": 0.1979,
+     "ate_se3": 0.1967,
+     "rpe_trans_m": 0.4062,
+     "rpe_rot_deg": 2.3354,
      "start_s": 3.725,
      "coverage_s": 108.25
     }
@@ -438,18 +438,18 @@
    "compare_from_s": 2.88,
    "cortex": {
     "run": {
-     "ate_4dof": 0.4097,
-     "ate_se3": 0.4058,
-     "rpe_trans_m": 0.3559,
-     "rpe_rot_deg": 5.278,
+     "ate_4dof": 0.3073,
+     "ate_se3": 0.3027,
+     "rpe_trans_m": 0.2802,
+     "rpe_rot_deg": 4.2558,
      "start_s": -0.02,
      "coverage_s": 115.45
     },
     "window": {
-     "ate_4dof": 0.383,
-     "ate_se3": 0.3786,
-     "rpe_trans_m": 0.3325,
-     "rpe_rot_deg": 5.0888,
+     "ate_4dof": 0.3061,
+     "ate_se3": 0.3014,
+     "rpe_trans_m": 0.2734,
+     "rpe_rot_deg": 3.9757,
      "start_s": 2.93,
      "coverage_s": 112.5
     }
@@ -485,18 +485,18 @@
    "compare_from_s": 4.565,
    "cortex": {
     "run": {
-     "ate_4dof": 0.1849,
-     "ate_se3": 0.1809,
-     "rpe_trans_m": 0.2724,
-     "rpe_rot_deg": 2.2154,
+     "ate_4dof": 0.1737,
+     "ate_se3": 0.17,
+     "rpe_trans_m": 0.2504,
+     "rpe_rot_deg": 2.249,
      "start_s": 0.415,
      "coverage_s": 114.4
     },
     "window": {
-     "ate_4dof": 0.1878,
-     "ate_se3": 0.1839,
-     "rpe_trans_m": 0.2675,
-     "rpe_rot_deg": 2.0511,
+     "ate_4dof": 0.1775,
+     "ate_se3": 0.1734,
+     "rpe_trans_m": 0.2429,
+     "rpe_rot_deg": 1.8405,
      "start_s": 4.565,
      "coverage_s": 110.25
     }
