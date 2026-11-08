@@ -1,0 +1,119 @@
+---
+title: "The Pipeline Spec Format"
+description: The YAML format of a cortex pipeline spec (branes.pipeline/1) — sources, edges, nodes, schedule, system invariants, and delta specs — and the rules the pipeline_graph tool enforces.
+sidebar:
+  label: "Spec Format"
+---
+
+A pipeline spec is a YAML file under `docs/methodology/specs/`, with `schema: branes.pipeline/1`.
+It is a development artifact: the tool reads it and generates the site's pages, and no code in
+`sdk/` or `daemons/` parses it. All paths are relative to the repository root. The worked example
+is `docs/methodology/specs/openvins-msckf.yaml`.
+
+## Top level
+
+| Key | Required | Meaning |
+|---|---|---|
+| `schema` | yes | `branes.pipeline/1` |
+| `name` | yes | kebab-case; names the generated page and figure |
+| `title` | yes | the pipeline's name on the site |
+| `summary` | no | a paragraph: what the algorithm does |
+| `sources` | yes | the papers: `{id, cite}` each; every node cites one |
+| `edges` | yes | the data structures (below) |
+| `nodes` | yes | the transformations (below) |
+| `schedule` | yes | the call sequence (below) |
+| `system_invariants` | no | what the whole graph must satisfy (below) |
+| `base`, `unchanged_consumers` | delta only | see [Delta specs](#delta-specs) |
+
+## Edges: the data structures
+
+| Key | Meaning |
+|---|---|
+| `id` | the name nodes use in `reads` and `writes` |
+| `kind` | `data` (default); `input` (a sensor or a calibration: no node writes it); `state` (the shared mutable state); `output` (leaves the graph: no node reads it) |
+| `contents` | what it holds, with units |
+| `code`, `symbol` | the file and the type or function that implements it; the symbol must occur in the file |
+| `invariants` | a list of `{text, check}`; `check` is a [reference](#references). An invariant without a check is a gap |
+| `precision` | free text: how narrow a type this structure tolerates |
+| `deviations` | how the implementation departs from the paper; each is a gap |
+
+## Nodes: the transformations
+
+| Key | Meaning |
+|---|---|
+| `id`, `stage`, `title` | the node's name, its stage label (e.g. `S2`), its title |
+| `does` | one line: inputs → outputs |
+| `reads`, `writes` | edge ids. A node that reads and writes the same edge updates it in place |
+| `source` | `{ref, where}`: a `sources` id and the section or equations |
+| `pre`, `post` | the pre- and post-conditions, one per list item |
+| `code` | the `sdk/` header that implements it |
+| `bench` | a [reference](#references) to its stage bench |
+| `tests` | a list of references to its unit tests |
+| `status` | `implemented`, `partial`, `planned` (specified ahead of the code: the schedule may call it, and it is reported as a gap) or `missing` (deliberately left out: the schedule must not call it) |
+| `optional` | true for a node the algorithm can run without |
+| `precision` | `{policy, note}`: the node's arithmetic-type policy and what was measured |
+| `deviations` | how the implementation departs from the paper; each is a gap |
+
+## Schedule
+
+```yaml
+schedule:
+  driver: sdk/include/branes/sdk/msckf_backend.hpp   # the code that runs it
+  events:
+    - event: imu            # not `on:` — YAML reads a bare `on` as true
+      rate_hz: 200
+      steps:
+        - {call: propagate, when: initialized}
+```
+
+Each step is `{call, when?, foreach?, note?}`. Every node that isn't `missing` must be called, and
+a `missing` node must not be. A spec written before its code calls its `planned` nodes.
+
+## System invariants
+
+`{id, text, check?, status?, note?}`, where `status` is `holds`, `failing` or `unknown` (the
+default). A failing invariant is reported as a gap together with its note.
+
+## References
+
+A reference is `{file, symbol?, case?}`. The file must exist; a `symbol` must occur in its code as
+an identifier (a mention in a comment or a string literal doesn't count, so prefer a distinctive
+type or function name); a `case` must be the beginning of the name of one of its active `TEST_CASE`
+or `TEMPLATE_TEST_CASE` calls (a commented-out case doesn't count). A broken reference is an
+error, so a rename in the code fails the spec's check rather than leaving a stale page.
+
+## Delta specs
+
+A paper that changes an existing pipeline is written against it:
+
+```yaml
+schema: branes.pipeline/1
+base: openvins-msckf.yaml          # relative to this file; must be a full spec
+name: riekf-msckf
+title: Right-invariant MSCKF
+edges:
+  - {id: FilterState, op: replace, kind: state, contents: ...}
+nodes:
+  - {id: propagate, op: replace, ...}
+unchanged_consumers:
+  FilterState: {sensor_model: "reads only the calibration"}
+```
+
+- A delta has its own `name` and `title`; reusing the base's name is an error, since it would
+  overwrite the base's generated page.
+- Each edge or node entry carries `op`: `add` (the base must not have it), `replace` (it must) or
+  `remove` (it must). A replaced entry is written out in full.
+- `sources` are appended to the base's; a `schedule` or `system_invariants` given in the delta
+  replaces the base's.
+- **When a delta replaces or removes an edge, every base node that reads or writes it must be
+  replaced or removed in the delta, or named under `unchanged_consumers.<edge>.<node>` with the
+  reason it is unaffected.** Otherwise the tool reports an error.
+
+## YAML pitfalls the tool catches
+
+- **` #` starts a comment** in a plain scalar, so `(#474, #574)` would silently become `(#474,`.
+  The tool reports any string with unbalanced brackets. Quote strings that cite issues.
+- **A repeated key keeps only its last value** in plain YAML, so a second `deviations:` would erase
+  the first. The tool rejects a duplicate key.
+- **A comma splits a flow list,** so `pre: [at rest, or moving]` is two conditions. Use a block list
+  of quoted strings for prose.
