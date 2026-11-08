@@ -123,6 +123,10 @@ struct Args {
     bool ideal_tracks = false;
     branes::tools::IdealTrackOptions ideal;
     double camera_sigma_px = 0.0;  ///< the filter's visual R as a pixel σ on cam0; 0 = VioConfig's default
+    // --riekf-legacy: the R-IEKF EuRoC adapter's pieces run as before #608, to
+    // measure each one's effect.
+    branes::tools::InvariantBackendAdapter<T>::Options riekf{};
+    bool riekf_flag = false;
 };
 
 /// The estimator configuration the flags select (defaults otherwise).
@@ -264,7 +268,23 @@ Args parse(int argc, char** argv) {
                 throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
         } else if (v == "--detect-trackable-only")
             a.detect_trackable_only = true;
-        else if (v == "--gate-per-dof") {
+        else if (v == "--riekf-legacy") {
+            if (!next_is_value())
+                throw std::invalid_argument("--riekf-legacy needs a list of gate, init, zupt");
+            std::stringstream list(argv[++i]);
+            std::string piece;
+            while (std::getline(list, piece, ',')) {
+                if (piece == "gate")
+                    a.riekf.legacy_gate = true;
+                else if (piece == "init")
+                    a.riekf.legacy_init = true;
+                else if (piece == "zupt")
+                    a.riekf.legacy_zupt = true;
+                else
+                    throw std::invalid_argument("--riekf-legacy: unknown piece '" + piece + "' (gate, init, zupt)");
+            }
+            a.riekf_flag = true;
+        } else if (v == "--gate-per-dof") {
             a.gate_per_dof = true;
             a.gate_flag = true;
         } else if (v == "--observability-ledger") {
@@ -544,7 +564,9 @@ struct RunResult {
     std::size_t frames = 0;
     double mean_features = 0;
     double mean_pos_sigma_m = 0;           ///< mean filter-reported position σ (√trace/3 of the P pos block)
-    std::size_t zero_velocity_frames = 0;  ///< frames S8 held the velocity at zero (#600; MSCKF EuRoC runs)
+    std::size_t zero_velocity_frames = 0;  ///< frames S8 held the velocity at zero (#600; EuRoC runs)
+    std::string init_method;               ///< R-IEKF EuRoC: how the seed was resolved (#608)
+    double init_t_s = 0.0;                 ///< R-IEKF EuRoC: when (filter time)
     /// EuRoC: gauge-anchored pose NEES against the ground truth, split yaw / roll-pitch / position (#605).
     std::optional<branes::tools::PoseConsistencySummary> consistency;
 };
@@ -937,7 +959,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     }
 
     const auto cam0 = euroc_cam0();
-    Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam), frontend_of(args));
+    Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam, args.riekf), frontend_of(args));
     est.configure(cfg);
     est.activate();
 
@@ -995,6 +1017,13 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
     out.consistency = consistency.summary();
+    out.zero_velocity_frames = est.backend().zero_velocity_frames();
+    out.nis_normalized = safe_nis(est.backend().impl().nis_consistency());
+    {
+        const auto& d = est.backend().init_diagnostics();
+        out.init_method = args.riekf.legacy_init ? "legacy static window" : branes::sdk::to_string(d.method);
+        out.init_t_s = d.t_s;
+    }
     write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
@@ -1081,6 +1110,10 @@ int main(int argc, char** argv) {
                "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
                "                             significance A (default 0.05)\n"
                "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
+               "                             (both also select the R-IEKF's gate on EuRoC, #608)\n"
+               "  --riekf-legacy LIST        R-IEKF on EuRoC: run these pieces as before #608, to measure\n"
+               "                             each (comma-separated): gate (16 per dof), init (a static\n"
+               "                             150-sample window, v = 0, sigma 0.05), zupt (no S8)\n"
                "  --tracks klt|gt            EuRoC: the KLT front end (default) or ideal tracks\n"
                "                             synthesized from ground truth (#602)\n"
                "  --track-sigma PX           ideal tracks: Gaussian pixel noise per axis (default 1)\n"
@@ -1099,9 +1132,17 @@ int main(int argc, char** argv) {
         std::cerr << "vio_pipeline: --stage-types selects MSCKF stage types; it does not apply to --invariant\n";
         return 2;
     }
-    if (args.invariant && args.gate_flag) {
-        std::cerr << "vio_pipeline: --gate-alpha and --gate-per-dof select the MSCKF gate; they do not "
-                     "apply to --invariant\n";
+    if (args.invariant && args.gate_flag && args.source != "euroc") {
+        std::cerr << "vio_pipeline: with --invariant, --gate-alpha and --gate-per-dof apply to EuRoC runs only\n";
+        return 2;
+    }
+    if (args.invariant && args.gate_flag && args.riekf.legacy_gate) {
+        std::cerr << "vio_pipeline: --riekf-legacy gate replaces the gate --gate-alpha / --gate-per-dof select\n";
+        return 2;
+    }
+    if (args.riekf_flag && !(args.invariant && args.source == "euroc")) {
+        std::cerr << "vio_pipeline: --riekf-legacy selects R-IEKF EuRoC adapter pieces; it needs --invariant "
+                     "--source euroc\n";
         return 2;
     }
     if (args.ideal_tracks && args.video) {
@@ -1189,9 +1230,18 @@ int main(int argc, char** argv) {
                   << " m  (over-confidence: ATE/sigma = "
                   // Divide whenever σ is usable; let a non-finite σ propagate (don't mask a poisoned covariance as 0).
                   << (r.mean_pos_sigma_m != 0.0 ? r.ate_rms_m / r.mean_pos_sigma_m : 0.0) << ")";
-        if (!args.invariant)
-            std::cout << "\n  NIS (normalized): " << r.nis_normalized
-                      << "\n  zero-velocity   : " << r.zero_velocity_frames << " frames held at rest (S8)";
+        std::cout << "\n  NIS (normalized): " << r.nis_normalized;
+        if (args.invariant) {
+            const auto& o = args.riekf;
+            std::cout << "\n  legacy pieces   : "
+                      << (o.legacy_gate || o.legacy_init || o.legacy_zupt
+                              ? std::string(o.legacy_gate ? "gate " : "") + (o.legacy_init ? "init " : "") +
+                                    (o.legacy_zupt ? "zupt" : "")
+                              : std::string("none"))
+                      << "\n  init            : " << r.init_method << " at t = " << std::fixed << std::setprecision(3)
+                      << r.init_t_s << std::defaultfloat << std::setprecision(6) << " s";
+        }
+        std::cout << "\n  zero-velocity   : " << r.zero_velocity_frames << " frames held at rest (S8)";
         std::cout << "\n";
         if (args.video && !args.invariant)
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";

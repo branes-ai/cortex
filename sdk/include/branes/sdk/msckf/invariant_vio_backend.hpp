@@ -19,6 +19,8 @@
 #ifndef BRANES_SDK_MSCKF_INVARIANT_VIO_BACKEND_HPP
 #define BRANES_SDK_MSCKF_INVARIANT_VIO_BACKEND_HPP
 
+#include <branes/sdk/eval/consistency.hpp>
+#include <branes/sdk/eval/innovation_whiteness.hpp>
 #include <branes/sdk/msckf/msckf_invariant_backend.hpp>
 
 #include <algorithm>
@@ -76,6 +78,24 @@ public:
         have_last_ = false;
     }
 
+    /// Seed the nav state at `t` and hold the IMU sample in effect there (the
+    /// last one at or before `t`), so propagation resumes from `t` without
+    /// waiting for the next sample: an initializer that fires at an image time,
+    /// between IMU samples, otherwise loses that gap (#608).
+    void
+    set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t, const Vec3& hold_gyro, const Vec3& hold_accel) {
+        be_.set_nav(X, bg, ba, t);
+        last_imu_time_ = t;
+        have_last_ = true;
+        last_gyro_ = hold_gyro;
+        last_accel_ = hold_accel;
+    }
+
+    /// Replace the nav covariance with G·Gᵀ (MsckfInvariantBackend::seed_covariance).
+    void seed_covariance(const DynMat<T>& G) {
+        be_.seed_covariance(G);
+    }
+
     /// Turn on online extrinsic calibration: append a calibration block.
     void enable_calibration(std::vector<Calib> init, T rot_sigma, T trans_sigma) {
         be_.enable_calibration(std::move(init), rot_sigma, trans_sigma);
@@ -104,16 +124,8 @@ public:
     /// Image frame: propagate to frame time, bound the window, clone, ingest the
     /// observations, and fuse every feature whose track ended this frame.
     void process_camera(double t, std::span<const NormalizedObs<T>> obs) {
-        if (have_last_) {
-            const double dt = t - last_imu_time_;
-            if (dt < 0.0)
-                return;
-            if (dt > 0.0) {
-                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
-                be_.set_timestamp(t);
-                last_imu_time_ = t;
-            }
-        }
+        if (!propagate_to(t))
+            return;
         // Bound the window: marginalize (after fusing) the oldest clone(s) first.
         while (clone_times_.size() >= max_clones_)
             marginalize_oldest();
@@ -137,6 +149,21 @@ public:
             update_and_erase(id);
     }
 
+    /// S8: an image frame at rest. Propagate to its time and apply the v = 0
+    /// pseudo-measurement; the frame adds no clone, as in the body-frame
+    /// backend: without parallax its features would triangulate on a zero
+    /// baseline (#600). Returns true iff the state was updated.
+    bool process_still_frame(double t, T velocity_sigma) {
+        if (!propagate_to(t))
+            return false;
+        return be_.zero_velocity_update(velocity_sigma);
+    }
+
+    /// S8: the gyro bias at rest is the mean angular rate (σ per axis).
+    bool gyro_bias_update(const Vec3& mean_rate, T sigma) {
+        return be_.gyro_bias_update(mean_rate, sigma);
+    }
+
     // ── accessors (for the consistency harness) ──────────────────────────────
     [[nodiscard]] const typename Backend::Nav& nav() const noexcept {
         return be_.nav();
@@ -149,6 +176,14 @@ public:
     }
     [[nodiscard]] std::size_t num_clones() const noexcept {
         return be_.num_clones();
+    }
+    /// Every update's NIS, accumulated over the run (as MsckfBackend's, #264).
+    [[nodiscard]] const eval::ConsistencyAccumulator& nis_consistency() const noexcept {
+        return nis_;
+    }
+    /// Every update's signed innovation sum: zero-mean and whiteness (#280).
+    [[nodiscard]] const eval::InnovationWhitenessAccumulator& innovation_whiteness() const noexcept {
+        return innov_;
     }
 
 private:
@@ -171,6 +206,22 @@ private:
         return kNoClone;
     }
 
+    // Propagate to an image time on the held IMU sample (zero-order hold).
+    // False for a frame older than the filter clock.
+    bool propagate_to(double t) {
+        if (have_last_) {
+            const double dt = t - last_imu_time_;
+            if (dt < 0.0)
+                return false;
+            if (dt > 0.0) {
+                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                be_.set_timestamp(t);
+                last_imu_time_ = t;
+            }
+        }
+        return true;
+    }
+
     void update_and_erase(std::uint64_t id) {
         auto it = tracks_.find(id);
         if (it == tracks_.end())
@@ -189,6 +240,11 @@ private:
         }
         if (track.size() >= 2) {
             (void)be_.update(track);
+            const auto& n = be_.last_nis();
+            if (n.valid) {  // recorded whether or not the gate accepted the track
+                nis_.add(static_cast<double>(n.value), static_cast<int>(n.dof));
+                innov_.add(static_cast<double>(n.innov_sum), n.dof);
+            }
         }
         tracks_.erase(it);
     }
@@ -222,6 +278,8 @@ private:
     }
 
     Backend be_;
+    eval::ConsistencyAccumulator nis_{};
+    eval::InnovationWhitenessAccumulator innov_{};
     std::size_t max_clones_;
     std::vector<double> clone_times_;  // parallel to be_.clones()
     std::unordered_map<std::uint64_t, std::vector<ObsRec>> tracks_;

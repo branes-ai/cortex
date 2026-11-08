@@ -26,6 +26,8 @@
 #ifndef BRANES_SDK_MSCKF_MSCKF_INVARIANT_BACKEND_HPP
 #define BRANES_SDK_MSCKF_MSCKF_INVARIANT_BACKEND_HPP
 
+#include <branes/math/stats.hpp>
+#include <branes/sdk/msckf/camera_updater.hpp>
 #include <branes/sdk/msckf/covariance.hpp>
 #include <branes/sdk/msckf/invariant_propagator.hpp>
 #include <branes/sdk/msckf/invariant_update.hpp>
@@ -61,10 +63,15 @@ public:
         std::size_t max_clones = 11;         ///< sliding-window size
         T initial_sigma = T{1} / T{10};      ///< nav prior σ
         T normalized_sigma = T{1} / T{100};  ///< per-pixel (normalized) measurement σ
-        /// χ² innovation gate: reject a track when γ = rᵀS⁻¹r exceeds
-        /// `chi2_per_dof · (#projected rows)`. Loose default, matches the body path.
+        /// χ² innovation gate: reject a track when γ = rᵀS⁻¹r exceeds the line
+        /// `gate_rule` names for its k projected rows: `chi2_per_dof · k`
+        /// (per_dof, the default here), or the χ²₁₋α(k) quantile at `gate_alpha`
+        /// (chi2_quantile, the shipped MSCKF's rule since #481; the EuRoC adapter
+        /// selects it, #608).
         T chi2_per_dof = T{5};
         bool enable_gating = true;
+        GateRule gate_rule = GateRule::per_dof;
+        double gate_alpha = 0.05;  ///< chi2_quantile only: the significance, in (0,1)
         /// S5 Gauss-Newton refinement steps after the linear triangulation
         /// (`refine_invariant_feature`, #548). It converges in fewer on most
         /// tracks; low-parallax ones (a slow start) need up to ~20. 0 keeps
@@ -75,7 +82,13 @@ public:
     };
 
     explicit MsckfInvariantBackend(const Config& cfg = {})
-        : cfg_(cfg), prop_(cfg.noise, cfg_.gravity), cov_(cfg.initial_sigma, Nav::kDim) {}
+        : cfg_(cfg), prop_(cfg.noise, cfg_.gravity), cov_(cfg.initial_sigma, Nav::kDim) {
+        if (cfg_.enable_gating && cfg_.gate_rule == GateRule::chi2_quantile &&
+            !(cfg_.gate_alpha > 0.0 && cfg_.gate_alpha < 1.0))
+            throw std::invalid_argument("MsckfInvariantBackend: gate_alpha must be in (0,1) when gating");
+        if (cfg_.enable_gating && cfg_.gate_rule == GateRule::per_dof && !(cfg_.chi2_per_dof > T{0}))
+            throw std::invalid_argument("MsckfInvariantBackend: chi2_per_dof must be positive when gating");
+    }
 
     // ── accessors ────────────────────────────────────────────────────
     [[nodiscard]] const Nav& nav() const noexcept {
@@ -105,12 +118,33 @@ public:
     [[nodiscard]] DynMat<T> covariance() const {
         return cov_.covariance();
     }
+    /// The innovation telemetry of the last `update`: NIS γ = rᵀS⁻¹r, its dof,
+    /// and the signed sum Σ r_k / σ for the whiteness test, as the body-frame
+    /// CameraUpdater reports them (#264). Invalid when the last update stopped
+    /// before S6d (no triangulation, no rows) or S was not positive-definite;
+    /// valid whether or not the gate then accepted the track (#608).
+    [[nodiscard]] const NisSample<T>& last_nis() const noexcept {
+        return last_nis_;
+    }
     void set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t = 0.0) {
         nav_.X = X;
         nav_.bg = bg;
         nav_.ba = ba;
         nav_.timestamp = t;
     }
+    /// Replace the nav covariance with G·Gᵀ (G is kDim × kDim, in this filter's
+    /// error state: δθ, ν, ρ, δb_g, δb_a). Seeds the prior from another
+    /// filter's, mapped into the right-invariant error (#608). Only before any
+    /// clone or calibration block exists.
+    void seed_covariance(const DynMat<T>& G) {
+        if (!clones_.empty() || !calib_.empty())
+            throw std::logic_error("seed_covariance must precede any clone or calibration block");
+        if (G.rows != Nav::kDim || G.cols != Nav::kDim)
+            throw std::invalid_argument("seed_covariance: G must be kDim x kDim");
+        cov_ = Cov(T{1}, Nav::kDim);
+        cov_.transform(G);
+    }
+
     /// Set the filter clock. `propagate` advances it by T(dt), which a narrow T
     /// rounds; a driver that holds the double sample times resets it to them.
     void set_timestamp(double t) noexcept {
@@ -217,6 +251,7 @@ public:
     /// (S6e), and retract nav + clones in the right-invariant box-plus. Returns
     /// true iff the state was updated.
     bool update(const InvariantTrack<T>& obs) {
+        last_nis_ = NisSample<T>{};
         if (obs.size() < 2 || clones_.empty())
             return false;
         // Keep fixed projection extrinsics separate from "estimated calibration columns" fallback.
@@ -244,12 +279,43 @@ public:
                 H(i, j) = proj.H_x[i * d + j];
         // S6c_compression: the identity — one feature per update leaves 2m − 3
         // rows, fewer than the joint dimension.
-        // S6d_gating
+        // S6d_gating, with the NIS reported whether or not the gate accepts
         const T r2 = cfg_.normalized_sigma * cfg_.normalized_sigma;
         if (!gate(H, proj.r, r2))
             return false;
         // S6e_ekf_update
         return ekf_update(H, proj.r, r2);
+    }
+
+    /// S8: the v = 0 pseudo-measurement in the right-invariant error. The world
+    /// velocity is v = Exp(δθ)·v̂ + ν ≈ v̂ − [v̂]×δθ + ν, so H_θ = −[v̂]×, H_ν = I
+    /// and r = −v̂, σ² per axis. Returns true iff the state was updated.
+    bool zero_velocity_update(T velocity_sigma) {
+        const std::size_t d = dim();
+        DynMat<T> H(3, d);
+        const auto vx = math::lie::detail::hat(nav_.X.velocity());
+        const Vec3& v = nav_.X.velocity();
+        std::vector<T> r(3);
+        for (std::size_t i = 0; i < 3; ++i) {
+            for (std::size_t j = 0; j < 3; ++j)
+                H(i, Nav::kTheta + j) = -vx(i, j);
+            H(i, Nav::kVel + i) = T{1};
+            r[i] = -v[i];
+        }
+        return ekf_update(H, r, velocity_sigma * velocity_sigma);
+    }
+
+    /// S8: the b_g = ω̄ pseudo-measurement at rest (the bias is additive in
+    /// this error state): H selects δb_g, r = ω̄ − b̂_g, σ² per axis.
+    bool gyro_bias_update(const Vec3& mean_rate, T sigma) {
+        const std::size_t d = dim();
+        DynMat<T> H(3, d);
+        std::vector<T> r(3);
+        for (std::size_t i = 0; i < 3; ++i) {
+            H(i, Nav::kBg + i) = T{1};
+            r[i] = mean_rate[i] - nav_.bg[i];
+        }
+        return ekf_update(H, r, sigma * sigma);
     }
 
     static constexpr std::size_t kCloneDim = 6;
@@ -279,12 +345,24 @@ private:
     /// S6d: χ² innovation gate. A single bad/low-parallax track can otherwise
     /// drive a large wrong correction. γ = rᵀS⁻¹r; reject if ill-conditioned or
     /// too large. Always passes when gating is disabled.
-    [[nodiscard]] bool gate(const DynMat<T>& H, const std::vector<T>& r, T r2) const {
-        if (!cfg_.enable_gating)
-            return true;
+    [[nodiscard]] bool gate(const DynMat<T>& H, const std::vector<T>& r, T r2) {
         T gamma = T{0};
         const bool ok = cov_.mahalanobis(H, std::span<const T>{r}, r2, gamma);
-        return ok && !(gamma > cfg_.chi2_per_dof * static_cast<T>(H.rows));
+        using std::sqrt;  // ADL: a non-IEEE T supplies its own
+        T isum{0};
+        for (const T v : r)
+            isum += v;
+        last_nis_ = NisSample<T>{gamma, H.rows, ok, isum / sqrt(r2)};
+        if (!cfg_.enable_gating)
+            return true;
+        return ok && !(gamma > gate_line(H.rows));
+    }
+
+    /// The gate's acceptance line for k projected rows (as CameraUpdater's).
+    [[nodiscard]] T gate_line(std::size_t k) const {
+        if (cfg_.gate_rule == GateRule::per_dof)
+            return cfg_.chi2_per_dof * static_cast<T>(k);
+        return static_cast<T>(math::chi_square_quantile(1.0 - cfg_.gate_alpha, k));
     }
 
     /// S6e: the EKF update and the right-invariant retraction. A filter must
@@ -350,6 +428,7 @@ private:
     std::vector<Clone> clones_;
     std::vector<Calib> calib_;
     Cov cov_;
+    NisSample<T> last_nis_{};
 };
 
 }  // namespace branes::sdk::msckf

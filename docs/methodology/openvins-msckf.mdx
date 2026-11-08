@@ -171,7 +171,7 @@ on image (20 Hz):
 | NIS ≈ dim(measurement) per update | `tests/sdk/consistency.cpp` “NEES/NIS flag over- and under-confidence…” | unknown |
 | innovations zero-mean and white | `tests/sdk/innovation_whiteness.cpp` “i.i.d. N(0,1) innovations read as zero-mean and white…” | unknown |
 | no information gained along global yaw and translation (the 4-D unobservable space) | `tests/tools/observability_ledger.cpp` “Observability ledger: on the synthetic world the leak is yaw…” | failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608) |
-| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — the MSCKF fails all three conditions (#605) |
+| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — the MSCKF fails all three conditions as recorded (#605); conditions 1 and 2 are confounded by the χ² gate (#613) |
 | 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences | `scripts/euroc-baseline.sh` | failing — median 2.8× OpenVINS mono (#595) |
 
 ## Gap report
@@ -198,5 +198,5 @@ What `pipeline_graph.py gaps` reports for this spec (22 items):
 - node 'online_calib': deviates from the paper: extrinsics only (VioConfig::estimate_extrinsics, off by default); no intrinsics; no time offset (#332)
 - system invariant 'nees': failing — the body-frame filter is over-confident on EuRoC (#212, #605)
 - system invariant 'gauge': failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608)
-- system invariant 'consistency_gate': failing — the MSCKF fails all three conditions (#605)
+- system invariant 'consistency_gate': failing — the MSCKF fails all three conditions as recorded (#605); conditions 1 and 2 are confounded by the χ² gate (#613)
 - system invariant 'accuracy': failing — median 2.8× OpenVINS mono (#595)
