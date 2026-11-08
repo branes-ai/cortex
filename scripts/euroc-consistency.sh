@@ -65,7 +65,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h | --help)
-            sed -n '2,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         -*)
@@ -109,6 +109,14 @@ if [ "$build" = 1 ]; then
 fi
 for t in vio_pipeline traj_eval; do
     [ -x "$BIN/$t" ] || { echo "euroc-consistency: $BIN/$t is missing (build it, or drop --no-build)" >&2; exit 2; }
+done
+# A missing dataset is a setup error, not a diverged run: check every
+# sequence before running any, so --record can never store it as a result.
+for s in "${seqs[@]}"; do
+    if [ -z "$(find "$DATASET_ROOT" -type d -name mav0 -path "*/$s/*" -not -path '*__MACOSX*' 2>/dev/null | head -1)" ]; then
+        echo "euroc-consistency: no mav0 for $s under $DATASET_ROOT (set CORTEX_EUROC_ROOT)" >&2
+        exit 2
+    fi
 done
 OUT="$OUT_ROOT/$backend"
 mkdir -p "$OUT"
