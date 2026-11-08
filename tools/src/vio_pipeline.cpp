@@ -47,6 +47,7 @@
 #include <branes/tools/ideal_tracks.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
 #include <branes/tools/observability_ledger.hpp>
+#include <branes/tools/pose_consistency.hpp>
 #include <branes/tools/stage_type_presets.hpp>
 #include <branes/tools/tum_trajectory.hpp>
 
@@ -544,6 +545,8 @@ struct RunResult {
     double mean_features = 0;
     double mean_pos_sigma_m = 0;           ///< mean filter-reported position σ (√trace/3 of the P pos block)
     std::size_t zero_velocity_frames = 0;  ///< frames S8 held the velocity at zero (#600; MSCKF EuRoC runs)
+    /// EuRoC: gauge-anchored pose NEES against the ground truth, split yaw / roll-pitch / position (#605).
+    std::optional<branes::tools::PoseConsistencySummary> consistency;
 };
 
 ev::SyntheticConfig<T> robot_preset(const std::string& r) {
@@ -828,6 +831,7 @@ bool run_euroc(const Args& args,
     if (args.ideal_tracks)
         ideal.emplace(gt, cam0.intrinsics, branes::math::lie::SE3<T>(cam0.R_imu_cam, cam0.p_imu_cam), args.ideal);
     std::size_t ideal_obs = 0;
+    branes::tools::PoseConsistency<T> consistency(gt);
 
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
@@ -862,6 +866,12 @@ bool run_euroc(const Args& args,
         traj.push_back(sp);
         ++n;
         sigma_sum += pos_sigma(est.backend().state().covariance(), msckf::State<T>::kPos);
+        consistency.add(t,
+                        sp.pose,
+                        est.backend().state().covariance(),
+                        msckf::State<T>::kTheta,
+                        msckf::State<T>::kPos,
+                        branes::tools::PoseErrorConvention::body_right);
         const auto tf = est.tracked_features();
         feat_total += ideal ? ideal_obs : tf.size();
         const double nis = safe_nis(est.backend().nis_consistency());
@@ -888,6 +898,7 @@ bool run_euroc(const Args& args,
     out.nis_normalized = safe_nis(est.backend().nis_consistency());
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
     out.zero_velocity_frames = est.backend().zero_velocity_frames();
+    out.consistency = consistency.summary();
     write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
@@ -907,7 +918,7 @@ bool run_euroc(const Args& args,
 bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out, std::ofstream* stream) {
     using Adapter = branes::tools::InvariantBackendAdapter<T>;
     using Estimator = branes::sdk::VioEstimator<T, Adapter>;
-    constexpr std::size_t kInvPos = 6;  // invariant nav error-state: δθ(0) δv(3) δp(6)
+    constexpr std::size_t kInvTheta = 0, kInvPos = 6;  // invariant nav error-state: δθ(0) δv(3) δp(6)
 
     std::vector<ImuMeasurement<T>> imu;
     std::vector<euroc::ImageEntry> images;
@@ -930,6 +941,14 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     est.configure(cfg);
     est.activate();
 
+    // Ideal tracks (#602, #605): the same ground-truth observations the MSCKF run
+    // takes, handed to the adapter in pixels in place of the KLT front end.
+    std::optional<branes::tools::IdealTracks<T>> ideal;
+    if (args.ideal_tracks)
+        ideal.emplace(gt, cam0.intrinsics, branes::math::lie::SE3<T>(cam0.R_imu_cam, cam0.p_imu_cam), args.ideal);
+    std::size_t ideal_obs = 0;
+    branes::tools::PoseConsistency<T> consistency(gt);
+
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
     double sigma_sum = 0;
@@ -942,13 +961,19 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
             est.feed_imu(std::span<const ImuMeasurement<T>>{imu.data() + imu_idx, end - imu_idx});
             imu_idx = end;
         }
-        branes::cv::OwnedImage<std::uint8_t> img;
-        try {
-            img = branes::cv::read_png(images[f].path);
-        } catch (const std::exception&) {
-            continue;
+        if (ideal) {
+            const auto obs = ideal->observe(t);
+            ideal_obs = obs.size();
+            est.backend().process_camera(t, std::span<const FrontendObservation<T>>{obs});
+        } else {
+            branes::cv::OwnedImage<std::uint8_t> img;
+            try {
+                img = branes::cv::read_png(images[f].path);
+            } catch (const std::exception&) {
+                continue;
+            }
+            est.feed_image(t, std::as_const(img).view());
         }
-        est.feed_image(t, std::as_const(img).view());
         if (!est.backend().initialized())
             continue;
         ev::StampedPose<T> sp;
@@ -956,8 +981,10 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         sp.pose = est.current_pose();
         traj.push_back(sp);
         ++n;
-        sigma_sum += pos_sigma(est.backend().covariance(), kInvPos);
-        feat_total += est.num_tracked_features();
+        const auto P = est.backend().covariance();
+        sigma_sum += pos_sigma(P, kInvPos);
+        consistency.add(t, sp.pose, P, kInvTheta, kInvPos, branes::tools::PoseErrorConvention::right_invariant);
+        feat_total += ideal ? ideal_obs : est.num_tracked_features();
         if (stream && stream->is_open()) {
             const Vec3 ep = est.current_pose().translation();
             *stream << "{\"type\":\"est\",\"t\":" << t << ",\"p\":" << v3str(ep)
@@ -967,6 +994,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     out.frames = n;
     out.mean_features = n ? static_cast<double>(feat_total) / static_cast<double>(n) : 0;
     out.mean_pos_sigma_m = n ? sigma_sum / static_cast<double>(n) : 0;
+    out.consistency = consistency.summary();
     write_tum(args, traj);
     const auto assoc = ev::associate<T>(traj, gt, 0.02);
     if (assoc.estimated.empty()) {
@@ -976,6 +1004,39 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
     }
     out.ate_rms_m = ev::ate_rmse<T>(assoc.estimated, assoc.reference);
     return true;
+}
+
+/// Print the EuRoC pose NEES split (#605) and, with --out, write consistency.json:
+/// the split, the world-yaw σ over the run, and (with --observability-ledger)
+/// the ledger's spurious yaw information and its S6 / S2 shares.
+void report_consistency(const RunResult& r, const RunTaps& taps, const Args& args) {
+    if (!r.consistency)
+        return;
+    const auto& c = *r.consistency;
+    std::cout << "  pose NEES       : roll/pitch " << c.nees_rp << " (target 2), yaw " << c.nees_yaw
+              << " (target 1), position " << c.nees_pos << " (target 3); " << c.frames << " frames"
+              << (c.not_pd ? ", " + std::to_string(c.not_pd) + " with a non-PD covariance" : std::string{})
+              << "\n  world yaw sigma : " << c.yaw_sigma_first << " -> min " << c.yaw_sigma_min << " -> "
+              << c.yaw_sigma_last << " rad; |yaw error| last " << c.yaw_err_last << ", max " << c.yaw_err_max
+              << " rad\n";
+    if (args.out.empty())
+        return;
+    std::ofstream f(args.out + "/consistency.json");
+    if (!f) {
+        std::cerr << "vio_pipeline: cannot write " << args.out << "/consistency.json\n";
+        return;
+    }
+    f << "{\"backend\":\"" << (args.invariant ? "riekf" : "msckf") << "\",\"pose\":";
+    c.write_json(f);
+    if (taps.ledger) {
+        using branes::tools::LeakSource;
+        const auto& t = taps.ledger->totals();
+        const auto share = [&](LeakSource s) { return t.share[static_cast<std::size_t>(s)].yaw; };
+        f << std::setprecision(std::numeric_limits<double>::max_digits10) << ",\"ledger\":{\"info_yaw\":" << t.info.yaw
+          << ",\"share_s6_mean_shift\":" << share(LeakSource::S6_mean_shift)
+          << ",\"share_s2\":" << share(LeakSource::S2_propagation) << ",\"closure_max\":" << t.closure_max << '}';
+    }
+    f << "}\n";
 }
 
 }  // namespace
@@ -1020,7 +1081,7 @@ int main(int argc, char** argv) {
                "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
                "                             significance A (default 0.05)\n"
                "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
-               "  --tracks klt|gt            EuRoC MSCKF: the KLT front end (default) or ideal tracks\n"
+               "  --tracks klt|gt            EuRoC: the KLT front end (default) or ideal tracks\n"
                "                             synthesized from ground truth (#602)\n"
                "  --track-sigma PX           ideal tracks: Gaussian pixel noise per axis (default 1)\n"
                "  --camera-sigma-px PX       the filter's visual measurement sigma, cam0 pixels\n"
@@ -1047,9 +1108,8 @@ int main(int argc, char** argv) {
         std::cerr << "vio_pipeline: --tracks gt does not write the per-frame tracks --video overlays\n";
         return 2;
     }
-    if (args.ideal_tracks && (args.invariant || args.source != "euroc")) {
-        std::cerr << "vio_pipeline: --tracks gt replaces the EuRoC front end of the MSCKF run; it needs "
-                     "--source euroc and no --invariant\n";
+    if (args.ideal_tracks && args.source != "euroc") {
+        std::cerr << "vio_pipeline: --tracks gt replaces the EuRoC front end; it needs --source euroc\n";
         return 2;
     }
     if (args.invariant && args.sqrt_covariance) {
@@ -1137,6 +1197,7 @@ int main(int argc, char** argv) {
             std::cout << "  overlay:  node docs-site/scripts/gen-overlay.mjs " << args.out << "\n";
         report_capture(rec.get(), args.capture_dir, args.live_assert);
         report_ledger(*taps, args);
+        report_consistency(r, *taps, args);
         return 0;
     }
 

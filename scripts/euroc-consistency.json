@@ -1,0 +1,8 @@
+{
+ "_about": "The EuRoC consistency gate (#605): scripts/euroc-consistency.sh. The bounds were set on 2026-11-07, before any estimator was tuned against them: a run diverges at 10x OpenVINS mono's window 4-DoF ATE (the threshold #602 used), and a yaw ANEES of 3 is three times the 1-DoF target. 'backends' holds each backend's recorded results (--record).",
+ "bounds": {
+  "diverge_ratio": 10,
+  "yaw_nees_max": 3
+ },
+ "backends": {}
+}
