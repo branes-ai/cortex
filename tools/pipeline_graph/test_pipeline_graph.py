@@ -240,6 +240,44 @@ class PipelineGraphTest(unittest.TestCase):
         _, _, rep = self.analyse("? [schema]\n: x\n" + BASE)
         self.assertTrue(any("unhashable key" in e for e in rep.errors), rep.errors)
 
+    def test_a_decision_without_a_reason_is_a_gap(self) -> None:
+        text = edit(BASE, "    does: propagate the state\n",
+                    "    does: propagate the state\n"
+                    "    decisions:\n"
+                    "      - {question: input over an interval, chosen: the end sample held,\n"
+                    "         alternatives: [both samples (RK4)]}\n"
+                    "      - {question: integrator, chosen: RK4, reason: the paper's choice}\n")
+        spec, delta, rep = self.analyse(text)
+        self.assertEqual(rep.errors, [])
+        self.assertIn("node 'predict': decision 'input over an interval' has no recorded reason "
+                      "(chosen: the end sample held)", rep.gaps)
+        self.assertFalse(any("integrator" in g for g in rep.gaps))
+        page = pg.page_source(spec, delta, rep)
+        self.assertIn("the end sample held over both samples (RK4). **no reason recorded**", page)
+
+        bad = edit(BASE, "    does: propagate the state\n",
+                   "    does: propagate the state\n    decisions:\n      - {question: integrator}\n")
+        _, _, rep = self.analyse(bad)
+        self.assertTrue(any("needs a question and what was chosen" in e for e in rep.errors), rep.errors)
+
+    def test_a_bound_needs_its_derivation_and_a_consumer(self) -> None:
+        good = BASE + ("system_invariants:\n"
+                       "  - id: closure\n"
+                       "    text: S2 closes on the truth\n"
+                       "    bound: {value: 1.1e-4 rad, consumer: correct, derivation: a tenth of 0.5 px}\n")
+        spec, delta, rep = self.analyse(good)
+        self.assertEqual(rep.errors, [])
+        self.assertIn("(bound 1.1e-4 rad, from what **correct** resolves: a tenth of 0.5 px)",
+                      pg.page_source(spec, delta, rep))
+        cases = {
+            "needs a value and its derivation": good.replace(", derivation: a tenth of 0.5 px", ""),
+            "consumer must name the node": good.replace("consumer: correct", "consumer: nobody"),
+        }
+        for want, text in cases.items():
+            with self.subTest(want):
+                _, _, rep = self.analyse(text)
+                self.assertTrue(any(want in e for e in rep.errors), rep.errors)
+
     def test_the_figure_draws_an_in_place_update_as_one_arrow(self) -> None:
         spec, _, _ = self.analyse(BASE)
         dot = pg.dot_source(spec)

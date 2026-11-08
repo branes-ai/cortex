@@ -142,6 +142,10 @@ edges:
     invariants:
       - text: NIS ~ χ²(dof) over windows
         check: {file: sdk/include/branes/sdk/eval/invariants/stream_checks.hpp, symbol: check_chi2_window}
+        bound:
+          value: "χ²₁₋α(dof) per update, α = 0.05"
+          consumer: msckf_update
+          derivation: "the S6d gate rejects above it, so a consistent filter loses α of its inliers and no more"
 
 # ── The transformations ──────────────────────────────────────────────────────
 # Every node has the shape (state, inputs, params) → (state′, diagnostics): it
@@ -228,6 +232,10 @@ nodes:
     status: implemented
     deviations:
       - the prior is an isotropic σ = 0.1 with no tilt-bias correlation, whatever the init method (#609)
+    decisions:
+      - question: the prior P₀
+        chosen: "isotropic σ = 0.1 on every core state"
+        alternatives: ["the tilt–accelerometer-bias correlation an IMU window implies (#609)"]
 
   - id: propagate
     stage: S2
@@ -249,8 +257,24 @@ nodes:
       - {file: tests/sdk/msckf_stages.cpp, case: "S2_propagation and S3_augmentation"}
     status: implemented
     precision: {policy: "T2 (msckf/stage_types.hpp)", note: "posit<32,2> passes the bench; P must be written in double on EuRoC (#532)"}
+    decisions:
+      - question: the IMU input over each interval
+        chosen: "the sample that ends it, held constant (#186)"
+        alternatives: ["the previous sample held", "both samples, interpolated and integrated by RK4 (geneva2020)"]
+      - question: the mean's integrator
+        chosen: one Euler step, the specific force rotated with the attitude at the start of the interval
+        alternatives: [midpoint, RK4]
+      - question: the transition Φ
+        chosen: first order, I + A·dt
+        alternatives: ["closed form", "a higher-order series"]
+        reason: "#471: a higher-order Φ leaks more yaw in the body-frame error state"
+      - question: the discrete process noise Q_d
+        chosen: "diagonal, σ²·dt per state"
+        alternatives: ["G·Q·Gᵀ with the θ–v–p correlations (geneva2020)"]
+        reason: "#212's S2 probe found the full Q_d did not change the over-confidence (docs/pipeline/stages/s2-imu-propagation.mdx)"
     deviations:
       - "no first-estimates Jacobians on Φ (FEJ, #606)"
+      - "the sample that ends each interval is held over it: a 2.5 ms IMU–camera skew, NIS 1.1–1.9 on the fast sequences (#616)"
 
   - id: augment
     stage: S3
@@ -317,6 +341,15 @@ nodes:
     deviations:
       - "no first-estimates Jacobians on H (FEJ, #606); the yaw leak is S6 moving the mean (95–99%, #480)"
       - S6c compression is the identity (one feature per update leaves 2m − 3 rows)
+    decisions:
+      - question: the S6d gate line
+        chosen: "the χ²₁₋α(dof) quantile, α = 0.05"
+        alternatives: ["5 per dof (before #481)"]
+        reason: "#481: it admits 1 − α of consistent inliers at every dof; the per-dof line admitted most 2σ-biased short tracks"
+      - question: S6c compression
+        chosen: none (the identity)
+        alternatives: ["QR to n + 1 rows (geneva2020)"]
+        reason: "one feature per update leaves 2m − 3 rows, fewer than the state dimension, so QR would not shrink it"
 
   - id: marginalize
     stage: S9
