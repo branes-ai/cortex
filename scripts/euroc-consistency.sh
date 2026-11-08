@@ -240,6 +240,7 @@ def g(x, w=7, p=2):
     return f"{x:{w}.{p}f}" if fin(x) and x < 1e4 else f"{x:{w}.0e}" if fin(x) else f"{'inf':>{w}}"
 
 
+unavailable = sorted(k for k, v in runs.items() if v["status"] == "eval_failed")
 print(f"\nConsistency gate, backend {backend}: window 4-DoF ATE / OpenVINS mono; ideal tracks of S px,")
 print("R matched to S or the default; median over seeds. Yaw sigma ratio = min / anchor (target 1);")
 print("yaw and roll/pitch ANEES are informational.")
@@ -249,16 +250,19 @@ for sg in sigmas:
     for s in seqs:
         m = [ratio(f"{s}/{sg}/{sd}/matched") for sd in seeds]
         d = [ratio(f"{s}/{sg}/{sd}/default") for sd in seeds]
-        dv = sum(1 for x in m if x >= B["diverge_ratio"])
+        keys = [f"{s}/{sg}/{sd}/matched" for sd in seeds]
+        na = sum(1 for k in keys if k in unavailable)  # unscored: neither diverged nor not
+        dv = sum(1 for k in keys if k not in unavailable and ratio(k) >= B["diverge_ratio"])
+        dcol = f"{dv}+{na}?" if na else str(dv)  # "+n?": n runs could not be scored
         ny = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_yaw"] for sd in seeds])
         nr = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_rp"] for sd in seeds])
         yr = med([runs[f"{s}/{sg}/{sd}/matched"]["yaw_sigma_ratio"] for sd in seeds])
-        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dv:>6}/{len(seeds)}{g(yr, 14, 3)}{g(ny, 9, 1)}{g(nr, 9, 0)}")
+        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dcol:>6}/{len(seeds)}{g(yr, 14, 3)}{g(ny, 9, 1)}{g(nr, 9, 0)}")
 
 verdict = {}
-unavailable = sorted(k for k, v in runs.items() if v["status"] == "eval_failed")
 diverged = sorted(k for k in runs if k.endswith("/matched") and k not in unavailable and ratio(k) >= B["diverge_ratio"])
-verdict["no_divergence"] = not diverged
+matched_unavailable = [k for k in unavailable if k.endswith("/matched")]
+verdict["no_divergence"] = not diverged and not matched_unavailable
 beats = {}
 for sg in sigmas:
     m = med([ratio(f"{s}/{sg}/{sd}/matched") for s in seqs for sd in seeds])
@@ -275,7 +279,9 @@ yaw_ratio = statistics.median([runs[k]["yaw_sigma_ratio"] if runs[k]["yaw_sigma_
 verdict["no_yaw_collapse"] = yaw_ratio >= B["yaw_sigma_ratio_min"]
 passed = all(verdict.values()) and not unavailable
 
-print(f"\n  1. no divergence (matched ratio < {B['diverge_ratio']}x): {'PASS' if verdict['no_divergence'] else 'FAIL'}"
+c1 = "PASS" if verdict["no_divergence"] else "FAIL" if diverged else "UNAVAILABLE"
+print(f"\n  1. no divergence (matched ratio < {B['diverge_ratio']}x): {c1}"
+      + (f" — {len(matched_unavailable)} matched run(s) unscored" if matched_unavailable else "")
       + (f" — {len(diverged)} of {sum(1 for k in runs if k.endswith('/matched'))} diverged: "
          + ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "") if diverged else ""))
 print(f"  2. matched R beats the default R (median ratio): {'PASS' if verdict['matched_beats_default'] else 'FAIL'} — "
