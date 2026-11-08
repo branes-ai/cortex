@@ -1,0 +1,126 @@
+---
+title: "From a Paper to a Transformation Graph"
+description: How cortex takes an algorithm from a research paper or blog post to a transformation graph — its transformations, the data structures they exchange, the call schedule and the invariants — before writing code, and uses that graph as the roadmap for implementation, verification and mixed-precision study.
+sidebar:
+  label: "Methodology: What, Why, How"
+---
+
+This section describes **how an algorithm enters cortex**: as a transformation graph extracted
+from the paper, before any implementation. It is the methodology of
+[epic #610](https://github.com/branes-ai/cortex/issues/610). It sits upstream of the
+[stage-bench debugging](../debugging/overview.mdx) of epic #444, which tests the transformations
+one at a time, and of the [stage contracts](../pipeline/overview.mdx) of the VIO pipeline.
+
+## What: the graph is the roadmap
+
+A paper describes an estimator as equations and prose. A **transformation graph** restates it as:
+
+- **nodes:** 5 to 10 transformations, each of the shape
+  *(state, inputs, params) → (state′, diagnostics)*: it mutates only the state it is given and
+  returns what happened;
+- **edges:** the data structures the transformations exchange in memory, each with its contents,
+  its type in the code and the invariants a validator checks;
+- **a schedule:** which transformations run on which event (an IMU sample, an image), in what order
+  and under what condition;
+- **system invariants:** what the whole graph must satisfy, such as NEES ≈ dim(state), white
+  innovations, no information along the unobservable directions.
+
+The graph is written down as a **pipeline spec**, a YAML file under
+`docs/methodology/specs/` ([format](spec-format.mdx)). A tool, `tools/pipeline_graph`, lints it,
+resolves every reference to code and tests, renders the page and figure for this site, and reports
+the gaps. The worked example is [the OpenVINS MSCKF](openvins-msckf.mdx).
+
+## Why: the VIO pipeline was decomposed after the fact
+
+cortex built its VIO filter the other way round:
+
+| When | What | Issue |
+|---|---|---|
+| 2026-05-25 | The MSCKF backend implemented as one class, from the MSCKF and OpenVINS papers | #186 |
+| 2026-06-04 | The S0–S10 stage contracts written down, while debugging over-confidence | #283, #212 |
+| 2026-10-08 | The stages extracted from the class as transformations | #452 |
+| 2026-10 | Stage benches, fixture capture, live assertion | #444–#447 |
+
+The decomposition was retrofitted to debug a running filter. What that cost:
+
+- **Months of whole-filter debugging.** The over-confidence was chased through the assembled filter
+  (#212), and three results that looked solid turned out to be artifacts of the test setup
+  ([the storyline](../first-principles/storyline.mdx)).
+- **An implicit graph.** The call sequence lived in member functions, and the data structures had
+  no stated invariants and no single place saying which transformation reads or writes them.
+- **A second paper integrated by hand, with pieces missing.** The right-invariant EKF changes one
+  data structure: the error convention of the filter state. Every transformation that reads that
+  state is affected. Its EuRoC harness replaced propagation, augmentation and the update, but ran a
+  different initialization, a different gate and no zero-velocity update (#608), and the accuracy
+  gap that followed was the harness's, not the estimator's (#605). Written as a change to the
+  graph, the affected transformations are listed before any code is written.
+
+## How: five steps
+
+1. **Extract the graph from the paper.** Write the spec: every node with the equations and section
+   it comes from, its pre- and post-conditions and the failure modes the literature reports; every
+   edge with its contents, units, manifold and invariants; the schedule; the system invariants. A
+   paper that modifies an existing pipeline is a **delta spec** on it (below).
+2. **Contract the edges.** Give each data structure a validator before implementing any node. The
+   checks live in `sdk/include/branes/sdk/eval/invariants/`; the spec points at them, and an
+   invariant without one is reported as a gap.
+3. **Stub and bench the nodes.** Each node becomes an `sdk/` transformation header, a
+   [stage bench](../debugging/stage-benches.mdx) with its oracle (finite-difference Jacobians, a
+   synthetic closed form, a captured fixture) and a sensitivity sweep. The spec records the header,
+   the bench and the unit tests.
+4. **Compose against the schedule.** The driver calls the nodes in the order the schedule gives.
+   [Composition benches and live assertion](../debugging/capture-and-composition.mdx) test the
+   composed loop. *Checking a run's stage-tap trace against the schedule is planned in #610.*
+5. **Verify the system, then study precision.** The system invariants on synthetic data, then on
+   real data against a reference ([the EuRoC baseline and consistency gate](../benchmarks/euroc-baseline.mdx)).
+   The spec's `precision` fields record each node's arithmetic-type policy and each edge's
+   sensitivity, which the [mixed-precision study](../debugging/mixed-precision.mdx) measures.
+
+### A paper that changes a pipeline: the delta spec
+
+A delta spec names its `base` and lists only what it changes: each node or edge is added, replaced
+or removed. The rule that matters is about **edges**. When a delta replaces a data structure, every
+base node that reads or writes it must be replaced too, or listed under `unchanged_consumers` with
+the reason it is unaffected. The tool rejects a delta that does neither. A change of error
+convention, a new state block or a different measurement model therefore cannot leave a
+transformation quietly working on the old definition.
+
+### Review checklist
+
+Before implementation starts, a spec review answers:
+
+- Does every node cite where in the paper it comes from?
+- Is every edge produced (an input, or some node writes it) and consumed (some node reads it, or
+  it is an output)?
+- Does the schedule call every implemented node, and does the tool report no errors?
+- Does every edge invariant have a validator, or is the gap accepted for now?
+- Does every node have pre- and post-conditions, a bench and an oracle?
+- Is every deviation from the paper written down, with its issue?
+- Is every system invariant tied to a check, with its current status?
+
+## Running the tool
+
+```bash
+python3 tools/pipeline_graph/pipeline_graph.py check  docs/methodology/specs/*.yaml   # lint + references + up to date
+python3 tools/pipeline_graph/pipeline_graph.py gaps   docs/methodology/specs/openvins-msckf.yaml
+python3 tools/pipeline_graph/pipeline_graph.py render docs/methodology/specs/openvins-msckf.yaml
+python3 -m unittest discover -s tools/pipeline_graph                                  # the tool's own tests
+```
+
+`render` writes the page (`docs/methodology/<name>.mdx`), the Graphviz source
+(`docs/assessments/figures/methodology/<name>.dot`) and, when `dot` is installed, the figure
+(`<name>.svg`). `check` runs in CI (the Lint job) and fails on an error or on a generated page
+that is out of date with its spec. It doesn't regenerate the SVG, so run `render` locally after a
+change to the graph.
+
+## Where it stands
+
+| Deliverable of #610 | Status |
+|---|---|
+| This methodology, the [spec format](spec-format.mdx) and the tool | done |
+| [The OpenVINS MSCKF](openvins-msckf.mdx) as the reference spec, mapped onto S0–S10 | done |
+| Edge validators for every data structure | partial: the matrix and geometry checks exist; the gaps are listed on the OpenVINS page |
+| Checking a run's stage-tap trace against the schedule | planned |
+| The right-invariant EKF as a delta spec, closing the #608 gaps | next (#608) |
+| A timed pilot on a new paper | planned |
+| Per-node and per-edge precision fields | in the format; filled for S2, S6 and the state |

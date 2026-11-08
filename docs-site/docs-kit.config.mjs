@@ -10,6 +10,7 @@ export default {
     pipeline: 'VIO Pipeline',
     debugging: 'Stage-Bench Debugging (#444)',
     'first-principles': 'VIO from First Principles',
+    methodology: 'Paper to Pipeline (#610)',
     benchmarks: 'Benchmarks & Validation',
     algorithms: 'Algorithms & Provenance',
     phases: 'Roadmap & Phases',

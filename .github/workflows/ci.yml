@@ -68,6 +68,15 @@ jobs:
           fi
           echo "Checking $(echo "$files" | wc -l) files."
           echo "$files" | xargs clang-format --dry-run --Werror
+      - name: Pipeline specs (#610)
+        # Lint every pipeline spec, resolve its code and test references, and
+        # check its generated page is up to date; then the tool's own tests.
+        # PyYAML ships with the runner image; install it only if it doesn't.
+        run: |
+          set -e
+          python3 -c "import yaml" 2>/dev/null || python3 -m pip install --user --break-system-packages pyyaml==6.0.2
+          python3 -m unittest discover -s tools/pipeline_graph
+          python3 tools/pipeline_graph/pipeline_graph.py check docs/methodology/specs/*.yaml
 
   # The plans and ADRs (docs/plan/, docs/adr/) are published on the
   # architecture site (branes-ai/architecture). Its check runs here, strict, so

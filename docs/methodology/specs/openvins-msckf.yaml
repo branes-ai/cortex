@@ -1,0 +1,445 @@
+# The OpenVINS MSCKF as a transformation graph (#610): the reference pipeline
+# spec. Extracted from the papers listed under `sources` (a clean-room
+# abstraction of the published algorithm, not of any source code), then mapped
+# onto the cortex implementation. Format: docs/methodology/spec-format.mdx.
+# Lint, cross-check and render with:
+#   python3 tools/pipeline_graph/pipeline_graph.py render docs/methodology/specs/openvins-msckf.yaml
+
+schema: branes.pipeline/1
+name: openvins-msckf
+title: OpenVINS MSCKF
+summary: >-
+  A sliding-window filter over IMU poses: the IMU propagates a 15-state nav
+  error and its covariance; each image clones the pose into the window; a
+  feature track that ends is triangulated, its feature marginalized by a
+  null-space projection, and fused into every clone it was seen from; the
+  oldest clone is marginalized to bound the window.
+
+sources:
+  - id: mourikis2007
+    cite: >-
+      A. I. Mourikis and S. I. Roumeliotis, "A Multi-State Constraint Kalman
+      Filter for Vision-aided Inertial Navigation", ICRA 2007.
+  - id: li2013
+    cite: >-
+      M. Li and A. I. Mourikis, "High-precision, consistent EKF-based
+      visual-inertial odometry", IJRR 32(6), 2013 (MSCKF 2.0, first-estimates
+      Jacobians).
+  - id: geneva2020
+    cite: >-
+      P. Geneva, K. Eckenhoff, W. Lee, Y. Yang and G. Huang, "OpenVINS: A
+      Research Platform for Visual-Inertial Estimation", ICRA 2020.
+  - id: huang2010
+    cite: >-
+      G. P. Huang, A. I. Mourikis and S. I. Roumeliotis, "Observability-based
+      Rules for Designing Consistent EKF SLAM Estimators", IJRR 29(5), 2010.
+
+# ── The data structures on the edges (in memory) ──────────────────────────────
+edges:
+  - id: ImuSample
+    kind: input
+    contents: t, angular rate ω (rad/s), specific force a (m/s²)
+    code: sdk/include/branes/sdk/vio_backend.hpp
+    symbol: ImuMeasurement
+    invariants:
+      - text: timestamps strictly increasing
+        check: {file: sdk/include/branes/sdk/eval/invariants/stream_checks.hpp, symbol: check_timestamps_increasing}
+      - text: Δt within the sensor-rate bounds
+        check: {file: sdk/include/branes/sdk/eval/invariants/stream_checks.hpp, symbol: check_dt_bounds}
+      - text: samples finite
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_finite}
+
+  - id: ImageFrame
+    kind: input
+    contents: t, 8-bit image, camera id
+    code: sdk/include/branes/sdk/vio_estimator.hpp
+    symbol: feed_image
+    invariants:
+      - text: t increasing and inside the IMU span
+      - text: the image matches the calibration's resolution
+    precision: integer pixels; no arithmetic-type choice
+
+  - id: CameraCalib
+    kind: input
+    contents: intrinsics (fx, fy, cx, cy), radtan distortion, camera↔IMU extrinsic (R_imu_cam, p_imu_cam)
+    code: math/include/branes/math/cameras/pinhole_radtan.hpp
+    symbol: PinholeRadtanCamera
+    invariants:
+      - text: R_imu_cam ∈ SO(3)
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_so3}
+      - text: intrinsics positive, principal point inside the image
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_intrinsics}
+
+  - id: NormalizedObs
+    contents: feature id, camera id, normalized image point (x, y)
+    code: sdk/include/branes/sdk/msckf/stages/s0_sensor_model.hpp
+    symbol: Result
+    invariants:
+      - text: finite, and the ray is in front of the camera (z > 0)
+    precision: the narrowest edge that keeps sub-pixel accuracy; float holds (#532)
+
+  - id: TrackDB
+    contents: feature id → [(clone time, normalized observation)], plus the tracks that ended this frame
+    code: sdk/include/branes/sdk/msckf/stages/s4_frontend.hpp
+    symbol: TrackTable
+    invariants:
+      - text: every observation's clone time is a live clone, or the observation is purged
+      - text: points inside the image
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_points_in_image}
+      - text: track length at most the clone window
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_track_lengths}
+
+  - id: NavSeed
+    contents: R, v, p, b_g, b_a, the time, and the prior P₀ in the filter's error convention
+    code: sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp
+    symbol: seed_from_imu
+    invariants:
+      - text: gravity sign and magnitude
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_gravity}
+      - text: P₀ symmetric positive-definite
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_spd}
+      - text: P₀ states what the init window does and does not determine (tilt-bias correlation)
+    deviations:
+      - P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
+
+  - id: FilterState
+    kind: state
+    contents: >-
+      nav (θ, p, v, b_g, b_a: 15), clones (θ, p: 6 each), optional camera↔IMU
+      extrinsics (6 per camera), the joint covariance P, and the error-state
+      convention every Jacobian assumes
+    code: sdk/include/branes/sdk/msckf/state.hpp
+    symbol: State
+    invariants:
+      - text: P symmetric
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_symmetric}
+      - text: P positive semidefinite
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_psd}
+      - text: R and every clone rotation ∈ SO(3)
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_so3}
+      - text: the layout and the error convention agree with every node's Jacobians
+    precision: stored in double; the P-writing stages must stay double (#532)
+    deviations:
+      - >-
+        error convention R = R̂·Exp(δθ) (body-frame right perturbation); OpenVINS
+        uses a left quaternion error. Legitimate if consistent everywhere.
+
+  - id: Landmark
+    contents: feature position p_f (world), the triangulation's parallax and conditioning
+    code: sdk/include/branes/sdk/msckf/stages/s5_triangulation.hpp
+    symbol: apply
+    invariants:
+      - text: positive depth in every observing camera
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_at_least}
+      - text: normal-matrix condition number reported
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: report_condition_number}
+
+  - id: UpdateDiag
+    kind: output
+    contents: NIS, dof, the gate verdict, and where a rejected track stopped
+    code: sdk/include/branes/sdk/msckf/stages/s6_msckf_update.hpp
+    symbol: Result
+    invariants:
+      - text: NIS ~ χ²(dof) over windows
+        check: {file: sdk/include/branes/sdk/eval/invariants/stream_checks.hpp, symbol: check_chi2_window}
+
+# ── The transformations ──────────────────────────────────────────────────────
+# Every node has the shape (state, inputs, params) → (state′, diagnostics): it
+# mutates only the state it is given and returns what happened (#452).
+nodes:
+  - id: sensor_model
+    stage: S0
+    title: Sensor model
+    does: pixel → normalized image point (undistort, unproject)
+    reads: [ImageFrame, CameraCalib]
+    writes: [NormalizedObs]
+    source: {ref: geneva2020, where: camera models}
+    pre:
+      - "intrinsics valid"
+      - "the pixel inside the image"
+    post:
+      - "project ∘ unproject is the identity"
+      - "the analytic Jacobian matches finite differences"
+    code: sdk/include/branes/sdk/msckf/stages/s0_sensor_model.hpp
+    bench: {file: tests/tools/stage_bench_s0_s1.cpp, case: "S0 bench: every fixture passes in every type"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S0_sensor_model normalizes a pixel"}
+    status: implemented
+
+  - id: track
+    stage: S4
+    title: Visual front end
+    does: image → feature tracks (FAST + KLT), and the tracks that ended
+    reads: [NormalizedObs, TrackDB]
+    writes: [TrackDB]
+    source: {ref: geneva2020, where: visual tracking}
+    pre:
+      - "consecutive frames"
+      - "features detected inside the trackable band"
+    post:
+      - "tracks inside the image"
+      - "forward-backward error bounded"
+      - "ended tracks released in id order"
+    code: sdk/include/branes/sdk/msckf/stages/s4_frontend.hpp
+    bench: {file: tests/tools/stage_bench_s4_s5.cpp, case: "S4 bench: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S4_frontend ingests observations"}
+    status: implemented
+    deviations:
+      - no RANSAC outlier rejection in the front end; the S6d gate carries it
+      - "the shipped default churns (>50% of new tracks lost on their first frame); the border margin is opt-in (#474, #574)"
+
+  - id: initialize
+    stage: S1a
+    title: Initialization
+    does: an IMU window at rest (static), or a moving window of frames (dynamic VI alignment) → the nav seed
+    reads: [ImuSample, TrackDB]
+    writes: [NavSeed]
+    source: {ref: geneva2020, where: initialization}
+    pre:
+      - "an IMU window that is at rest, or frames with enough excitation and parallax"
+    post:
+      - "gravity-aligned attitude"
+      - "the method is recorded"
+    code: sdk/include/branes/sdk/imu_init.hpp
+    bench: {file: tests/tools/stage_bench_s0_s1.cpp, case: "S1 bench: static paths pass every fixture"}
+    tests:
+      - {file: tests/sdk/imu_init.cpp, case: "static init recovers gravity"}
+      - {file: tests/sdk/msckf_dynamic_init.cpp, case: "the backend bootstraps a moving start via dynamic VI init"}
+    status: implemented
+    deviations:
+      - "the dynamic path is excitation-limited on EuRoC and has open SfM defects (#254, #499–#501)"
+
+  - id: seed_state
+    stage: S1b
+    title: Seed the filter
+    does: the nav seed → a fresh filter state, its mean and its prior P₀ in the filter's error convention
+    reads: [NavSeed]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: initialization}
+    pre:
+      - "a successful seed"
+    post:
+      - "P₀ symmetric positive-definite, in the error convention every later node assumes"
+    code: sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp
+    bench: {file: tests/tools/stage_bench_s0_s1.cpp, case: "S1 bench: static paths pass every fixture"}
+    tests:
+      - {file: tests/sdk/msckf_backend.cpp, case: "the backend initializes attitude from a stationary window"}
+    status: implemented
+    deviations:
+      - the prior is an isotropic σ = 0.1 with no tilt-bias correlation, whatever the init method (#609)
+
+  - id: propagate
+    stage: S2
+    title: IMU propagation
+    does: one IMU sample → the propagated mean, P ← Φ P Φᵀ + Q_d
+    reads: [FilterState, ImuSample]
+    writes: [FilterState]
+    source: {ref: li2013, where: "§III, the IMU model; Φ at first estimates"}
+    pre:
+      - "Δt > 0 and bounded"
+      - "the state initialized"
+    post:
+      - "R ∈ SO(3)"
+      - "P symmetric PSD"
+      - "Φ preserves the 4-D unobservable subspace"
+    code: sdk/include/branes/sdk/msckf/stages/s2_propagation.hpp
+    bench: {file: tests/tools/stage_bench_s2_s3.cpp, case: "S2 bench: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S2_propagation and S3_augmentation"}
+    status: implemented
+    precision: {policy: "T2 (msckf/stage_types.hpp)", note: "posit<32,2> passes the bench; P must be written in double on EuRoC (#532)"}
+    deviations:
+      - "no first-estimates Jacobians on Φ (FEJ, #606)"
+
+  - id: augment
+    stage: S3
+    title: State augmentation
+    does: the state → the state plus a clone of the pose at the image time, P′ = G P Gᵀ
+    reads: [FilterState]
+    writes: [FilterState]
+    source: {ref: mourikis2007, where: "§III-B, stochastic cloning"}
+    pre:
+      - "the state propagated to the image time"
+    post:
+      - "P grows by 6 with an exact block copy"
+      - "P PSD"
+    code: sdk/include/branes/sdk/msckf/stages/s3_augmentation.hpp
+    bench: {file: tests/tools/stage_bench_s2_s3.cpp, case: "S3 bench: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S2_propagation and S3_augmentation"}
+    status: implemented
+
+  - id: triangulate
+    stage: S5
+    title: Triangulation
+    does: an ended track and the clone window → the feature position
+    reads: [TrackDB, FilterState]
+    writes: [Landmark]
+    source: {ref: mourikis2007, where: "§III-C, multi-view least squares, then Gauss-Newton"}
+    pre:
+      - "at least two observations from live clones"
+      - "enough parallax"
+    post:
+      - "positive depth in every camera"
+      - "bounded reprojection error"
+      - "conditioning reported"
+    code: sdk/include/branes/sdk/msckf/stages/s5_triangulation.hpp
+    bench: {file: tests/tools/stage_bench_s4_s5.cpp, case: "S5 bench: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S5 and S6a-S6e run one feature track"}
+    status: implemented
+
+  - id: msckf_update
+    stage: S6
+    title: MSCKF update
+    does: >-
+      track + landmark → Jacobians H_f, H_x (S6a) → left null-space projection
+      (S6b) → QR compression (S6c) → χ² gate (S6d) → EKF update and retraction (S6e)
+    reads: [FilterState, TrackDB, Landmark]
+    writes: [FilterState, UpdateDiag]
+    source: {ref: mourikis2007, where: "§III-C–D; H at first estimates (li2013)"}
+    pre:
+      - "the landmark triangulated against the current clones"
+    post:
+      - "Nᵀ H_f = 0"
+      - "P⁺ ⪯ P⁻"
+      - "no information along the unobservable directions"
+      - "δx finite"
+    code: sdk/include/branes/sdk/msckf/stages/s6_msckf_update.hpp
+    bench: {file: tests/tools/stage_bench_s6.cpp, case: "S6 benches: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S6 composite is bit-identical to CameraUpdater::update"}
+      - {file: tests/sdk/msckf_camera_update.cpp, case: "S6d gate line: the chi-square quantile by default"}
+      - {file: tests/tools/stage_bench_s6.cpp, case: "S6 update: no information along the unobservable directions"}
+    status: implemented
+    precision: {policy: "T6, T6e (msckf/stage_types.hpp)", note: "S6e writes P: double on EuRoC (#532); the carried square-root factor holds in posit32"}
+    deviations:
+      - "no first-estimates Jacobians on H (FEJ, #606); the yaw leak is S6 moving the mean (95–99%, #480)"
+      - S6c compression is the identity (one feature per update leaves 2m − 3 rows)
+
+  - id: marginalize
+    stage: S9
+    title: Marginalization
+    does: the state → the state without its oldest clone (a principal submatrix of P), after fusing every track that touches it
+    reads: [FilterState, TrackDB]
+    writes: [FilterState, TrackDB]
+    source: {ref: mourikis2007, where: "§III-E, window management"}
+    pre:
+      - "every track touching the clone has been fused"
+    post:
+      - "P is the principal submatrix"
+      - "P PSD"
+      - "no observation refers to the dropped clone"
+    code: sdk/include/branes/sdk/msckf/stages/s9_marginalization.hpp
+    bench: {file: tests/tools/stage_bench_s9_s10.cpp, case: "S9 policies remove the clone they name"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S9_marginalization keeps the principal submatrix"}
+    status: implemented
+
+  - id: zero_velocity
+    stage: S8
+    optional: true
+    title: Zero-velocity update
+    does: IMU and image both at rest → the v = 0 and b_g = ω̄ pseudo-measurements; the frame adds no clone
+    reads: [FilterState, ImuSample, TrackDB]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: zero-velocity update}
+    pre:
+      - "both the IMU and the image tests say rest"
+    post:
+      - "never fires while moving faster than 0.05 m/s on EuRoC (a measurement, not a guarantee)"
+    code: sdk/include/branes/sdk/msckf/stages/s8_zero_velocity.hpp
+    bench: {file: tests/sdk/zero_velocity.cpp, case: "S8 finds rest under vibration"}
+    tests:
+      - {file: tests/sdk/zero_velocity.cpp, case: "S8 pseudo-measurements pull v to zero"}
+    status: implemented
+
+  - id: slam_update
+    stage: S7
+    optional: true
+    title: SLAM-feature update
+    does: long-lived features kept in the state as landmarks and updated every frame
+    reads: [FilterState, TrackDB]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: SLAM features}
+    status: missing
+
+  - id: online_calib
+    stage: S10
+    optional: true
+    title: Online calibration
+    does: the state ⊕ camera↔IMU extrinsics, intrinsics and time offset, estimated with the rest
+    reads: [FilterState, CameraCalib]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: online calibration}
+    pre:
+      - "the extrinsic prior σ's stated"
+      - "enabled before any clone exists"
+    post:
+      - "the extrinsic rotation ∈ SO(3)"
+      - "the calibration covariance PSD"
+      - "estimating moves the extrinsic toward the truth"
+    code: sdk/include/branes/sdk/msckf/stages/s10_online_calibration.hpp
+    bench: {file: tests/tools/stage_bench_s9_s10.cpp, case: "S10 bench: every fixture passes for every variant"}
+    tests:
+      - {file: tests/sdk/msckf_stages.cpp, case: "S9_marginalization keeps the principal submatrix; S10 adds calibration states"}
+      - {file: tests/tools/stage_bench_s9_s10.cpp, case: "S10: estimating the extrinsic moves it toward the truth"}
+    status: partial
+    deviations:
+      - extrinsics only (VioConfig::estimate_extrinsics, off by default); no intrinsics; no time offset (#332)
+
+# ── The call sequence ────────────────────────────────────────────────────────
+schedule:
+  driver: sdk/include/branes/sdk/msckf_backend.hpp
+  events:
+    - event: imu
+      rate_hz: 200
+      steps:
+        - {call: initialize, when: not initialized, note: accumulate; static or gravity-align when a window allows}
+        - {call: seed_state, when: a seed is ready}
+        - {call: online_calib, when: a seed is ready and extrinsics are estimated, note: appends the calibration block; S6 updates it}
+        - {call: propagate, when: initialized}
+    - event: image
+      rate_hz: 20
+      steps:
+        - {call: sensor_model}
+        - {call: track}
+        - {call: initialize, when: not initialized, note: try the dynamic VI alignment}
+        - {call: seed_state, when: a seed is ready, note: then return}
+        - {call: propagate, note: to the image time, on the held IMU sample}
+        - {call: zero_velocity, when: at rest, note: then return; the frame adds no clone}
+        - {call: msckf_update, foreach: track touching the oldest clone, when: window full}
+        - {call: marginalize, when: window full}
+        - {call: augment}
+        - {call: triangulate, foreach: ended track (ascending id)}
+        - {call: msckf_update, foreach: ended track (ascending id)}
+
+# ── What the whole graph must satisfy ────────────────────────────────────────
+system_invariants:
+  - id: nees
+    text: NEES ≈ dim(state) against ground truth (consistency)
+    check: {file: sdk/include/branes/sdk/eval/nav_consistency.hpp, symbol: nav_block_nees}
+    status: failing
+    note: "the body-frame filter is over-confident on EuRoC (#212, #605)"
+  - id: nis
+    text: NIS ≈ dim(measurement) per update
+    check: {file: tests/sdk/consistency.cpp, case: "NEES/NIS flag over- and under-confidence"}
+  - id: whiteness
+    text: innovations zero-mean and white
+    check: {file: tests/sdk/innovation_whiteness.cpp, case: "i.i.d. N(0,1) innovations read as zero-mean and white"}
+  - id: gauge
+    text: no information gained along global yaw and translation (the 4-D unobservable space)
+    check: {file: tests/tools/observability_ledger.cpp, case: "Observability ledger: on the synthetic world the leak is yaw"}
+    status: failing
+    note: the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608)
+  - id: consistency_gate
+    text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
+    check: {file: scripts/euroc-consistency.sh}
+    status: failing
+    note: the MSCKF fails all three conditions (#605)
+  - id: accuracy
+    text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
+    check: {file: scripts/euroc-baseline.sh}
+    status: failing
+    note: median 2.8× OpenVINS mono (#595)
