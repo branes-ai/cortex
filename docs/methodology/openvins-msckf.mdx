@@ -9,7 +9,7 @@ sidebar:
 
 A sliding-window filter over IMU poses: the IMU propagates a 15-state nav error and its covariance; each image clones the pose into the window; a feature track that ends is triangulated, its feature marginalized by a null-space projection, and fused into every clone it was seen from; the oldest clone is marginalized to bound the window.
 
-![The OpenVINS MSCKF transformation graph: boxes are transformations (green implemented, amber partial, red missing; dashed optional), parallelograms are sensor inputs, the cylinder is the shared filter state, and notes are the data structures passed between transformations.](../assessments/figures/methodology/openvins-msckf.svg)
+![The OpenVINS MSCKF transformation graph: boxes are transformations (green implemented, amber partial, blue planned, red missing; dashed optional), parallelograms are sensor inputs and outputs, the cylinder is the shared filter state, notes are the data structures passed between transformations, and a double-headed arrow is a transformation that updates a structure in place.](../assessments/figures/methodology/openvins-msckf.svg)
 
 ## Sources
 

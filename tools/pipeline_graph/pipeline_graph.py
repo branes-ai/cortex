@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = "branes.pipeline/1"
 PAGE_DIR = ROOT / "docs" / "methodology"
 FIGURE_DIR = ROOT / "docs" / "assessments" / "figures" / "methodology"
-STATUSES = {"implemented", "partial", "missing"}
+STATUSES = {"implemented", "partial", "planned", "missing"}
 INVARIANT_STATUSES = {"holds", "failing", "unknown"}
 EDGE_KINDS = {"data", "input", "state", "output"}
 DELTA_OPS = {"add", "replace", "remove"}
@@ -279,6 +279,10 @@ def lint(spec: dict, delta: dict | None, rep: Report) -> None:
         if status == "missing":
             rep.gap(f"node '{nid}' ({n.get('stage', '')}): not implemented")
             continue
+        if status == "planned":
+            # Specified ahead of the code: in the schedule, not yet built.
+            rep.gap(f"node '{nid}' ({n.get('stage', '')}): planned, not implemented yet")
+            continue
         if not n.get("code"):
             rep.gap(f"node '{nid}': no implementing code")
         else:
@@ -374,7 +378,7 @@ def dot_source(spec: dict) -> str:
                      f'fillcolor="{fill}", color="#8a97ab"];')
     for n in spec.get("nodes", []):
         status = n.get("status")
-        fill = {"implemented": "#d9f2e3", "partial": "#fff1c2", "missing": "#f9d6d5"}[status]
+        fill = {"implemented": "#d9f2e3", "partial": "#fff1c2", "planned": "#dde7f7", "missing": "#f9d6d5"}[status]
         style = "filled,dashed" if n.get("optional") else "filled"
         label = f"{n.get('stage', '')}  {n['id']}".strip()
         lines.append(f'  {q("n:" + n["id"])} [label={q(label)}, shape=box, style="{style},rounded", '
@@ -442,8 +446,9 @@ def page_source(spec: dict, delta: dict | None, rep: Report) -> str:
                 "data structures listed under *Changes from the base*, and keeps the rest.", ""]
     out += [
         f"![The {title} transformation graph: boxes are transformations (green implemented, amber partial, "
-        "red missing; dashed optional), parallelograms are sensor inputs, the cylinder is the shared filter "
-        f"state, and notes are the data structures passed between transformations.]"
+        "blue planned, red missing; dashed optional), parallelograms are sensor inputs and outputs, the cylinder "
+        "is the shared filter state, notes are the data structures passed between transformations, and a "
+        f"double-headed arrow is a transformation that updates a structure in place.]"
         f"(../assessments/figures/methodology/{name}.svg)",
         "",
         "## Sources",

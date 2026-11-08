@@ -49,7 +49,7 @@ is `docs/methodology/specs/openvins-msckf.yaml`.
 | `code` | the `sdk/` header that implements it |
 | `bench` | a [reference](#references) to its stage bench |
 | `tests` | a list of references to its unit tests |
-| `status` | `implemented`, `partial` or `missing` |
+| `status` | `implemented`, `partial`, `planned` (specified ahead of the code: the schedule may call it, and it is reported as a gap) or `missing` (deliberately left out: the schedule must not call it) |
 | `optional` | true for a node the algorithm can run without |
 | `precision` | `{policy, note}`: the node's arithmetic-type policy and what was measured |
 | `deviations` | how the implementation departs from the paper; each is a gap |
@@ -67,7 +67,7 @@ schedule:
 ```
 
 Each step is `{call, when?, foreach?, note?}`. Every node that isn't `missing` must be called, and
-a `missing` node must not be.
+a `missing` node must not be. A spec written before its code calls its `planned` nodes.
 
 ## System invariants
 

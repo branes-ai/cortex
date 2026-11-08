@@ -95,6 +95,15 @@ class PipelineGraphTest(unittest.TestCase):
                 _, _, rep = self.analyse(text)
                 self.assertTrue(any(want in e for e in rep.errors), rep.errors)
 
+    def test_a_planned_node_may_be_scheduled_a_missing_one_may_not(self) -> None:
+        planned = edit(BASE, "writes: [State, Diag]\n    source: {ref: paper}\n    status: implemented",
+                       "writes: [State, Diag]\n    source: {ref: paper}\n    status: planned")
+        _, _, rep = self.analyse(planned)
+        self.assertEqual(rep.errors, [])
+        self.assertIn("node 'correct' (): planned, not implemented yet", rep.gaps)
+        _, _, rep = self.analyse(planned.replace("status: planned", "status: missing"))
+        self.assertTrue(any("is missing but the schedule calls it" in e for e in rep.errors), rep.errors)
+
     def test_a_missing_file_or_test_case_reference_is_an_error(self) -> None:
         text = edit(BASE, "status: implemented\n  - id: correct",
                     "status: implemented\n    code: no/such/file.hpp\n  - id: correct")
