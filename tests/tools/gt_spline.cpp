@@ -8,8 +8,10 @@
 //   * the spline's analytic velocity, acceleration and body angular velocity
 //     match finite differences of its own pose;
 //   * it stays close to the ground truth it was built from;
-//   * s2_closure: the noise-free synthesized IMU, integrated by the shipped
-//     S2, reproduces the spline's pose over a clone window;
+//   * s2_closure, with a bound taken from what the camera resolves (a tenth of
+//     0.5 px over a clone window), not from what S2 achieves: averaging each
+//     interval's two samples meets it for rotation; the shipped S2 does not
+//     (#616), and a [!shouldfail] tripwire records that until it does;
 //   * the injected noise has the configured densities and is white, and the
 //     biases walk at the configured rate.
 //
@@ -95,42 +97,98 @@ TEST_CASE("gt spline: it stays close to the ground truth it was built from", "[t
     CHECK_THROWS(Spline(sampled(0.1), 0.05));  // fewer than four knots
 }
 
-TEST_CASE("gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline", "[tools][gt_spline]") {
-    const Spline s(sampled(10.0), 0.05);
-    // Integrate 0.6 s (a clone window) of noise-free samples at `rate` Hz with
-    // the shipped S2, seeded from the spline, the way MsckfBackend does: each
-    // sample over the interval it ends. Returns {rotation, position} error.
-    const auto closure = [&](double rate) {
-        std::vector<double> times;
-        for (int k = 0; k <= static_cast<int>(0.6 * rate); ++k)
-            times.push_back(2.0 + k / rate);
-        const auto imu = bt::synthesize_imu<T>(s, times, bt::ImuSynthesisOptions{});
-        REQUIRE(imu.size() == times.size());
-        ms::State<T> st(0.1);
-        const SE3 P0 = s.pose(imu.front().timestamp_s);
-        st.R = P0.rotation();
-        st.p = P0.translation();
-        st.v = s.velocity(imu.front().timestamp_s);
-        const ms::Propagator<T> prop;
-        for (std::size_t k = 1; k < imu.size(); ++k) {
-            const auto& m = imu[k];
-            const Vec3 w{{m.angular_velocity[0], m.angular_velocity[1], m.angular_velocity[2]}};
-            const Vec3 f{{m.linear_acceleration[0], m.linear_acceleration[1], m.linear_acceleration[2]}};
-            (void)ms::stages::s2_propagation::apply(st, prop, w, f, m.timestamp_s - imu[k - 1].timestamp_s);
+namespace {
+// A fast flight: rolling and pitching at about 1.3 rad/s, EuRoC V2_03's 95th
+// percentile, where a sample held over the wrong interval shows (#616).
+SE3 fast_truth(double t) {
+    const Vec3 p{{1.5 * std::sin(0.8 * t), 1.0 * std::cos(0.6 * t), 0.3 * std::sin(1.5 * t)}};
+    const Vec3 r{{0.3 * std::sin(4.3 * t), 0.26 * std::cos(5.0 * t), 0.5 * t}};
+    return SE3(SO3::exp(r), p);
+}
+
+// The S2-closure bound, from what the camera resolves, not from what S2
+// achieves: over a clone window (11 frames at 20 Hz, 0.55 s), S2's error must
+// stay under a tenth of the gate's finest track noise, 0.5 px at cam0's
+// fx = 458.65, i.e. 1.09e-4 rad of rotation, and 0.22 mm of position at the
+// nearest landmark depth (2 m).
+std::vector<branes::sdk::eval::StampedPose<T>> fast_sampled() {
+    std::vector<branes::sdk::eval::StampedPose<T>> gt;
+    for (double t = 0.0; t <= 10.0; t += 0.005)
+        gt.push_back({t, fast_truth(t)});
+    return gt;
+}
+
+constexpr double kWindowS = 0.55;
+constexpr double kRotBound = 0.1 * 0.5 / 458.654;
+constexpr double kPosBound = 2.0 * kRotBound;
+
+enum class Hold { end_sample, both_samples };
+
+// Integrate a window of noise-free samples at `rate` Hz with the shipped S2,
+// seeded from the spline at the first sample, and return the {rotation,
+// position} error against the spline at the last. end_sample feeds each
+// interval the sample that ends it (MsckfBackend today); both_samples feeds it
+// the average of its two samples.
+std::pair<double, double> closure(const Spline& s, double rate, Hold hold) {
+    std::vector<double> times;
+    for (int k = 0; k <= static_cast<int>(std::lround(kWindowS * rate)); ++k)
+        times.push_back(2.0 + k / rate);
+    const auto imu = bt::synthesize_imu<T>(s, times, bt::ImuSynthesisOptions{});
+    REQUIRE(imu.size() == times.size());
+    ms::State<T> st(0.1);
+    const SE3 P0 = s.pose(imu.front().timestamp_s);
+    st.R = P0.rotation();
+    st.p = P0.translation();
+    st.v = s.velocity(imu.front().timestamp_s);
+    const ms::Propagator<T> prop;
+    const auto vec = [](const auto& a) { return Vec3{{a[0], a[1], a[2]}}; };
+    for (std::size_t k = 1; k < imu.size(); ++k) {
+        Vec3 w = vec(imu[k].angular_velocity), f = vec(imu[k].linear_acceleration);
+        if (hold == Hold::both_samples) {
+            w = (w + vec(imu[k - 1].angular_velocity)) * 0.5;
+            f = (f + vec(imu[k - 1].linear_acceleration)) * 0.5;
         }
-        const SE3 P1 = s.pose(imu.back().timestamp_s);
-        return std::pair{norm((P1.rotation().inverse() * st.R).log()), norm(st.p - P1.translation())};
-    };
-    const auto [rot200, pos200] = closure(200.0);
-    const auto [rot400, pos400] = closure(400.0);
-    // At EuRoC's 200 Hz: about 0.14 px of rotation at most, against the gate's
-    // 0.5 px tracks, and well under a millimetre over the window.
-    CHECK(rot200 < 3e-4);
-    CHECK(pos200 < 1e-3);
-    // The residual is S2's first-order discretization, not a disagreement
-    // between the synthesized IMU and the spline: it halves with the step.
-    CHECK(rot200 / rot400 > 1.8);
-    CHECK(rot200 / rot400 < 2.2);
+        (void)ms::stages::s2_propagation::apply(st, prop, w, f, imu[k].timestamp_s - imu[k - 1].timestamp_s);
+    }
+    const SE3 P1 = s.pose(imu.back().timestamp_s);
+    return {norm((P1.rotation().inverse() * st.R).log()), norm(st.p - P1.translation())};
+}
+}  // namespace
+
+TEST_CASE("gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound",
+          "[tools][gt_spline]") {
+    // The rotation bound is attainable at EuRoC's 200 Hz: the shipped S2 step,
+    // fed the average of each interval's two samples, closes on a fast spline
+    // within it, and converges at second order. This also checks the
+    // synthesized IMU against the spline it came from. Its position still
+    // drifts at first order (about 5 mm over the window): the specific force is
+    // rotated with the attitude at the start of the interval, which #616's
+    // integrator must fix as well.
+    const Spline s(fast_sampled(), 0.05);
+    const auto [rot, pos] = closure(s, 200.0, Hold::both_samples);
+    const auto [rot2, pos2] = closure(s, 400.0, Hold::both_samples);
+    CAPTURE(rot, rot2, pos, pos2, kRotBound, kPosBound);
+    CHECK(rot < kRotBound);
+    CHECK(rot / rot2 > 3.5);  // second order: a quarter at half the step
+}
+
+// A tripwire for #616: the shipped S2, fed each interval the sample that ends
+// it as MsckfBackend does, must close within what the camera resolves, at
+// second order or better. Today it misses the rotation bound 28x (a sample held
+// over the wrong interval is a 2.5 ms IMU-camera skew) and converges at first
+// order, so this case fails and [!shouldfail] reports that as a pass. When #616
+// fixes S2 the case passes, [!shouldfail] turns that into a failure, and the
+// tag must come off: the test then guards the fix.
+TEST_CASE("gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)",
+          "[tools][gt_spline][!shouldfail]") {
+    const Spline s(fast_sampled(), 0.05);
+    const auto [rot, pos] = closure(s, 200.0, Hold::end_sample);
+    const auto [rot2, pos2] = closure(s, 400.0, Hold::end_sample);
+    CAPTURE(rot, rot2, pos, pos2, kRotBound, kPosBound);
+    CHECK(rot < kRotBound);
+    CHECK(pos < kPosBound);
+    CHECK(rot / rot2 > 3.5);
+    CHECK(pos / pos2 > 3.5);
 }
 
 TEST_CASE("gt spline: the synthesized noise has the configured densities", "[tools][gt_spline]") {

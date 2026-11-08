@@ -92,8 +92,8 @@ edges:
     code: tools/include/branes/tools/gt_spline.hpp
     symbol: synthesize_imu
     invariants:
-      - text: "noise-free, integrated by the shipped S2, it reproduces the spline's pose"
-        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
+      - text: "noise-free, integrated from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound"}
       - text: "the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness)"
         check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
 
@@ -158,11 +158,11 @@ nodes:
     pre:
       - "the IMU timestamps lie inside the spline's span"
     post:
-      - "noise-free, the shipped S2 integrates it back to the spline's pose (to its first-order discretization)"
+      - "noise-free and integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window"
       - "the noise statistics match the densities"
     code: tools/include/branes/tools/gt_spline.hpp
     tests:
-      - {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound"}
       - {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
     status: implemented
 
@@ -252,10 +252,10 @@ system_invariants:
     status: holds
     note: "median 1.03 for both backends (was 1.65–4.3 with the real IMU and the raw ground truth); 1.1–1.9 on the fast V1_03, V2_02 and V2_03, where S2's first-order integration at 200 Hz is the residual (1.02 at 1 kHz)"
   - id: s2_closure
-    text: "the synthesized IMU, noise-free, integrates back to the truth"
-    check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
-    status: holds
-    note: "to S2's first-order discretization: 1.3e-4 rad over 0.6 s on the test trajectory, halving with the step"
+    text: "the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order"
+    check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves"}
+    status: failing
+    note: "the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616"
   - id: same_gate
     text: every backend runs with the same S6d gate line
     check: {file: scripts/euroc-consistency.sh}

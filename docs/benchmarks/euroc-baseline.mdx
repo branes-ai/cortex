@@ -301,8 +301,11 @@ that it belongs to the estimator:
   is 1.1–1.9 for both backends, against 1.02–1.04 on the Machine Hall. The
   residual is S2's first-order integration at 200 Hz: the same V2_03 run
   synthesized at 1 kHz has NIS 1.02 for both backends and a 4-DoF ATE of
-  0.02–0.03 m instead of 0.14–0.35 m. The noise-free synthetic IMU closes on
-  the spline only to that order (`tests/tools/gt_spline.cpp`).
+  0.02–0.03 m instead of 0.14–0.35 m. Probes then isolated it: S2 holds each
+  interval's end sample, a 2.5 ms IMU–camera skew, and averaging the two samples
+  gives NIS 1.00 everywhere (#616). `tests/tools/gt_spline.cpp` holds S2 to a
+  closure bound taken from what the camera resolves, which the shipped S2 misses
+  28× (a `[!shouldfail]` tripwire until #616).
 - **Roll/pitch NEES is now 2–19** for both, against 17–3161 before: the real
   IMU's accelerometer bias and its disagreement with the ground truth (#609) are
   no longer in the bench. They remain on real data.

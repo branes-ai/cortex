@@ -44,8 +44,8 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 **synth_imu** (G2, Synthesize the IMU)
 
 - *Pre:* the IMU timestamps lie inside the spline's span
-- *Post:* noise-free, the shipped S2 integrates it back to the spline's pose (to its first-order discretization); the noise statistics match the densities
-- *Test:* `tests/tools/gt_spline.cpp` “gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline…”
+- *Post:* noise-free and integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window; the noise statistics match the densities
+- *Test:* `tests/tools/gt_spline.cpp` “gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound…”
 - *Test:* `tests/tools/gt_spline.cpp` “gt spline: the synthesized noise has the configured densities…”
 
 **synth_tracks** (G3, Synthesize the tracks)
@@ -81,7 +81,7 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 | **NoiseModel** | input | the gyro and accelerometer noise densities and bias random walks (VioConfig's), the track pixel σ S, and the seed | `sdk/include/branes/sdk/vio_backend.hpp` `VioConfig` | ✗ the filter's Q and the synthesis use the same densities; matched R equals S |
 | **CameraCalib** | input | EuRoC cam0 intrinsics, distortion and camera↔IMU extrinsic | `tools/include/branes/tools/euroc_cam0.hpp` `euroc_cam0` | ✓ R_imu_cam ∈ SO(3) |
 | **TruthSpline** | data | a uniform cumulative cubic B-spline on SO(3) × ℝ³ with control poses at ground-truth samples every 0.05 s; pose, angular velocity and acceleration at any time inside its span | `tools/include/branes/tools/gt_spline.hpp` `PoseSpline` | ✓ C² in position and rotation; ω and a match finite differences of its pose; ✓ stays within a stated bound of the ground truth (it approximates, it is not fitted) |
-| **ImuStream** | data | at the real IMU timestamps, ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks from zero | `tools/include/branes/tools/gt_spline.hpp` `synthesize_imu` | ✓ noise-free, integrated by the shipped S2, it reproduces the spline's pose; ✓ the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness) |
+| **ImuStream** | data | at the real IMU timestamps, ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks from zero | `tools/include/branes/tools/gt_spline.hpp` `synthesize_imu` | ✓ noise-free, integrated from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window; ✓ the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness) |
 | **TrackStream** | data | per image time, pixel observations of fixed landmarks seen from the truth's camera pose, plus N(0, S²) per axis | `tools/include/branes/tools/ideal_tracks.hpp` `IdealTracks` | ✓ noise-free, each observation is the exact projection of its landmark; ✓ the added noise is N(0, (S/fx)²) per axis in normalized coordinates and nothing else |
 | **Estimate** | data | the backend's trajectory (TUM) and per-frame pose covariance in its own error convention | `tools/src/vio_pipeline.cpp` `write_tum` | ✗ finite; one pose per tracked frame |
 | **Score** | data | window 4-DoF ATE ÷ OpenVINS mono, the pose NEES split, the world-yaw σ over the run, NIS | `tools/include/branes/tools/pose_consistency.hpp` `PoseConsistencySummary` | ✗ scored against TruthSpline, not the raw ground truth; ✗ a run with no trajectory counts as diverged; one that cannot be scored is unavailable |
@@ -109,13 +109,13 @@ on grid complete:
 | Invariant | Check | Status |
 |---|---|---|
 | converged runs with matched R have normalized NIS ≈ 1 (the noise model is true) | — | holds — median 1.03 for both backends (was 1.65–4.3 with the real IMU and the raw ground truth); 1.1–1.9 on the fast V1_03, V2_02 and V2_03, where S2's first-order integration at 200 Hz is the residual (1.02 at 1 kHz) |
-| the synthesized IMU, noise-free, integrates back to the truth | `tests/tools/gt_spline.cpp` “gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline…” | holds — to S2's first-order discretization: 1.3e-4 rad over 0.6 s on the test trajectory, halving with the step |
+| the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order | `tests/tools/gt_spline.cpp` “gt spline: S2 closure, the shipped S2 within what the camera resolves…” | failing — the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616 |
 | every backend runs with the same S6d gate line | `scripts/euroc-consistency.sh` | holds — since #608 both use the χ² quantile; before it the R-IEKF used 16 per dof |
 | each condition's result changes with the estimator, not with the gate's line | — | holds — each remaining failure checked with the gate loosened to 5 per dof: the MSCKF's MH_04 divergences vanish, but with a true noise model that is the MSCKF tipped over by its own over-confidence; every other failure persists, so all are the estimators' (#613) |
 
 ## Gap report
 
-What `pipeline_graph.py gaps` reports for this spec (13 items):
+What `pipeline_graph.py gaps` reports for this spec (14 items):
 
 - edge 'NoiseModel': no validator for "the filter's Q and the synthesis use the same densities; matched R equals S"
 - edge 'Estimate': no validator for "finite; one pose per tracked frame"
@@ -129,4 +129,5 @@ What `pipeline_graph.py gaps` reports for this spec (13 items):
 - node 'verdict': no stage bench
 - node 'verdict': no unit tests
 - system invariant 'nis_band': no check
+- system invariant 's2_closure': failing — the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616
 - system invariant 'verdict_attributable': no check
