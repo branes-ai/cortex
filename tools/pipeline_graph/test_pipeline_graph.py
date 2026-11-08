@@ -160,6 +160,45 @@ class PipelineGraphTest(unittest.TestCase):
                 _, _, rep = self.analyse(head + body, "d.yaml")
                 self.assertTrue(any(want in e for e in rep.errors), rep.errors)
 
+    def test_a_duplicate_key_is_rejected_not_silently_overwritten(self) -> None:
+        text = edit(BASE, "    does: update the state\n", "    does: update the state\n    does: something else\n")
+        _, _, rep = self.analyse(text)
+        self.assertTrue(any("duplicate key 'does'" in e for e in rep.errors), rep.errors)
+
+    def test_a_delta_must_name_itself(self) -> None:
+        write(self.dir, "toy.yaml", BASE)
+        for header, want in [("schema: branes.pipeline/1\nbase: toy.yaml\ntitle: D\n", "missing 'name'"),
+                             ("schema: branes.pipeline/1\nbase: toy.yaml\nname: toy\ntitle: D\n",
+                              "a delta needs its own name")]:
+            with self.subTest(want):
+                _, _, rep = self.analyse(header, "d.yaml")
+                self.assertTrue(any(want in e for e in rep.errors), rep.errors)
+
+    def test_what_the_page_needs_is_linted(self) -> None:
+        cases = {
+            "needs an id and a cite": edit(BASE, '{id: paper, cite: "A paper"}', "{id: paper}"),
+            "needs an id and a text": BASE + "system_invariants:\n  - {id: nees}\n",
+        }
+        for want, text in cases.items():
+            with self.subTest(want):
+                _, _, rep = self.analyse(text)
+                self.assertTrue(any(want in e for e in rep.errors), rep.errors)
+
+    def test_a_symbol_named_only_in_a_comment_does_not_resolve(self) -> None:
+        (self.dir / "a.hpp").write_text("// Result is documented here\n/* and apply\n here */\nstruct Other {};\n"
+                                        'const char* s = "Quoted";\n', encoding="utf-8")
+        saved = pg.ROOT
+        pg.ROOT = self.dir
+        try:
+            for sym, ok in [("Result", False), ("apply", False), ("Other", True), ("Quoted", True)]:
+                with self.subTest(sym):
+                    rep = pg.Report()
+                    self.assertEqual(pg.check_ref("here", {"file": "a.hpp", "symbol": sym}, rep, "code"), ok,
+                                     rep.errors)
+        finally:
+            pg.ROOT = saved
+            pg._file_cache.clear()
+
     def test_the_figure_draws_an_in_place_update_as_one_arrow(self) -> None:
         spec, _, _ = self.analyse(BASE)
         dot = pg.dot_source(spec)

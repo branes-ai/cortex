@@ -76,8 +76,9 @@ default). A failing invariant is reported as a gap together with its note.
 
 ## References
 
-A reference is `{file, symbol?, case?}`. The file must exist; a `symbol` must occur in it as a whole
-word; a `case` must be the beginning of one of its `TEST_CASE` names. A broken reference is an
+A reference is `{file, symbol?, case?}`. The file must exist; a `symbol` must occur in its code as
+a whole word (a mention in a comment doesn't count, so prefer a distinctive type or function name);
+a `case` must be the beginning of one of its `TEST_CASE` names. A broken reference is an
 error, so a rename in the code fails the spec's check rather than leaving a stale page.
 
 ## Delta specs
@@ -97,6 +98,8 @@ unchanged_consumers:
   FilterState: {sensor_model: "reads only the calibration"}
 ```
 
+- A delta has its own `name` and `title`; reusing the base's name is an error, since it would
+  overwrite the base's generated page.
 - Each edge or node entry carries `op`: `add` (the base must not have it), `replace` (it must) or
   `remove` (it must). A replaced entry is written out in full.
 - `sources` are appended to the base's; a `schedule` or `system_invariants` given in the delta
@@ -109,5 +112,7 @@ unchanged_consumers:
 
 - **` #` starts a comment** in a plain scalar, so `(#474, #574)` would silently become `(#474,`.
   The tool reports any string with unbalanced brackets. Quote strings that cite issues.
+- **A repeated key keeps only its last value** in plain YAML, so a second `deviations:` would erase
+  the first. The tool rejects a duplicate key.
 - **A comma splits a flow list,** so `pre: [at rest, or moving]` is two conditions. Use a block list
   of quoted strings for prose.

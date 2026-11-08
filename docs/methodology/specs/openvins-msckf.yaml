@@ -127,7 +127,7 @@ edges:
   - id: Landmark
     contents: feature position p_f (world), the triangulation's parallax and conditioning
     code: sdk/include/branes/sdk/msckf/stages/s5_triangulation.hpp
-    symbol: apply
+    symbol: Result
     invariants:
       - text: positive depth in every observing camera
         check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_at_least}

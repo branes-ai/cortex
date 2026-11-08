@@ -68,9 +68,27 @@ class Report:
 
 # ── loading and delta resolution ─────────────────────────────────────────────
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that rejects a duplicate mapping key. PyYAML keeps the last
+    one silently, so a second `deviations:` would erase the first list's gaps."""
+
+
+def _construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r}", key_node.start_mark)
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping)
+
+
 def load_yaml(path: Path) -> dict:
     with path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml.load(f, Loader=_UniqueKeyLoader)  # noqa: S506 - a SafeLoader subclass
     if not isinstance(data, dict):
         raise ValueError(f"{path}: a spec is a mapping")
     return data
@@ -153,7 +171,14 @@ def resolve(path: Path, rep: Report) -> tuple[dict, dict | None]:
 # ── lint and cross-check ─────────────────────────────────────────────────────
 
 _TEST_CASE = re.compile(r'TEST_CASE\(\s*"((?:[^"\\]|\\.)*)"')
+_COMMENT = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:[^"\\\n]|\\.)*"', re.S)
 _file_cache: dict[Path, str] = {}
+
+
+def code_only(text: str) -> str:
+    """C/C++ source with its comments removed (string literals kept), so a
+    symbol named only in a comment doesn't satisfy a reference."""
+    return _COMMENT.sub(lambda m: m.group(0) if m.group(0).startswith('"') else " ", text)
 
 
 def file_text(rel: str) -> str | None:
@@ -177,8 +202,8 @@ def check_ref(where: str, ref: dict | None, rep: Report, what: str) -> bool:
     if text is None:
         rep.error(f"{where}: {what} file not found: {ref['file']}")
         return False
-    if "symbol" in ref and not re.search(rf"\b{re.escape(ref['symbol'])}\b", text):
-        rep.error(f"{where}: {what} symbol '{ref['symbol']}' not in {ref['file']}")
+    if "symbol" in ref and not re.search(rf"\b{re.escape(ref['symbol'])}\b", code_only(text)):
+        rep.error(f"{where}: {what} symbol '{ref['symbol']}' not in the code of {ref['file']} (comments don't count)")
         return False
     if "case" in ref:
         names = _TEST_CASE.findall(text)
@@ -213,13 +238,21 @@ def lint(spec: dict, delta: dict | None, rep: Report) -> None:
             rep.error(f"unknown top-level key '{k}'")
     if raw.get("schema") != SCHEMA:
         rep.error(f"schema must be '{SCHEMA}'")
+    # Checked on the document as written: a delta that omitted its name would
+    # inherit the base's, and `render` would overwrite the base's page.
     for k in ("name", "title"):
-        if not spec.get(k):
+        if not raw.get(k):
             rep.error(f"missing '{k}'")
-    if spec.get("name") and not re.fullmatch(r"[a-z0-9][a-z0-9-]*", spec["name"]):
+    if raw.get("name") and not re.fullmatch(r"[a-z0-9][a-z0-9-]*", raw["name"]):
         rep.error("name must be kebab-case (it names the generated files)")
+    if delta is not None and "_base" in spec and raw.get("name") == spec["_base"].get("name"):
+        rep.error("a delta needs its own name: the base's would overwrite the base's generated page")
 
-    sources = {s.get("id") for s in spec.get("sources", [])}
+    sources = set()
+    for s in spec.get("sources", []):
+        if not s.get("id") or not s.get("cite"):
+            rep.error(f"source {s.get('id')!r}: needs an id and a cite")
+        sources.add(s.get("id"))
     edges = {}
     for e in spec.get("edges", []):
         eid = e.get("id")
@@ -338,6 +371,8 @@ def lint(spec: dict, delta: dict | None, rep: Report) -> None:
 
     for inv in spec.get("system_invariants", []):
         iid = inv.get("id")
+        if not iid or not inv.get("text"):
+            rep.error(f"system invariant '{iid}': needs an id and a text")
         if inv.get("status", "unknown") not in INVARIANT_STATUSES:
             rep.error(f"system invariant '{iid}': status must be one of {sorted(INVARIANT_STATUSES)}")
         if inv.get("check"):
