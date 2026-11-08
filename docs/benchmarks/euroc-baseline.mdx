@@ -204,6 +204,87 @@ OpenVINS mono's, with track seed 1:
     the default `R`) shows how large a change a small perturbation alone
     produces.
 
+## The consistency gate
+
+The ideal-track split above showed that the body-frame filter gets worse when it
+is told the truth about its measurements. `scripts/euroc-consistency.sh` (#605)
+turns that into a pass/fail check that any backend can be run through:
+
+- **Runs:** ideal tracks at S = 1 and 0.5 px, track seeds 1–3, on all 11
+  sequences. Each runs twice: with the filter's `R` matched to S, and with its
+  default `R` (4.6 px). That is 132 runs of about 11 s each, since ideal-track
+  runs read no images.
+- **Pass condition** (bounds in `scripts/euroc-consistency.json`, set before
+  any estimator was tuned against them):
+  1. no matched run is worse than 10× OpenVINS mono's window 4-DoF ATE;
+  2. at each S, the median matched ratio is below the median default ratio;
+  3. the median yaw ANEES of the matched runs is at most 3 (target 1).
+- **Yaw NEES:** `vio_pipeline` scores every EuRoC run against the ground truth
+  with `tools/pose_consistency.hpp`. It anchors the gauge (position and yaw)
+  at the first scored frame, takes the error in the filter's own convention so
+  its own covariance applies, and splits the attitude in the world frame. It
+  writes the split and the world-yaw σ to `consistency.json`.
+
+Results at commit 58f2a20, median over the three seeds (window ratio to
+OpenVINS mono):
+
+| Sequence | MSCKF 1 px matched | MSCKF 1 px default | R-IEKF 1 px matched | R-IEKF 1 px default | R-IEKF 0.5 px matched |
+|---|---:|---:|---:|---:|---:|
+| MH_01_easy | 11.9× | 15.1× | 9.1× | 9.0× | 5.1× |
+| MH_02_easy | 3.0× | 2.7× | 0.8× | 3.4× | 0.6× |
+| MH_03_medium | 2.7× | 1.8× | 1.4× | 2.5× | 1.1× |
+| MH_04_difficult | 29.8× | 2.3× | 1.5× | 1.8× | 1.3× |
+| MH_05_difficult | 0.8× | 1.1× | 0.9× | 1.1× | 0.8× |
+| V1_01_easy | 4.4× | 5.3× | 3.1× | 4.9× | 1.9× |
+| V1_02_medium | 3.0× | 2.9× | 1.7× | 3.6× | 1.4× |
+| V1_03_difficult | 4.3× | 3.1× | 2.6× | 4.1× | 1.8× |
+| V2_01_easy | 1.0× | 1.3× | 0.7× | 0.9× | 0.5× |
+| V2_02_medium | 3.7× | 3.6× | 2.4× | 4.0× | 1.6× |
+| V2_03_difficult | 24.3× | 1.5× | 1.0× | 1.3× | 0.9× |
+
+| Gate condition | MSCKF | R-IEKF |
+|---|---|---|
+| 1. No divergence (66 matched runs) | **fail:** 22 diverge | **fail:** 1 diverges (MH_01, 1 px, seed 2) |
+| 2. Matched beats default (median, 1 px / 0.5 px) | **fail:** 4.10× vs 2.62×; 6.42× vs 2.03× | **pass:** 1.47× vs 3.43×; 1.25× vs 3.39× |
+| 3. Median yaw ANEES ≤ 3 | **fail:** 47.8 | **pass:** 1.26 |
+
+- **The body-frame MSCKF fails all three.** Told the truth, it gets worse at
+  both noise levels, and 22 of its 66 matched runs diverge. Its world-yaw σ
+  falls from its 0.1 rad prior to 0.004–0.013 rad on every run, and its yaw
+  error does not, so a run's yaw ANEES is 4.5–927. This is the leak #480
+  attributed to S6 moving the mean.
+- **The R-IEKF passes the two consistency conditions.** Its world-yaw σ never
+  falls below its 0.05 rad prior on any run, as it must, since nothing
+  observes yaw. At 1 px, matched `R` helps on 10 of the 11 sequences (the MSCKF: 4), and at 0.5 px
+  the median is 1.25× OpenVINS mono's real-image score. Its one divergence is
+  MH_01, whose start moves: the adapter seeds a zero velocity at the origin
+  (see below). MH_03 (yaw ANEES 78) and MH_04 (11–12) are its outliers on
+  condition 3.
+- **On real KLT tracks the order reverses.** With the default front end the
+  R-IEKF scores 0.563 m on V1_01 against the MSCKF's 0.217 m, and 0.503 m on
+  V2_03 against 0.178 m. With ideal tracks it is the better estimator. So what
+  holds it back on real data is outside the estimator's consistency: its
+  adapter still gates at 16 per dof instead of the χ² quantile (#481), seeds
+  from a static window at the origin with zero velocity, and has none of the
+  dynamic-init (#592, #597, #599) or zero-velocity (#600) work.
+- **Roll/pitch NEES is recorded, not gated.** It is 17–3161 for both backends,
+  and it is not a clean measure on EuRoC. The ground truth carries an
+  accelerometer bias of 0.09–0.55 m/s² (V1_01: 0.548 m/s² on y). Both filters
+  seed their tilt from the raw accelerometer, so they start 0.5–2.7° tilted
+  and never learn the bias (V1_01: 2–3° throughout, with a filter tilt σ near
+  0.06°). Even after the ground truth's own bias is removed, its body frame
+  disagrees with the accelerometer's gravity by 0.1–0.9° at rest. That caps
+  the roll/pitch NEES any filter can reach against it.
+
+```sh
+scripts/euroc-consistency.sh                    # MSCKF; ~8 min at 3 jobs
+scripts/euroc-consistency.sh --backend riekf    # the R-IEKF (--invariant)
+scripts/euroc-consistency.sh --record           # record this backend's results
+```
+
+The script exits non-zero while the gate fails. Like the baseline, it needs
+the dataset on disk and is not in CI.
+
 ## The regression benchmark
 
 `scripts/euroc-baseline.sh` reruns the baseline on the development station.

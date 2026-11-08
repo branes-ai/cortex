@@ -68,7 +68,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 | C1 | Joint step against finite differences | Over several propagate → update → retract cycles | `invariant_joint_step_fd.cpp` | locked |
 | C2 | Square-root and full covariance agree | δx and P agree to 1e-12 on a rectangular factor after augmentation | "the square-root update takes the rectangular factor …" | locked |
 | C3 | Stage-boundary fixtures replay bit for bit | Captured fixtures reproduce; the first violation points at a real fault | `stage_capture.cpp` | locked (the oracle has a false positive, <Issue id={487} />) |
-| C4 | Where the loop gains unobservable information | The unobservable basis carried through the loop by the filter's own Jacobians closes against N(x̂) + Σ per-stage defects to roundoff; S3, S9 and untapped changes add no defect; no information along global translation; the yaw shares add up to the total | `observability_ledger.cpp` (4 cases); on EuRoC, `vio_pipeline --observability-ledger` | locked (instrument); body-frame leak characterized: S6's mean shift carries 95–99%, <Issue id={480} /> |
+| C4 | Where the loop gains unobservable information | The unobservable basis carried through the loop by the filter's own Jacobians closes against N(x̂) + Σ per-stage defects to roundoff; S3, S9 and untapped changes add no defect; no information along global translation; the yaw shares add up to the total | `observability_ledger.cpp` (5 cases); on EuRoC, `vio_pipeline --observability-ledger` | locked (instrument); body-frame leak characterized: S6's mean shift carries 95–99%, <Issue id={480} /> |
 
 ## D. The system, on synthetic data with matched noise
 
@@ -93,6 +93,7 @@ cortex test case that implements it (Catch2 case names, under `tests/`).
 | E6 | Mixed-precision presets on real data | No divergence for any shipped stage-type preset; ATE and NEES per preset | `vio_pipeline` EuRoC runs | manual |
 | E7 | Sanitizers on a real replay | ASan and UBSan clean end to end | run by hand | **missing** in CI <Issue id={561} /> |
 | E8 | Latency | Real-time factor 1.0× or better (now 0.10×, p50 506 ms); synthetic budget 75 ms double, 50 ms float | `vio_latency.cpp` | gated, informational <Issue id={213} /> |
+| E9 | **Consistency gate:** told the true noise, the filter improves | Ideal tracks (real IMU) at 1 and 0.5 px, seeds 1–3, on all 11 sequences: no run with R matched to the tracks worse than 10× OpenVINS mono; matched R beats the default R on the median; median gauge-anchored yaw ANEES at most 3 | `scripts/euroc-consistency.sh --backend msckf` or `riekf` (bounds and recorded results in `scripts/euroc-consistency.json`); `pose_consistency.cpp` locks the NEES split | **failing**, manual: the MSCKF fails all three (22 of 66 diverge, yaw ANEES 47.8); the R-IEKF passes 2 and 3 (yaw ANEES 1.26) and fails 1 on one MH_01 run <Issue id={605} />, <Issue id={606} /> |
 
 ## F. Engineering hygiene
 
