@@ -1,0 +1,270 @@
+# The right-invariant MSCKF (R-IEKF) as a delta on the OpenVINS MSCKF (#610,
+# #608). Barrau & Bonnabel's invariant EKF changes one data structure: the
+# error convention of the filter state. Every transformation that reads or
+# writes the filter state is listed here: replaced, or kept with a reason.
+#
+# This spec records the R-IEKF as it runs on EuRoC today, through
+# tools/include/branes/tools/invariant_backend_adapter.hpp. Its gaps are the
+# pieces #608 replaces with the shipped path: the bespoke initialize and
+# seed_state, the 16-per-dof gate, and the missing zero-velocity update.
+# Format: docs/methodology/spec-format.mdx.
+
+schema: branes.pipeline/1
+base: openvins-msckf.yaml
+name: riekf-msckf
+title: Right-Invariant MSCKF
+summary: >-
+  The OpenVINS MSCKF with the nav error taken on SE₂(3), right-invariant
+  (R = Exp(δθ)·R̂, v = Exp(δθ)·v̂ + ν, p = Exp(δθ)·p̂ + ρ). Propagation's Φ
+  then doesn't depend on the estimate, so the 4-D unobservable subspace is
+  preserved by construction and no update can gain information along it:
+  the property FEJ approximates in the body-frame filter.
+
+sources:
+  - id: barrau2017
+    cite: >-
+      A. Barrau and S. Bonnabel, "The Invariant Extended Kalman Filter as a
+      Stable Observer", IEEE TAC 62(4), 2017.
+  - id: hartley2020
+    cite: >-
+      R. Hartley, M. Ghaffari, R. M. Eustice and J. W. Grizzle, "Contact-aided
+      invariant extended Kalman filtering for robot state estimation", IJRR
+      39(4), 2020 (the right-invariant IMU error dynamics on SE₂(3)).
+
+edges:
+  - id: FilterState
+    op: replace
+    kind: state
+    contents: >-
+      nav on SE₂(3) with additive biases (θ, ν, ρ, b_g, b_a: 15), clones (θ, ρ:
+      6 each) in the same right-invariant error, the joint covariance P
+    code: sdk/include/branes/sdk/msckf/invariant_propagator.hpp
+    symbol: InvariantNavState
+    invariants:
+      - text: P symmetric
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_symmetric}
+      - text: P positive semidefinite
+        check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_psd}
+      - text: R and every clone rotation ∈ SO(3)
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_so3}
+      - text: "every Jacobian and retraction uses R = Exp(δθ)·R̂, v = Exp(δθ)·v̂ + ν, p = Exp(δθ)·p̂ + ρ"
+    precision: stored in double; the Joseph form on EuRoC (the square-root form diverges there)
+    note: the error convention changes; every consumer is revisited below
+
+nodes:
+  - id: initialize
+    op: replace
+    stage: S1a
+    title: Initialization (adapter)
+    does: a sliding 150-sample IMU window → a static, else gravity-aligned, attitude and biases
+    reads: [ImuSample]
+    writes: [NavSeed]
+    source: {ref: geneva2020, where: initialization}
+    pre:
+      - "an IMU window at rest or tilted but unaccelerated"
+    post:
+      - "gravity-aligned attitude"
+    code: tools/include/branes/tools/invariant_backend_adapter.hpp
+    tests:
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: bootstraps from a static IMU window"}
+    status: partial
+    note: not the shipped initializer; #608 removes this replacement so the base node runs
+    deviations:
+      - "not the base's initializer: no vibrating-rest gyro bias (#591), no timeouts, no dynamic VI alignment (#592), so a moving start is seeded at rest (#608)"
+
+  - id: seed_state
+    op: replace
+    stage: S1b
+    title: Seed the filter (adapter)
+    does: the seed's attitude and biases → the nav at the origin with zero velocity, an isotropic σ = 0.05 prior
+    reads: [NavSeed]
+    writes: [FilterState]
+    source: {ref: barrau2017, where: the invariant error}
+    pre:
+      - "a successful seed"
+    post:
+      - "P₀ positive-definite in the right-invariant error"
+    code: tools/include/branes/tools/invariant_backend_adapter.hpp
+    status: partial
+    note: "#608: map the base's prior into the right-invariant error, P = J·P_body·Jᵀ"
+    deviations:
+      - "the seed's velocity is dropped and the prior is not the base's: an isotropic 0.05, not the body-frame prior mapped into this error (#608)"
+
+  - id: propagate
+    op: replace
+    stage: S2
+    title: Invariant IMU propagation
+    does: one IMU sample → the propagated SE₂(3) mean; P ← Φ P Φᵀ + L Lᵀ with Φ independent of the estimate
+    reads: [FilterState, ImuSample]
+    writes: [FilterState]
+    source: {ref: hartley2020, where: the right-invariant IMU error dynamics}
+    pre:
+      - "Δt > 0 and bounded"
+    post:
+      - "R ∈ SO(3); P symmetric PSD"
+      - "Φ preserves the gauge null space at any state"
+    code: sdk/include/branes/sdk/msckf/invariant_propagator.hpp
+    bench: {file: tests/tools/stage_bench_s2_s3.cpp, case: "S2 bench: the invariant error maps the body-frame gauge"}
+    tests:
+      - {file: tests/sdk/invariant_propagator.cpp, case: "invariant propagation: Phi preserves the gauge null space at any state"}
+      - {file: tests/sdk/invariant_propagator.cpp, case: "invariant propagation: the predicted covariance matches a Monte-Carlo"}
+    status: implemented
+
+  - id: augment
+    op: replace
+    stage: S3
+    title: Invariant augmentation
+    does: the state → the state plus a clone sharing the nav's δθ and ρ, P′ = G P Gᵀ
+    reads: [FilterState]
+    writes: [FilterState]
+    source: {ref: mourikis2007, where: "§III-B, stochastic cloning, in the invariant error"}
+    pre:
+      - "the state propagated to the image time"
+    post:
+      - "P grows by 6 with an exact block copy; P PSD"
+    code: sdk/include/branes/sdk/msckf/msckf_invariant_backend.hpp
+    tests:
+      - {file: tests/sdk/invariant_joint_step_fd.cpp, case: "DIAG FD: augmentation G under rotation"}
+      - {file: tests/sdk/msckf_invariant_backend.cpp, case: "invariant backend: propagate + augment + update runs and stays PSD"}
+    status: implemented
+
+  - id: triangulate
+    op: replace
+    stage: S5
+    title: Invariant triangulation
+    does: an ended track and the invariant clones → the feature position, linear then Gauss-Newton
+    reads: [TrackDB, FilterState]
+    writes: [Landmark]
+    source: {ref: mourikis2007, where: "§III-C"}
+    pre:
+      - "at least two observations from live clones"
+    post:
+      - "positive depth in every camera; a low-parallax linear solve repaired by refinement"
+    code: sdk/include/branes/sdk/msckf/invariant_update.hpp
+    tests:
+      - {file: tests/sdk/invariant_update.cpp, case: "invariant triangulation: Gauss-Newton refinement repairs"}
+    status: implemented
+
+  - id: msckf_update
+    op: replace
+    stage: S6
+    title: Invariant MSCKF update
+    does: track + landmark → the invariant H (nav columns zero) → null-space projection → χ² gate → EKF update, right-invariant retraction
+    reads: [FilterState, TrackDB, Landmark]
+    writes: [FilterState, UpdateDiag]
+    source: {ref: barrau2017, where: the invariant measurement update}
+    pre:
+      - "the landmark triangulated against the current clones"
+    post:
+      - "H annihilates the 4-DoF gauge at the actual clone poses"
+      - "P⁺ ⪯ P⁻; a non-finite δx is rolled back"
+    code: sdk/include/branes/sdk/msckf/msckf_invariant_backend.hpp
+    tests:
+      - {file: tests/sdk/invariant_update.cpp, case: "invariant update: H annihilates the 4-DoF gauge"}
+      - {file: tests/sdk/msckf_invariant_backend.cpp, case: "invariant backend: the marginalized joint update annihilates the 4-DoF gauge"}
+      - {file: tests/sdk/invariant_joint_step_fd.cpp, case: "DIAG FD: measurement-update linearization (proj.r vs -H*e)"}
+    status: partial
+    deviations:
+      - "the gate is a fixed 16 per dof on EuRoC (the adapter), not the base's χ²₁₋α(dof) quantile (#481, #608)"
+      - "the update does not report its NIS: UpdateDiag is not filled"
+
+  - id: marginalize
+    op: replace
+    stage: S9
+    title: Marginalization (invariant backend)
+    does: the state → the state without its oldest clone, after fusing every track that touches it
+    reads: [FilterState, TrackDB]
+    writes: [FilterState, TrackDB]
+    source: {ref: mourikis2007, where: "§III-E"}
+    pre:
+      - "every track touching the clone has been fused"
+    post:
+      - "P is the principal submatrix; no observation refers to the dropped clone"
+    code: sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp
+    tests:
+      - {file: tests/sdk/invariant_vio_backend.cpp, case: "invariant VIO backend: end-to-end integration over a seed sweep"}
+    status: implemented
+    note: a principal submatrix is the same in any error convention; the track bookkeeping is the invariant backend's own
+
+  - id: zero_velocity
+    op: replace
+    stage: S8
+    optional: true
+    title: Invariant zero-velocity update
+    does: >-
+      at rest → v = 0 in the invariant error (H_θ = −[v̂]×, H_ν = I, r = −v̂) and
+      b_g = ω̄; the frame adds no clone
+    reads: [FilterState, ImuSample, TrackDB]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: zero-velocity update}
+    pre:
+      - "both the IMU and the image tests say rest (the base's detector)"
+    post:
+      - "the posterior equals the Kalman update with H from finite differences of the retraction"
+    status: planned
+    note: "#608"
+
+  - id: online_calib
+    op: replace
+    stage: S10
+    optional: true
+    title: Online calibration (not wired on EuRoC)
+    does: the state ⊕ camera↔IMU extrinsics; MsckfInvariantBackend::enable_calibration exists, the EuRoC adapter doesn't call it
+    reads: [FilterState, CameraCalib]
+    writes: [FilterState]
+    source: {ref: geneva2020, where: online calibration}
+    status: missing
+
+unchanged_consumers:
+  FilterState:
+    slam_update: "not implemented in either filter"
+
+schedule:
+  driver: tools/include/branes/tools/invariant_backend_adapter.hpp
+  events:
+    - event: imu
+      rate_hz: 200
+      steps:
+        - {call: initialize, when: not initialized, note: the adapter's 150-sample window}
+        - {call: seed_state, when: a seed is ready}
+        - {call: propagate, when: initialized, note: on the held previous sample}
+    - event: image
+      rate_hz: 20
+      steps:
+        - {call: sensor_model}
+        - {call: track}
+        - {call: propagate, note: to the image time, on the held IMU sample}
+        - {call: zero_velocity, when: at rest, note: "planned (#608); then return"}
+        - {call: msckf_update, foreach: track touching the oldest clone, when: window full}
+        - {call: marginalize, when: window full}
+        - {call: augment}
+        - {call: triangulate, foreach: ended track (ascending id)}
+        - {call: msckf_update, foreach: ended track (ascending id)}
+
+system_invariants:
+  - id: nees
+    text: NEES ≈ dim(state) against ground truth (consistency)
+    check: {file: tools/include/branes/tools/pose_consistency.hpp, symbol: PoseConsistency}
+    status: unknown
+    note: "consistent on ideal EuRoC tracks (yaw ANEES 1.26); on real KLT tracks not yet measured (#365)"
+  - id: nis
+    text: NIS ≈ dim(measurement) per update
+    status: unknown
+    note: the invariant update does not report its NIS
+  - id: whiteness
+    text: innovations zero-mean and white
+    status: unknown
+  - id: gauge
+    text: no information gained along global yaw and translation (the 4-D unobservable space)
+    check: {file: tests/sdk/msckf_invariant_backend.cpp, case: "invariant backend: the marginalized joint update annihilates the 4-DoF gauge"}
+    status: holds
+  - id: consistency_gate
+    text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
+    check: {file: scripts/euroc-consistency.sh}
+    status: failing
+    note: "passes conditions 2 and 3 (yaw σ ratio 0.90); fails 1 on one MH_01 run, a moving start the adapter seeds at rest (#605)"
+  - id: accuracy
+    text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
+    check: {file: scripts/euroc-baseline.sh}
+    status: failing
+    note: "worse than the body-frame MSCKF on real KLT tracks: V1_01 0.563 m vs 0.217 m (#608)"
