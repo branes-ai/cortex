@@ -10,11 +10,23 @@
 # its default R. The verdict (bounds in scripts/euroc-consistency.json):
 #
 #   1. no divergence: every matched run's window 4-DoF ATE is under
-#      diverge_ratio x OpenVINS mono's (failed runs count as diverged);
+#      diverge_ratio x OpenVINS mono's (a run that writes no trajectory counts
+#      as diverged);
 #   2. matched R beats the default R: at each S, the median window ratio of the
 #      matched runs is below the default runs';
-#   3. yaw consistency: the median over the matched runs of the yaw ANEES
-#      (gauge-anchored, world frame; target 1) is at most yaw_nees_max.
+#   3. no yaw collapse: nothing observes yaw, so the filter's world-yaw sigma
+#      should not fall below its value at the gauge anchor. The median over the
+#      matched runs of (smallest yaw sigma / yaw sigma at the anchor) must be at
+#      least yaw_sigma_ratio_min.
+#
+# A run whose trajectory exists but that traj_eval could not score is an
+# evaluation failure, not a divergence: the gate then reports UNAVAILABLE and
+# fails, and --record refuses to store it.
+#
+# The yaw ANEES is printed but not gated. Its error is measured from the anchor
+# and its denominator is the current yaw variance alone; the correct variance
+# of the change since the anchor needs the covariance between the two times,
+# which neither filter exposes. So the ANEES is not a sound consistency test.
 #
 # Roll/pitch and position NEES are recorded but not gated: on EuRoC the ground
 # truth's body frame and the accelerometer's gravity disagree by 0.1-0.9 deg
@@ -155,7 +167,7 @@ done | xargs -P "$JOBS" -L 1 bash -c 'run_one "$@"' _
 
 commit="$(git -C "$REPO" rev-parse --short HEAD)"
 python3 - "$BASELINE" "$GATE" "$OUT" "$backend" "$record" "$commit" "$SIGMAS" "$SEEDS" "${seqs[@]}" <<'EOF'
-import datetime, json, math, statistics, sys
+import datetime, json, math, os, statistics, sys
 
 base_path, gate_path, out, backend, record, commit, sigmas, seeds = sys.argv[1:9]
 seqs = sys.argv[9:]
@@ -186,10 +198,19 @@ for s in seqs:
                 d = f"{out}/{s}/s{sg}_seed{sd}_{r}"
                 sc, cj = load(f"{d}/score_window.json"), load(f"{d}/consistency.json")
                 ate = sc.get("ate_4dof") if sc else None
+                try:
+                    has_traj = os.path.getsize(f"{d}/trajectory.tum") > 0
+                except OSError:
+                    has_traj = False
                 pose = cj.get("pose", {}) if cj else {}
                 led = cj.get("ledger") if cj else None
                 ratio = ate / ov if fin(ate) else math.inf
+                # No trajectory: the estimator failed (a divergence). A trajectory
+                # without a finite score: the evaluation failed (unavailable).
+                status = "scored" if fin(ate) else "eval_failed" if has_traj else "no_trajectory"
+                ys0, ysm = pose.get("yaw_sigma_first"), pose.get("yaw_sigma_min")
                 runs[f"{s}/{sg}/{sd}/{r}"] = {
+                    "status": status,
                     "ate_4dof": round(ate, 4) if fin(ate) else None,
                     "ratio": round(ratio, 3) if fin(ratio) else None,
                     "rpe_rot_deg": round(sc["rpe_rot_deg"], 3) if sc and fin(sc.get("rpe_rot_deg")) else None,
@@ -198,6 +219,7 @@ for s in seqs:
                     "nees_pos": pose.get("nees_pos"),
                     "yaw_sigma_first": pose.get("yaw_sigma_first"),
                     "yaw_sigma_min": pose.get("yaw_sigma_min"),
+                    "yaw_sigma_ratio": round(ysm / ys0, 4) if fin(ys0) and fin(ysm) and ys0 > 0 else None,
                     "yaw_err_max": pose.get("yaw_err_max"),
                     "ledger_info_yaw": led.get("info_yaw") if led else None,
                     "ledger_share_s6": led.get("share_s6_mean_shift") if led else None,
@@ -219,48 +241,65 @@ def g(x, w=7, p=2):
 
 
 print(f"\nConsistency gate, backend {backend}: window 4-DoF ATE / OpenVINS mono; ideal tracks of S px,")
-print("R matched to S or the default; median over seeds. Yaw ANEES target 1.")
+print("R matched to S or the default; median over seeds. Yaw sigma ratio = min / anchor (target 1);")
+print("yaw and roll/pitch ANEES are informational.")
 for sg in sigmas:
     print(f"\n  S = {sg} px")
-    print(f"  {'sequence':17}{'matched':>8}{'default':>8}{'diverged':>9}{'yaw NEES':>9}{'rp NEES':>9}{'yaw sigma min':>14}")
+    print(f"  {'sequence':17}{'matched':>8}{'default':>8}{'diverged':>9}{'yaw sig ratio':>14}{'yaw NEES':>9}{'rp NEES':>9}")
     for s in seqs:
         m = [ratio(f"{s}/{sg}/{sd}/matched") for sd in seeds]
         d = [ratio(f"{s}/{sg}/{sd}/default") for sd in seeds]
         dv = sum(1 for x in m if x >= B["diverge_ratio"])
         ny = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_yaw"] for sd in seeds])
         nr = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_rp"] for sd in seeds])
-        ys = med([runs[f"{s}/{sg}/{sd}/matched"]["yaw_sigma_min"] for sd in seeds])
-        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dv:>6}/{len(seeds)}{g(ny, 9, 1)}{g(nr, 9, 0)}{g(ys, 14, 4)}")
+        yr = med([runs[f"{s}/{sg}/{sd}/matched"]["yaw_sigma_ratio"] for sd in seeds])
+        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dv:>6}/{len(seeds)}{g(yr, 14, 3)}{g(ny, 9, 1)}{g(nr, 9, 0)}")
 
 verdict = {}
-diverged = sorted(k for k in runs if k.endswith("/matched") and ratio(k) >= B["diverge_ratio"])
+unavailable = sorted(k for k, v in runs.items() if v["status"] == "eval_failed")
+diverged = sorted(k for k in runs if k.endswith("/matched") and k not in unavailable and ratio(k) >= B["diverge_ratio"])
 verdict["no_divergence"] = not diverged
 beats = {}
 for sg in sigmas:
     m = med([ratio(f"{s}/{sg}/{sd}/matched") for s in seqs for sd in seeds])
     d = med([ratio(f"{s}/{sg}/{sd}/default") for s in seqs for sd in seeds])
     beats[sg] = {"matched": round(m, 3) if fin(m) else None, "default": round(d, 3) if fin(d) else None}
-verdict["matched_beats_default"] = all(
-    v["matched"] is not None and v["matched"] < (v["default"] if v["default"] is not None else math.inf)
-    for v in beats.values())
+# A median over a missing default-R score would read it as infinity and let
+# matched R "win": every default run must have been scored for the comparison.
+default_missing = sorted(k for k, v in runs.items() if k.endswith("/default") and v["status"] != "scored")
+verdict["matched_beats_default"] = not default_missing and all(
+    v["matched"] is not None and v["default"] is not None and v["matched"] < v["default"] for v in beats.values())
 yaw = med([runs[k]["nees_yaw"] for k in runs if k.endswith("/matched")])
-verdict["yaw_consistent"] = fin(yaw) and yaw <= B["yaw_nees_max"]
-passed = all(verdict.values())
+yaw_ratio = statistics.median([runs[k]["yaw_sigma_ratio"] if runs[k]["yaw_sigma_ratio"] is not None else 0.0
+                               for k in runs if k.endswith("/matched")])
+verdict["no_yaw_collapse"] = yaw_ratio >= B["yaw_sigma_ratio_min"]
+passed = all(verdict.values()) and not unavailable
 
 print(f"\n  1. no divergence (matched ratio < {B['diverge_ratio']}x): {'PASS' if verdict['no_divergence'] else 'FAIL'}"
       + (f" — {len(diverged)} of {sum(1 for k in runs if k.endswith('/matched'))} diverged: "
          + ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "") if diverged else ""))
 print(f"  2. matched R beats the default R (median ratio): {'PASS' if verdict['matched_beats_default'] else 'FAIL'} — "
       + "; ".join(f"S {k}: {g(v['matched'] or math.inf, 1, 2)} vs {g(v['default'] or math.inf, 1, 2)}" for k, v in beats.items()))
-print(f"  3. median yaw ANEES of the matched runs <= {B['yaw_nees_max']}: {'PASS' if verdict['yaw_consistent'] else 'FAIL'}"
-      f" — {g(yaw, 1, 2)}")
-print(f"\n  gate: {'PASS' if passed else 'FAIL'}  ({len(seqs)} sequences, S in {sigmas}, seeds {seeds}; {out})")
+if default_missing:
+    print(f"     default-R comparison unavailable: {len(default_missing)} default run(s) not scored: "
+          + ", ".join(default_missing[:8]))
+print(f"  3. no yaw collapse (median yaw sigma min/anchor >= {B['yaw_sigma_ratio_min']}): "
+      f"{'PASS' if verdict['no_yaw_collapse'] else 'FAIL'} — {g(yaw_ratio, 1, 3)}")
+print(f"     (informational: median yaw ANEES {g(yaw, 1, 2)}; not a sound test, see the header)")
+if unavailable:
+    print(f"\n  UNAVAILABLE: traj_eval could not score {len(unavailable)} run(s) that wrote a trajectory: "
+          + ", ".join(unavailable[:8]) + (" ..." if len(unavailable) > 8 else ""))
+print(f"\n  gate: {'PASS' if passed else 'UNAVAILABLE' if unavailable else 'FAIL'}  "
+      f"({len(seqs)} sequences, S in {sigmas}, seeds {seeds}; {out})")
 
-if record:
+if record and unavailable:
+    print("  not recording: some runs could not be scored (an evaluation fault, not an estimator result)")
+elif record:
     gate.setdefault("backends", {})[backend] = {
         "commit": commit,
         "date": datetime.date.today().isoformat(),
-        "verdict": {**verdict, "pass": passed, "median_yaw_nees": round(yaw, 3) if fin(yaw) else None,
+        "verdict": {**verdict, "pass": passed, "median_yaw_sigma_ratio": round(yaw_ratio, 4),
+                    "median_yaw_nees": round(yaw, 3) if fin(yaw) else None,
                     "median_ratio": beats, "diverged": diverged},
         "runs": runs,
     }

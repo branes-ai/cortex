@@ -29,8 +29,17 @@
 //   - right_invariant (R-IEKF):      R_true = Exp(φ)·R̂, p_true = Exp(φ)·p̂ + ρ;
 //                                    φ is already in the world frame.
 //
-// The anchor frame itself has zero yaw and position error by construction, so
-// early frames read low; over a run of thousands of frames that is immaterial.
+// The anchor frame itself has zero yaw and position error by construction.
+// The yaw (and position) ANEES is therefore only approximate. Its error is the
+// change since the anchor, but its denominator is the current variance alone.
+// The variance of that change also needs the anchor's variance and the
+// covariance between the two times, which neither filter exposes. With a large
+// yaw prior that the filter never reduces, the current variance mostly
+// reflects the prior and the ANEES reads low. The world-yaw σ is the sound
+// signal: nothing observes yaw, so it should not fall below its value at the
+// anchor (yaw_sigma_min against yaw_sigma_first). The EuRoC gate
+// (scripts/euroc-consistency.sh) gates on that ratio and reports the ANEES for
+// information only.
 //
 // Header-only, C++20.
 

@@ -214,19 +214,41 @@ turns that into a pass/fail check that any backend can be run through:
   sequences. Each runs twice: with the filter's `R` matched to S, and with its
   default `R` (4.6 px). That is 132 runs of about 11 s each, since ideal-track
   runs read no images.
-- **Pass condition** (bounds in `scripts/euroc-consistency.json`, set before
-  any estimator was tuned against them):
-  1. no matched run is worse than 10× OpenVINS mono's window 4-DoF ATE;
-  2. at each S, the median matched ratio is below the median default ratio;
-  3. the median yaw ANEES of the matched runs is at most 3 (target 1).
-- **Yaw NEES:** `vio_pipeline` scores every EuRoC run against the ground truth
+- **Pass condition** (bounds in `scripts/euroc-consistency.json`):
+  1. no matched run is worse than 10× OpenVINS mono's window 4-DoF ATE (a run
+     that writes no trajectory counts as diverged);
+  2. at each S, the median matched ratio is below the median default ratio,
+     and every default run was scored;
+  3. **no yaw collapse:** nothing observes yaw, so the filter's world-yaw σ
+     should not fall below its value at the gauge anchor. The median over the
+     matched runs of (smallest yaw σ ÷ yaw σ at the anchor) must be at least
+     0.5.
+
+  A run that writes a trajectory that `traj_eval` cannot score is an
+  evaluation fault, not a divergence. The gate then reports UNAVAILABLE, and
+  `--record` refuses to store the result.
+- **Pose NEES:** `vio_pipeline` scores every EuRoC run against the ground truth
   with `tools/pose_consistency.hpp`. It anchors the gauge (position and yaw)
   at the first scored frame, takes the error in the filter's own convention so
   its own covariance applies, and splits the attitude in the world frame. It
   writes the split and the world-yaw σ to `consistency.json`.
+- **Why the yaw ANEES is not gated.** The first version of condition 3 was a
+  median yaw ANEES of at most 3. Review of #607 showed that test is unsound.
+  The yaw error is measured from the anchor, but the denominator is the
+  current yaw variance alone. The variance of the change since the anchor also
+  needs the anchor's variance and the covariance between the two times, which
+  neither filter exposes. With a yaw prior the filter never reduces, the
+  current variance mostly reflects the prior, so the ANEES reads low. The yaw σ
+  ratio needs no cross-time term.
+  - This replacement was made after the first results. The 10× and ANEES
+    bounds had been set before any estimator ran.
+  - The 0.5 bound lets the marginal yaw σ fall somewhat through its correlation
+    with observable states (the R-IEKF reaches 0.52 on MH_03), but not
+    collapse.
+  - Every verdict below is the same at any bound between 0.13 and 0.9.
 
-Results at commit 58f2a20, median over the three seeds (window ratio to
-OpenVINS mono):
+Results (commit db7ccdc; the estimator code is unchanged since 58f2a20), median
+over the three seeds (window ratio to OpenVINS mono):
 
 | Sequence | MSCKF 1 px matched | MSCKF 1 px default | R-IEKF 1 px matched | R-IEKF 1 px default | R-IEKF 0.5 px matched |
 |---|---:|---:|---:|---:|---:|
@@ -246,20 +268,23 @@ OpenVINS mono):
 |---|---|---|
 | 1. No divergence (66 matched runs) | **fail:** 22 diverge | **fail:** 1 diverges (MH_01, 1 px, seed 2) |
 | 2. Matched beats default (median, 1 px / 0.5 px) | **fail:** 4.10× vs 2.62×; 6.42× vs 2.03× | **pass:** 1.47× vs 3.43×; 1.25× vs 3.39× |
-| 3. Median yaw ANEES ≤ 3 | **fail:** 47.8 | **pass:** 1.26 |
+| 3. No yaw collapse (median yaw σ min ÷ anchor ≥ 0.5) | **fail:** 0.076 (every run 0.03–0.13) | **pass:** 0.902 (every run 0.52–0.99) |
+| Yaw ANEES (informational) | 47.8 | 1.26 |
 
 - **The body-frame MSCKF fails all three.** Told the truth, it gets worse at
   both noise levels, and 22 of its 66 matched runs diverge. Its world-yaw σ
-  falls from its 0.1 rad prior to 0.004–0.013 rad on every run, and its yaw
-  error does not, so a run's yaw ANEES is 4.5–927. This is the leak #480
-  attributed to S6 moving the mean.
-- **The R-IEKF passes the two consistency conditions.** Its world-yaw σ never
-  falls below its 0.05 rad prior on any run, as it must, since nothing
-  observes yaw. At 1 px, matched `R` helps on 10 of the 11 sequences (the MSCKF: 4), and at 0.5 px
-  the median is 1.25× OpenVINS mono's real-image score. Its one divergence is
-  MH_01, whose start moves: the adapter seeds a zero velocity at the origin
-  (see below). MH_03 (yaw ANEES 78) and MH_04 (11–12) are its outliers on
-  condition 3.
+  falls to 3–13% of its value at the anchor on every run (to 0.004–0.013 rad),
+  and its yaw error does not shrink with it. This is the leak #480 attributed
+  to S6 moving the mean.
+- **The R-IEKF passes the two consistency conditions.** Its world-yaw σ holds
+  at a median 90% of its anchor value and never falls below its 0.05 rad
+  prior. At 1 px, matched `R` helps on 10 of the 11 sequences (the MSCKF: 4),
+  and at 0.5 px the median is 1.25× OpenVINS mono's real-image score.
+  - Its one divergence is MH_01, whose start moves: the adapter seeds a zero
+    velocity at the origin (see below).
+  - Its weakest sequences on condition 3 are MH_03 (yaw σ falls to 0.52 of the
+    anchor) and V1_03 (0.68). There its anchor σ sits above the prior and
+    returns to it.
 - **On real KLT tracks the order reverses.** With the default front end the
   R-IEKF scores 0.563 m on V1_01 against the MSCKF's 0.217 m, and 0.503 m on
   V2_03 against 0.178 m. With ideal tracks it is the better estimator. So what
