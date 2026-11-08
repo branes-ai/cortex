@@ -1,0 +1,250 @@
+# The EuRoC consistency gate as a transformation graph (#610, #613): a V&V bench,
+# not an estimator. It asks whether a filter told the true noise does better
+# and stays consistent. Before #613 its truth was the raw ground truth while
+# its IMU was real, so "the true noise" was not true: the ground truth drifts
+# 0.25–0.45 px against the gyro over 0.25 s in the Vicon rooms. Here every
+# input to the filter is generated from one smooth truth, a B-spline through
+# the ground truth, so R and Q are exactly the noise injected.
+# Written before the code (#613): nodes marked planned do not exist yet.
+# Format: docs/methodology/spec-format.mdx.
+
+schema: branes.pipeline/1
+name: euroc-consistency-gate
+title: EuRoC Consistency Gate
+summary: >-
+  For each sequence, track-noise level S, seed and R (matched to S, or the
+  filter's default): fit a smooth truth through the ground truth, synthesize
+  the IMU and the feature tracks from it with known noise, run the backend
+  under test, score its trajectory and pose consistency against that truth;
+  then judge the grid. Every backend runs with the same S6d gate.
+
+sources:
+  - id: kim1995
+    cite: >-
+      M.-J. Kim, M.-S. Kim and S. Y. Shin, "A General Construction Scheme for
+      Unit Quaternion Curves with Simple High Order Derivatives", SIGGRAPH 1995
+      (the cumulative B-spline on rotations).
+  - id: sommer2020
+    cite: >-
+      C. Sommer, V. Usenko, D. Schubert, N. Demmel and D. Cremers, "Efficient
+      Derivative Computation for Cumulative B-Splines on Lie Groups", CVPR 2020
+      (angular velocity and acceleration of a cumulative spline).
+  - id: mueggler2018
+    cite: >-
+      E. Mueggler, G. Gallego, H. Rebecq and D. Scaramuzza, "Continuous-Time
+      Visual-Inertial Odometry for Event Cameras", IEEE T-RO 34(6), 2018
+      (an IMU synthesized from a spline trajectory).
+  - id: barshalom2001
+    cite: >-
+      Y. Bar-Shalom, X. R. Li and T. Kirubarajan, "Estimation with Applications
+      to Tracking and Navigation", Wiley 2001 (NEES, NIS and their χ² bands).
+  - id: zhang2018
+    cite: >-
+      Z. Zhang and D. Scaramuzza, "A Tutorial on Quantitative Trajectory
+      Evaluation for Visual(-Inertial) Odometry", IROS 2018 (4-DoF alignment,
+      ATE, RPE).
+
+edges:
+  - id: GroundTruth
+    kind: input
+    contents: the EuRoC state_groundtruth_estimate0 poses (Vicon or Leica, 200 Hz)
+    code: tools/include/branes/tools/ideal_tracks.hpp
+    symbol: IdealTracks
+    invariants:
+      - text: timestamps strictly increasing
+        check: {file: sdk/include/branes/sdk/eval/invariants/stream_checks.hpp, symbol: check_timestamps_increasing}
+
+  - id: NoiseModel
+    kind: input
+    contents: >-
+      the gyro and accelerometer noise densities and bias random walks
+      (VioConfig's), the track pixel σ S, and the seed
+    code: sdk/include/branes/sdk/vio_backend.hpp
+    symbol: VioConfig
+    invariants:
+      - text: the filter's Q and the synthesis use the same densities; matched R equals S
+    precision: double throughout; the bench is not a precision study
+
+  - id: CameraCalib
+    kind: input
+    contents: EuRoC cam0 intrinsics, distortion and camera↔IMU extrinsic
+    code: tools/include/branes/tools/euroc_cam0.hpp
+    symbol: euroc_cam0
+    invariants:
+      - text: R_imu_cam ∈ SO(3)
+        check: {file: sdk/include/branes/sdk/eval/invariants/geometry_checks.hpp, symbol: check_so3}
+
+  - id: TruthSpline
+    contents: >-
+      a uniform cumulative cubic B-spline on SO(3) × ℝ³ with control poses at
+      ground-truth samples; pose, angular velocity and acceleration at any time
+      inside its span
+    invariants:
+      - text: "C² in position and rotation; ω and a match finite differences of its pose"
+      - text: "stays within a stated bound of the ground truth (it approximates, it is not fitted)"
+
+  - id: ImuStream
+    contents: "200 Hz samples ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks"
+    invariants:
+      - text: "noise-free, integrated by the shipped S2, it reproduces the spline's pose"
+      - text: "the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness)"
+
+  - id: TrackStream
+    contents: per image time, pixel observations of fixed landmarks seen from the truth's camera pose, plus N(0, S²) per axis
+    code: tools/include/branes/tools/ideal_tracks.hpp
+    symbol: IdealTracks
+    invariants:
+      - text: "noise-free, each observation is the exact projection of its landmark"
+      - text: the added noise is N(0, S²) per axis and nothing else
+
+  - id: Estimate
+    contents: the backend's trajectory (TUM) and per-frame pose covariance in its own error convention
+    code: tools/src/vio_pipeline.cpp
+    symbol: write_tum
+    invariants:
+      - text: finite; one pose per tracked frame
+
+  - id: Score
+    contents: >-
+      window 4-DoF ATE ÷ OpenVINS mono, the pose NEES split, the world-yaw σ
+      over the run, NIS
+    code: tools/include/branes/tools/pose_consistency.hpp
+    symbol: PoseConsistencySummary
+    invariants:
+      - text: scored against TruthSpline, not the raw ground truth
+      - text: a run with no trajectory counts as diverged; one that cannot be scored is unavailable
+
+  - id: GateVerdict
+    kind: output
+    contents: PASS, FAIL or UNAVAILABLE per condition, and the recorded results
+    code: scripts/euroc-consistency.json
+
+nodes:
+  - id: fit_spline
+    stage: G1
+    title: Fit the truth
+    does: ground-truth poses → a cumulative cubic B-spline through control poses sampled from them
+    reads: [GroundTruth]
+    writes: [TruthSpline]
+    source: {ref: kim1995, where: "the cumulative basis; derivatives from sommer2020"}
+    pre:
+      - "the ground truth covers the sequence; no gap longer than one knot interval"
+    post:
+      - "pose, ω and a are defined on the span; ω and a agree with finite differences of the pose"
+      - "the deviation from the ground truth is reported"
+    status: planned
+
+  - id: synth_imu
+    stage: G2
+    title: Synthesize the IMU
+    does: the spline at the real IMU timestamps → ω and specific force in the body frame, plus noise and bias walks at the configured densities
+    reads: [TruthSpline, NoiseModel]
+    writes: [ImuStream]
+    source: {ref: mueggler2018, where: "the IMU from a spline trajectory"}
+    pre:
+      - "the IMU timestamps lie inside the spline's span"
+    post:
+      - "noise-free, the shipped S2 integrates it back to the spline's pose"
+      - "the noise statistics match the densities"
+    status: planned
+
+  - id: synth_tracks
+    stage: G3
+    title: Synthesize the tracks
+    does: the camera pose from the truth at each image time → projections of seeded landmarks, plus N(0, S²)
+    reads: [TruthSpline, CameraCalib, NoiseModel]
+    writes: [TrackStream]
+    source: {ref: zhang2018, where: "ideal measurements for a controlled evaluation"}
+    pre:
+      - "the truth covers the image time"
+    post:
+      - "noise-free, every observation is the exact projection; the noise is the injected noise only"
+    code: tools/include/branes/tools/ideal_tracks.hpp
+    tests:
+      - {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks are projections of fixed landmarks"}
+      - {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks add the noise and only the noise"}
+    status: implemented
+    deviations:
+      - "reads the raw ground truth today, not the spline (#613)"
+
+  - id: run_filter
+    stage: G4
+    title: Run the backend under test
+    does: the IMU and the tracks → the estimate, with R matched to S or the default, Q from NoiseModel, and the shipped χ² gate for every backend
+    reads: [ImuStream, TrackStream, NoiseModel]
+    writes: [Estimate]
+    source: {ref: barshalom2001, where: "a filter told the true noise is consistent"}
+    pre:
+      - "R and Q are exactly the injected noise when matched"
+      - "every backend uses the same S6d gate line"
+    post:
+      - "converged runs have NIS within its χ² band"
+    code: tools/src/vio_pipeline.cpp
+    tests:
+      - {file: tests/tools/pose_consistency.cpp, case: "Pose consistency: errors drawn from the covariance give an ANEES"}
+    status: partial
+    deviations:
+      - "the IMU is the real one, not synthesized from the truth, so matched R and Q are not the true noise (#613)"
+
+  - id: score
+    stage: G5
+    title: Score the run
+    does: the estimate against the truth → window ATE ratio, pose NEES split, world-yaw σ, NIS
+    reads: [Estimate, TruthSpline]
+    writes: [Score]
+    source: {ref: zhang2018, where: "4-DoF alignment and ATE"}
+    pre:
+      - "the estimate and the truth overlap in time"
+    post:
+      - "the gauge is anchored once; errors are taken in the filter's own convention"
+    code: tools/include/branes/tools/pose_consistency.hpp
+    tests:
+      - {file: tests/tools/pose_consistency.cpp, case: "Pose consistency: the gauge anchor absorbs yaw and position"}
+    status: partial
+    deviations:
+      - "ATE is scored against the raw ground truth (traj_eval --dataset), not the truth the filter was given (#613)"
+
+  - id: verdict
+    stage: G6
+    title: Judge the grid
+    does: every run's score → the three conditions (no divergence, matched beats default, no yaw collapse) and the gate's verdict
+    reads: [Score]
+    writes: [GateVerdict]
+    source: {ref: barshalom2001, where: "consistency tests over Monte-Carlo runs"}
+    pre:
+      - "every run scored, or marked diverged or unavailable"
+    post:
+      - "an unavailable result cannot be recorded"
+    code: scripts/euroc-consistency.sh
+    status: implemented
+
+schedule:
+  driver: scripts/euroc-consistency.sh
+  events:
+    - event: run (sequence × S × seed × R)
+      steps:
+        - {call: fit_spline}
+        - {call: synth_imu}
+        - {call: synth_tracks}
+        - {call: run_filter}
+        - {call: score}
+    - event: grid complete
+      steps:
+        - {call: verdict}
+
+system_invariants:
+  - id: nis_band
+    text: "converged runs with matched R have normalized NIS ≈ 1 (the noise model is true)"
+    status: failing
+    note: "1.65–4.3 with the real IMU and the raw ground truth (#613)"
+  - id: s2_closure
+    text: "the synthesized IMU, noise-free, integrates back to the truth"
+    status: unknown
+  - id: same_gate
+    text: every backend runs with the same S6d gate line
+    status: holds
+    note: "since #608 both use the χ² quantile; before it the R-IEKF used 16 per dof"
+  - id: verdict_attributable
+    text: "each condition's result changes with the estimator, not with the gate's line"
+    status: failing
+    note: "conditions 1 and 2 flip with the gate line (#613)"
