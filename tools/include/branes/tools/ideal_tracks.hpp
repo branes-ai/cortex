@@ -46,7 +46,13 @@
 namespace branes::tools {
 
 struct IdealTrackOptions {
-    double sigma_px = 1.0;               ///< Gaussian pixel noise per axis
+    double sigma_px = 1.0;  ///< Gaussian pixel noise per axis
+    /// Draw the noise in undistorted normalized coordinates with σ = sigma_px / fx
+    /// (the filter's own pixel-to-normalized conversion), then project through
+    /// the lens: the noise the filter is told is then exactly the noise it
+    /// gets. Off (the default), the noise is N(0, σ²) in distorted pixels, which
+    /// undistortion stretches by up to ~1.35× near EuRoC cam0's edges (#613).
+    bool noise_normalized = false;
     std::size_t target_features = 150;   ///< spawn while fewer are visible (S4's default)
     double min_feature_distance = 15.0;  ///< px between a new landmark and the visible ones (S4's default)
     double min_depth_m = 2.0;            ///< spawn depth range along the ray (log-uniform)
@@ -120,7 +126,15 @@ public:
             o.camera_id = 0;
             o.u = px[i].first;
             o.v = px[i].second;
-            if (opt_.sigma_px > 0) {
+            if (opt_.sigma_px > 0 && opt_.noise_normalized) {
+                const auto b = cam_.unproject({o.u, o.v});
+                const T sn = static_cast<T>(opt_.sigma_px) / cam_.fx();
+                const T x = b[0] / b[2] + sn * static_cast<T>(unit_(noise_rng_));
+                const T y = b[1] / b[2] + sn * static_cast<T>(unit_(noise_rng_));
+                const auto q = cam_.project({x, y, T(1)});
+                o.u = q[0];
+                o.v = q[1];
+            } else if (opt_.sigma_px > 0) {
                 o.u += static_cast<T>(opt_.sigma_px * unit_(noise_rng_));
                 o.v += static_cast<T>(opt_.sigma_px * unit_(noise_rng_));
             }

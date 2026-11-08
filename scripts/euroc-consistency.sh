@@ -4,10 +4,19 @@
 # docs/benchmarks/euroc-baseline.mdx "The consistency gate").
 #
 # Can the estimator be told the true measurement noise and get better rather
-# than diverge? Every run keeps the real EuRoC IMU and timestamps and replaces
-# the KLT front end with ideal tracks (#602) of a known pixel noise S. Each
-# (sequence, S, seed) runs twice: with the filter's R matched to S, and with
-# its default R. The verdict (bounds in scripts/euroc-consistency.json):
+# than diverge? Since #613 every input comes from one truth: a cubic B-spline
+# through the ground truth (vio_pipeline --imu gt). The IMU is synthesized from
+# it at the real IMU timestamps with the filter's own noise densities, the KLT
+# front end is replaced by ideal tracks (#602) seen from it with a known noise
+# S (drawn in normalized coordinates, sigma S / fx, so it is exactly what a
+# matched R says), and each run is scored against it (traj_eval --truth). R and
+# Q are then the true noise. Before #613 the IMU was the real one and the truth
+# the raw ground truth, whose error against the IMU (0.25-0.45 px over 0.25 s in
+# the Vicon rooms) made matched R untrue and let the chi-square gate starve
+# both filters (docs/methodology/specs/euroc-consistency-gate.yaml). Every
+# backend runs with the same, shipped S6d gate. Each (sequence, S, seed) runs
+# twice: with the filter's R matched to S, and with its default R. The verdict
+# (bounds in scripts/euroc-consistency.json):
 #
 #   1. no divergence: every matched run's window 4-DoF ATE is under
 #      diverge_ratio x OpenVINS mono's (a run that writes no trajectory counts
@@ -28,10 +37,10 @@
 # of the change since the anchor needs the covariance between the two times,
 # which neither filter exposes. So the ANEES is not a sound consistency test.
 #
-# Roll/pitch and position NEES are recorded but not gated: on EuRoC the ground
-# truth's body frame and the accelerometer's gravity disagree by 0.1-0.9 deg
-# even after the ground truth's own accelerometer bias is removed, which caps
-# the roll/pitch NEES any filter can reach against it.
+# Roll/pitch and position NEES and the normalized NIS are recorded but not
+# gated. With the synthesized IMU they measure the estimator alone; NIS is the
+# check that the noise model is true (~1 when it is and the filter is
+# consistent).
 #
 #   scripts/euroc-consistency.sh                       # MSCKF, all 11 sequences
 #   scripts/euroc-consistency.sh --backend riekf       # the R-IEKF (--invariant)
@@ -77,7 +86,7 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h | --help)
-            sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,62p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         -*)
@@ -138,7 +147,7 @@ run_one() {
     local seq="$1" sigma="$2" seed="$3" r="$4"
     local dir="$OUT/$seq/s${sigma}_seed${seed}_$r" mav0 from rarg=""
     mkdir -p "$dir"
-    rm -f "$dir/trajectory.tum" "$dir/consistency.json" "$dir/score_window.json"
+    rm -f "$dir/trajectory.tum" "$dir/truth.tum" "$dir/consistency.json" "$dir/score_window.json"
     mav0="$(find "$DATASET_ROOT" -type d -name mav0 -path "*/$seq/*" -not -path '*__MACOSX*' 2>/dev/null | head -1)"
     if [ -z "$mav0" ]; then
         echo "$seq: no mav0 under $DATASET_ROOT" > "$dir/vio_pipeline.log"
@@ -146,10 +155,10 @@ run_one() {
     fi
     [ "$r" = matched ] && rarg="--camera-sigma-px $sigma"
     # shellcheck disable=SC2086  # the flag strings split into arguments on purpose
-    "$BIN/vio_pipeline" --source euroc --dataset "$mav0" --out "$dir" --tracks gt --track-sigma "$sigma" \
+    "$BIN/vio_pipeline" --source euroc --dataset "$mav0" --out "$dir" --tracks gt --imu gt --track-sigma "$sigma" \
         --track-seed "$seed" $rarg $BACKEND_ARGS > "$dir/vio_pipeline.log" 2>&1 || true
     from="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sequences"][sys.argv[2]]["compare_from_s"])' "$BASELINE" "$seq")"
-    "$BIN/traj_eval" --dataset "$mav0" --est "$dir/trajectory.tum" --from "$from" --json \
+    "$BIN/traj_eval" --dataset "$mav0" --truth "$dir/truth.tum" --est "$dir/trajectory.tum" --from "$from" --json \
         > "$dir/score_window.json" 2>> "$dir/vio_pipeline.log" || true
 }
 export -f run_one
@@ -189,6 +198,18 @@ def fin(x):
     return isinstance(x, (int, float)) and math.isfinite(x)
 
 
+def nis_of(log):
+    """The run's normalized NIS, as vio_pipeline prints it."""
+    try:
+        for line in open(log):
+            if line.strip().startswith("NIS (normalized)"):
+                v = float(line.split(":", 1)[1])
+                return v if math.isfinite(v) else None
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 runs = {}
 for s in seqs:
     ov = base["sequences"][s]["openvins"]["mono"]["ate_4dof"]
@@ -221,6 +242,7 @@ for s in seqs:
                     "yaw_sigma_min": pose.get("yaw_sigma_min"),
                     "yaw_sigma_ratio": round(ysm / ys0, 4) if fin(ys0) and fin(ysm) and ys0 > 0 else None,
                     "yaw_err_max": pose.get("yaw_err_max"),
+                    "nis": nis_of(f"{d}/vio_pipeline.log"),
                     "ledger_info_yaw": led.get("info_yaw") if led else None,
                     "ledger_share_s6": led.get("share_s6_mean_shift") if led else None,
                 }
@@ -243,10 +265,10 @@ def g(x, w=7, p=2):
 unavailable = sorted(k for k, v in runs.items() if v["status"] == "eval_failed")
 print(f"\nConsistency gate, backend {backend}: window 4-DoF ATE / OpenVINS mono; ideal tracks of S px,")
 print("R matched to S or the default; median over seeds. Yaw sigma ratio = min / anchor (target 1);")
-print("yaw and roll/pitch ANEES are informational.")
+print("yaw and roll/pitch ANEES and NIS are informational (NIS ~1 when the noise model is true).")
 for sg in sigmas:
     print(f"\n  S = {sg} px")
-    print(f"  {'sequence':17}{'matched':>8}{'default':>8}{'diverged':>9}{'yaw sig ratio':>14}{'yaw NEES':>9}{'rp NEES':>9}")
+    print(f"  {'sequence':17}{'matched':>8}{'default':>8}{'diverged':>9}{'yaw sig ratio':>14}{'yaw NEES':>9}{'rp NEES':>9}{'NIS':>7}")
     for s in seqs:
         m = [ratio(f"{s}/{sg}/{sd}/matched") for sd in seeds]
         d = [ratio(f"{s}/{sg}/{sd}/default") for sd in seeds]
@@ -257,7 +279,9 @@ for sg in sigmas:
         ny = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_yaw"] for sd in seeds])
         nr = med([runs[f"{s}/{sg}/{sd}/matched"]["nees_rp"] for sd in seeds])
         yr = med([runs[f"{s}/{sg}/{sd}/matched"]["yaw_sigma_ratio"] for sd in seeds])
-        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dcol:>6}/{len(seeds)}{g(yr, 14, 3)}{g(ny, 9, 1)}{g(nr, 9, 0)}")
+        nn = med([runs[f"{s}/{sg}/{sd}/matched"]["nis"] for sd in seeds])
+        print(f"  {s:17}{g(med(m), 8, 1)}{g(med(d), 8, 1)}{dcol:>6}/{len(seeds)}{g(yr, 14, 3)}{g(ny, 9, 1)}{g(nr, 9, 0)}"
+              f"{g(nn, 7, 2)}")
 
 verdict = {}
 diverged = sorted(k for k in runs if k.endswith("/matched") and k not in unavailable and ratio(k) >= B["diverge_ratio"])
@@ -291,7 +315,9 @@ if default_missing:
           + ", ".join(default_missing[:8]))
 print(f"  3. no yaw collapse (median yaw sigma min/anchor >= {B['yaw_sigma_ratio_min']}): "
       f"{'PASS' if verdict['no_yaw_collapse'] else 'FAIL'} — {g(yaw_ratio, 1, 3)}")
-print(f"     (informational: median yaw ANEES {g(yaw, 1, 2)}; not a sound test, see the header)")
+nis_med = med([runs[k]["nis"] for k in runs if k.endswith("/matched")])
+print(f"     (informational: median yaw ANEES {g(yaw, 1, 2)}, not a sound test, see the header; "
+      f"median NIS of the matched runs {g(nis_med, 1, 2)})")
 if unavailable:
     print(f"\n  UNAVAILABLE: traj_eval could not score {len(unavailable)} run(s) that wrote a trajectory: "
           + ", ".join(unavailable[:8]) + (" ..." if len(unavailable) > 8 else ""))
@@ -306,6 +332,8 @@ elif record:
         "date": datetime.date.today().isoformat(),
         "verdict": {**verdict, "pass": passed, "median_yaw_sigma_ratio": round(yaw_ratio, 4),
                     "median_yaw_nees": round(yaw, 3) if fin(yaw) else None,
+                    "median_nis": round(nis_med, 3) if fin(nis_med) else None,
+                    "truth": "spline (--imu gt, #613)",
                     "median_ratio": beats, "diverged": diverged},
         "runs": runs,
     }

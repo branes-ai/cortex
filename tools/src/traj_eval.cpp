@@ -22,6 +22,11 @@
 //   ./traj_eval --dataset ... --est ... --from 40      # skip the first 40 s of GT
 //   ./traj_eval --dataset ... --est ... --lengths 4,8  # other segment lengths
 //
+// --truth TRUTH.tum scores against that trajectory instead of the dataset's ground
+// truth (vio_pipeline --imu gt writes one: the spline the run was generated from,
+// #613); --from/--to still count from the dataset's first ground-truth stamp, so a
+// window means the same with or without it.
+//
 // --from/--to are seconds after the first ground-truth stamp, so two
 // estimators can be scored over the same window; without them every pose is
 // kept, including one stamped just before the first ground-truth sample. Exit status: 0 scored,
@@ -53,6 +58,7 @@ using json = nlohmann::json;
 
 struct Args {
     std::string dataset, est;
+    std::string truth;                                         ///< --truth: score against this TUM trajectory (#613)
     double from_s = -std::numeric_limits<double>::infinity();  ///< default: no window
     double to_s = std::numeric_limits<double>::infinity();
     std::vector<double> lengths{8.0, 16.0, 24.0, 32.0, 40.0};
@@ -90,6 +96,8 @@ Args parse(int argc, char** argv) {
             a.dataset = next();
         else if (v == "--est")
             a.est = next();
+        else if (v == "--truth")
+            a.truth = next();
         else if (v == "--from")
             a.from_s = std::stod(next());
         else if (v == "--to")
@@ -107,22 +115,36 @@ Args parse(int argc, char** argv) {
 }
 
 void usage() {
-    std::cout << "usage: traj_eval --dataset <mav0 dir> --est <trajectory.tum> [--from S] [--to S]\n"
-                 "                 [--lengths 8,16,24,32,40] [--json]\n";
+    std::cout << "usage: traj_eval --dataset <mav0 dir> --est <trajectory.tum> [--truth <truth.tum>]\n"
+                 "                 [--from S] [--to S] [--lengths 8,16,24,32,40] [--json]\n";
 }
 
 int run(const Args& args) {
-    const auto gt = bs::euroc::parse_groundtruth<T>(args.dataset);
-    if (gt.empty()) {
+    const auto dataset_gt = bs::euroc::parse_groundtruth<T>(args.dataset);
+    if (dataset_gt.empty()) {
         std::cerr << "traj_eval: no ground truth under " << args.dataset << '\n';
         return 1;
     }
+    std::vector<ev::StampedPose<T>> truth;
+    if (!args.truth.empty()) {
+        std::ifstream tf(args.truth);
+        if (!tf) {
+            std::cerr << "traj_eval: cannot read " << args.truth << '\n';
+            return 1;
+        }
+        truth = branes::tools::read_tum<T>(tf);
+        if (truth.empty()) {
+            std::cerr << "traj_eval: no poses in " << args.truth << '\n';
+            return 1;
+        }
+    }
+    const auto& gt = args.truth.empty() ? dataset_gt : truth;
     std::ifstream f(args.est);
     if (!f) {
         std::cerr << "traj_eval: cannot read " << args.est << '\n';
         return 1;
     }
-    const double t0 = gt.front().t_s;
+    const double t0 = dataset_gt.front().t_s;  // the window counts from the dataset's first stamp
     std::vector<ev::StampedPose<T>> est;
     for (const auto& sp : branes::tools::read_tum<T>(f))
         if (sp.t_s >= t0 + args.from_s && sp.t_s <= t0 + args.to_s)

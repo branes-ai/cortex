@@ -44,6 +44,7 @@
 #include <branes/tools/bench/c_filter_loop_bench.hpp>
 #include <branes/tools/bench/stage_recorder.hpp>
 #include <branes/tools/euroc_cam0.hpp>
+#include <branes/tools/gt_spline.hpp>
 #include <branes/tools/ideal_tracks.hpp>
 #include <branes/tools/invariant_backend_adapter.hpp>
 #include <branes/tools/observability_ledger.hpp>
@@ -51,6 +52,7 @@
 #include <branes/tools/stage_type_presets.hpp>
 #include <branes/tools/tum_trajectory.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -122,6 +124,9 @@ struct Args {
     // observations synthesized from ground truth (branes/tools/ideal_tracks.hpp).
     bool ideal_tracks = false;
     branes::tools::IdealTrackOptions ideal;
+    // --imu gt (#613): the IMU, the ideal tracks and the score all come from one
+    // smooth truth through the ground truth, so matched R and Q are the true noise.
+    bool gt_imu = false;
     double camera_sigma_px = 0.0;  ///< the filter's visual R as a pixel σ on cam0; 0 = VioConfig's default
     // --riekf-legacy: the R-IEKF EuRoC adapter's pieces run as before #608, to
     // measure each one's effect.
@@ -216,8 +221,16 @@ Args parse(int argc, char** argv) {
             }
         } else if (v == "--robot" && next_is_value())
             a.robot = argv[++i];
-        else if (v == "--tracks" || v == "--track-sigma" || v == "--camera-sigma-px" || v == "--track-seed" ||
-                 v == "--track-depth") {
+        else if (v == "--imu") {
+            if (!next_is_value())
+                throw std::invalid_argument("--imu needs a value: real or gt");
+            const std::string_view x = argv[++i];
+            if (x != "gt" && x != "real")
+                throw std::invalid_argument("--imu: real or gt");
+            a.gt_imu = x == "gt";
+            a.ideal.noise_normalized = a.gt_imu;  // the true noise is what the filter is told (#613)
+        } else if (v == "--tracks" || v == "--track-sigma" || v == "--camera-sigma-px" || v == "--track-seed" ||
+                   v == "--track-depth") {
             // A missing value is an error, not a silent fall back to the KLT run.
             if (!next_is_value())
                 throw std::invalid_argument(std::string(v) + " needs a value (see --help)");
@@ -808,6 +821,52 @@ void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
     branes::tools::write_tum<T>(f, traj);
 }
 
+// --imu gt (#613): replace the real IMU with one synthesized from a smooth truth
+// through the ground truth, at the real IMU's timestamps and the filter's own
+// noise densities, and make that truth the ground truth for the ideal tracks,
+// the pose NEES and the ATE. The truth is written to truth.tum for traj_eval
+// --truth. The IMU noise is seeded from the track seed but drawn separately.
+constexpr double kTruthKnotS = 0.05;  ///< spline knot interval: smooths Vicon jitter, keeps the motion
+
+void use_spline_truth(const Args& args,
+                      const VioConfig& cfg,
+                      std::vector<ImuMeasurement<T>>& imu,
+                      const std::vector<euroc::ImageEntry>& images,
+                      std::vector<ev::StampedPose<T>>& gt) {
+    if (!args.gt_imu)
+        return;
+    const branes::tools::PoseSpline<T> spline(gt, kTruthKnotS);
+    std::vector<double> imu_t;
+    imu_t.reserve(imu.size());
+    for (const auto& m : imu)
+        imu_t.push_back(m.timestamp_s);
+    branes::tools::ImuSynthesisOptions o;
+    o.gyro_noise_density = cfg.gyro_noise_density;
+    o.accel_noise_density = cfg.accel_noise_density;
+    o.gyro_bias_random_walk = cfg.gyro_bias_random_walk;
+    o.accel_bias_random_walk = cfg.accel_bias_random_walk;
+    o.gravity_magnitude = cfg.gravity_magnitude;
+    o.seed = 0x9E3779B97F4A7C15ULL ^ args.ideal.seed;  // independent of the track noise's stream
+    imu = branes::tools::synthesize_imu<T>(spline, imu_t, o);
+    // The truth at every ground-truth stamp and image time it covers.
+    std::vector<double> truth_t;
+    truth_t.reserve(gt.size() + images.size());
+    for (const auto& g : gt)
+        truth_t.push_back(g.t_s);
+    for (const auto& im : images)
+        truth_t.push_back(im.t_s);
+    std::sort(truth_t.begin(), truth_t.end());
+    truth_t.erase(std::unique(truth_t.begin(), truth_t.end()), truth_t.end());
+    gt = spline.sample(truth_t);
+    if (!args.out.empty()) {
+        std::ofstream f(args.out + "/truth.tum");
+        if (f)
+            branes::tools::write_tum<T>(f, gt);
+        else
+            std::cerr << "vio_pipeline: cannot write " << args.out << "/truth.tum\n";
+    }
+}
+
 // ── EuRoC source (real images through the KLT front end) ───────────────────
 // Gated: returns false (with a hint) when the dataset is absent/unreadable.
 template <class Cov, msckf::StageTypePolicy Stages>
@@ -837,6 +896,7 @@ bool run_euroc(const Args& args,
                   << " IMU). Skipping.\n";
         return false;
     }
+    use_spline_truth(args, cfg, imu, images, gt);
 
     const auto cam0 = euroc_cam0();
     typename Backend::CameraCalibration cal;
@@ -957,6 +1017,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         std::cout << "  EuRoC streams empty at '" << args.dataset << "'. Skipping.\n";
         return false;
     }
+    use_spline_truth(args, cfg, imu, images, gt);
 
     const auto cam0 = euroc_cam0();
     Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam, args.riekf), frontend_of(args));
@@ -1120,6 +1181,10 @@ int main(int argc, char** argv) {
                "  --camera-sigma-px PX       the filter's visual measurement sigma, cam0 pixels\n"
                "                             (default 0.01 normalized, ~4.6 px)\n"
                "  --track-seed N             ideal tracks: landmark and noise seed (default 1)\n"
+               "  --imu real|gt              EuRoC with --tracks gt: the real IMU (default), or one synthesized\n"
+               "                             from a spline through the ground truth with the filter's noise\n"
+               "                             densities; that spline is then the truth (writes truth.tum), and\n"
+               "                             the track noise is drawn in normalized coordinates (#613)\n"
                "  --track-depth MIN,MAX      ideal tracks: landmark depth range, m (default 2,8)\n"
                "  --detect-trackable-only    EuRoC front end: skip FAST corners in the KLT border band\n"
                "                             (#474; off by default)\n"
@@ -1147,6 +1212,11 @@ int main(int argc, char** argv) {
     }
     if (args.ideal_tracks && args.video) {
         std::cerr << "vio_pipeline: --tracks gt does not write the per-frame tracks --video overlays\n";
+        return 2;
+    }
+    if (args.gt_imu && !args.ideal_tracks) {
+        std::cerr << "vio_pipeline: --imu gt synthesizes the IMU from the truth the ideal tracks use; it needs "
+                     "--tracks gt\n";
         return 2;
     }
     if (args.ideal_tracks && args.source != "euroc") {
