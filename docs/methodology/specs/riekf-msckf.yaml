@@ -3,10 +3,12 @@
 # error convention of the filter state. Every transformation that reads or
 # writes the filter state is listed here: replaced, or kept with a reason.
 #
-# This spec records the R-IEKF as it runs on EuRoC today, through
-# tools/include/branes/tools/invariant_backend_adapter.hpp. Its gaps are the
-# pieces #608 replaces with the shipped path: the bespoke initialize and
-# seed_state, the 16-per-dof gate, and the missing zero-velocity update.
+# The R-IEKF runs on EuRoC through tools/include/branes/tools/invariant_backend_adapter.hpp.
+# Since #608 it runs the base's initialize unchanged (that node doesn't read
+# the filter state), seeds the filter in its own error convention, gates with
+# the base's chi-square quantile, and has the zero-velocity update. Before
+# #608 the adapter replaced initialize with its own window, dropped the seed's
+# velocity, gated at 16 per dof and had no S8: see this file's history.
 # Format: docs/methodology/spec-format.mdx.
 
 schema: branes.pipeline/1
@@ -52,43 +54,30 @@ edges:
     note: the error convention changes; every consumer is revisited below
 
 nodes:
-  - id: initialize
-    op: replace
-    stage: S1a
-    title: Initialization (adapter)
-    does: a sliding 150-sample IMU window → a static, else gravity-aligned, attitude and biases
-    reads: [ImuSample]
-    writes: [NavSeed]
-    source: {ref: geneva2020, where: initialization}
-    pre:
-      - "an IMU window at rest or tilted but unaccelerated"
-    post:
-      - "gravity-aligned attitude"
-    code: tools/include/branes/tools/invariant_backend_adapter.hpp
-    tests:
-      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: bootstraps from a static IMU window"}
-    status: partial
-    note: not the shipped initializer; #608 removes this replacement so the base node runs
-    deviations:
-      - "not the base's initializer: no vibrating-rest gyro bias (#591), no timeouts, no dynamic VI alignment (#592), so a moving start is seeded at rest (#608)"
-
   - id: seed_state
     op: replace
     stage: S1b
-    title: Seed the filter (adapter)
-    does: the seed's attitude and biases → the nav at the origin with zero velocity, an isotropic σ = 0.05 prior
+    title: Seed the filter in the invariant error
+    does: >-
+      the seed's mean as it is (velocity included); the base's body-frame prior
+      mapped into the right-invariant error, P₀ = J·P_body·Jᵀ with
+      δθ_world = R̂·δθ_body, ν = δv + [v̂]×δθ_world, ρ = δp + [p̂]×δθ_world
     reads: [NavSeed]
     writes: [FilterState]
     source: {ref: barrau2017, where: the invariant error}
     pre:
-      - "a successful seed"
+      - "a successful seed from the base's initialize"
     post:
-      - "P₀ positive-definite in the right-invariant error"
+      - "the mean equals the seed; P₀ = J·P_body·Jᵀ, positive-definite"
+      - "the IMU sample in effect at the seed time is held, so propagation resumes at the seed time"
     code: tools/include/branes/tools/invariant_backend_adapter.hpp
-    status: partial
-    note: "#608: map the base's prior into the right-invariant error, P = J·P_body·Jᵀ"
+    tests:
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: the body-to-invariant map matches the exact error"}
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: initializes through the shipped MSCKF with its seed"}
+    status: implemented
+    note: "#608"
     deviations:
-      - "the seed's velocity is dropped and the prior is not the base's: an isotropic 0.05, not the body-frame prior mapped into this error (#608)"
+      - "the base's prior is itself an isotropic σ = 0.1 with no tilt-bias correlation (#609); this node maps it faithfully"
 
   - id: propagate
     op: replace
@@ -163,10 +152,10 @@ nodes:
       - {file: tests/sdk/invariant_update.cpp, case: "invariant update: H annihilates the 4-DoF gauge"}
       - {file: tests/sdk/msckf_invariant_backend.cpp, case: "invariant backend: the marginalized joint update annihilates the 4-DoF gauge"}
       - {file: tests/sdk/invariant_joint_step_fd.cpp, case: "DIAG FD: measurement-update linearization (proj.r vs -H*e)"}
-    status: partial
-    deviations:
-      - "the gate is a fixed 16 per dof on EuRoC (the adapter), not the base's χ²₁₋α(dof) quantile (#481, #608)"
-      - "the update does not report its NIS: UpdateDiag is not filled"
+      - {file: tests/sdk/invariant_zero_velocity.cpp, case: "invariant backend: every update reports its NIS, gated or not"}
+      - {file: tests/sdk/invariant_zero_velocity.cpp, case: "invariant backend: the chi-square gate needs alpha in (0,1)"}
+    status: implemented
+    note: "#608: the base's χ²₁₋α(dof) gate (#481), and the NIS and innovation sum of every update"
 
   - id: marginalize
     op: replace
@@ -201,7 +190,12 @@ nodes:
       - "both the IMU and the image tests say rest (the base's detector)"
     post:
       - "the posterior equals the Kalman update with H from finite differences of the retraction"
-    status: planned
+    code: sdk/include/branes/sdk/msckf/msckf_invariant_backend.hpp
+    tests:
+      - {file: tests/sdk/invariant_zero_velocity.cpp, case: "invariant S8: the zero-velocity posterior matches the retraction's Jacobian"}
+      - {file: tests/sdk/invariant_zero_velocity.cpp, case: "invariant S8: the gyro-bias update is the additive Kalman update"}
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: S8 holds a frame at rest out of the window"}
+    status: implemented
     note: "#608"
 
   - id: online_calib
@@ -225,7 +219,7 @@ schedule:
     - event: imu
       rate_hz: 200
       steps:
-        - {call: initialize, when: not initialized, note: the adapter's 150-sample window}
+        - {call: initialize, when: not initialized, note: the base's initializer, run by a bootstrap MsckfBackend}
         - {call: seed_state, when: a seed is ready}
         - {call: propagate, when: initialized, note: on the held previous sample}
     - event: image
@@ -233,8 +227,10 @@ schedule:
       steps:
         - {call: sensor_model}
         - {call: track}
+        - {call: initialize, when: not initialized, note: try the dynamic VI alignment}
+        - {call: seed_state, when: a seed is ready, note: then return}
         - {call: propagate, note: to the image time, on the held IMU sample}
-        - {call: zero_velocity, when: at rest, note: "planned (#608); then return"}
+        - {call: zero_velocity, when: at rest, note: then return; the frame adds no clone}
         - {call: msckf_update, foreach: track touching the oldest clone, when: window full}
         - {call: marginalize, when: window full}
         - {call: augment}
@@ -249,11 +245,14 @@ system_invariants:
     note: "consistent on ideal EuRoC tracks (yaw ANEES 1.26); on real KLT tracks not yet measured (#365)"
   - id: nis
     text: NIS ≈ dim(measurement) per update
+    check: {file: sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp, symbol: nis_consistency}
     status: unknown
-    note: the invariant update does not report its NIS
+    note: "reported since #608; measured on EuRoC below"
   - id: whiteness
     text: innovations zero-mean and white
+    check: {file: sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp, symbol: innovation_whiteness}
     status: unknown
+    note: "reported since #608"
   - id: gauge
     text: no information gained along global yaw and translation (the 4-D unobservable space)
     check: {file: tests/sdk/msckf_invariant_backend.cpp, case: "invariant backend: the marginalized joint update annihilates the 4-DoF gauge"}
