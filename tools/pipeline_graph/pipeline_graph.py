@@ -77,6 +77,11 @@ def _construct_unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, d
     seen = set()
     for key_node, _ in node.value:
         key = loader.construct_object(key_node, deep=deep)
+        try:
+            hash(key)
+        except TypeError:
+            raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark,
+                                                    "found an unhashable key", key_node.start_mark) from None
         if key in seen:
             raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r}", key_node.start_mark)
         seen.add(key)
@@ -170,15 +175,79 @@ def resolve(path: Path, rep: Report) -> tuple[dict, dict | None]:
 
 # ── lint and cross-check ─────────────────────────────────────────────────────
 
-_TEST_CASE = re.compile(r'TEST_CASE\(\s*"((?:[^"\\]|\\.)*)"')
-_COMMENT = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:[^"\\\n]|\\.)*"', re.S)
 _file_cache: dict[Path, str] = {}
+_RAW_OPEN = re.compile(r'R"([^ ()\\\t\n]{0,16})\(')
+_TEST_CASE_CALL = re.compile(r'\b(?:TEMPLATE_)?TEST_CASE\s*\(\s*\x00(\d+)\x00')
 
 
-def code_only(text: str) -> str:
-    """C/C++ source with its comments removed (string literals kept), so a
-    symbol named only in a comment doesn't satisfy a reference."""
-    return _COMMENT.sub(lambda m: m.group(0) if m.group(0).startswith('"') else " ", text)
+def lex_cpp(text: str) -> tuple[str, list[str]]:
+    """Split C/C++ source into its code and its string literals: comments become
+    a space, each string literal (ordinary, prefixed or raw) becomes the
+    placeholder NUL<index>NUL into the returned list, and a character literal
+    becomes a space. A ' inside a number (a C++14 digit separator, 1'000) is
+    part of the number, not a character literal."""
+    out: list[str] = []
+    strings: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            out.append(" ")
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+        elif c == '"':
+            raw = _RAW_OPEN.match(text, i - 1) if i > 0 and text[i - 1] == "R" else None
+            if raw:
+                close = ")" + raw.group(1) + '"'
+                j = text.find(close, raw.end())
+                end = n if j < 0 else j + len(close)
+                body = text[raw.end():j if j >= 0 else n]
+            else:
+                j = i + 1
+                while j < n and text[j] not in '"\n':
+                    j += 2 if text[j] == "\\" else 1
+                end = min(j + 1, n)
+                body = text[i + 1:j]
+            out.append(f"\x00{len(strings)}\x00")
+            strings.append(body)
+            i = end
+        elif c == "'":
+            # A digit separator if the token before it is a number: walk back
+            # over the pp-number characters and look at where it starts.
+            k = i
+            while k > 0 and (text[k - 1].isalnum() or text[k - 1] in "_.'"):
+                k -= 1
+            if k < i and text[k].isdigit():
+                out.append(c)
+                i += 1
+                continue
+            j = i + 1
+            while j < n and text[j] not in "'\n":
+                j += 2 if text[j] == "\\" else 1
+            out.append(" ")
+            i = min(j + 1, n)
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out), strings
+
+
+def has_identifier(text: str, symbol: str) -> bool:
+    """`symbol` occurs as a whole identifier in the code, outside comments and
+    string or character literals."""
+    code, _ = lex_cpp(text)
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])", code) is not None
+
+
+def test_case_names(text: str) -> list[str]:
+    """The names of the active TEST_CASE / TEMPLATE_TEST_CASE calls (a
+    commented-out case is not one)."""
+    code, strings = lex_cpp(text)
+    return [strings[int(m.group(1))] for m in _TEST_CASE_CALL.finditer(code)]
 
 
 def file_text(rel: str) -> str | None:
@@ -191,8 +260,9 @@ def file_text(rel: str) -> str | None:
 
 
 def check_ref(where: str, ref: dict | None, rep: Report, what: str) -> bool:
-    """A reference {file, symbol?, case?}: the file exists, the symbol occurs in
-    it as a word, the case is a prefix of one of its TEST_CASE names."""
+    """A reference {file, symbol?, case?}: the file exists, the symbol is an
+    identifier in its code (not in a comment or a literal), the case is a prefix
+    of one of its active TEST_CASE names."""
     if not ref:
         return False
     if not isinstance(ref, dict) or "file" not in ref:
@@ -202,11 +272,12 @@ def check_ref(where: str, ref: dict | None, rep: Report, what: str) -> bool:
     if text is None:
         rep.error(f"{where}: {what} file not found: {ref['file']}")
         return False
-    if "symbol" in ref and not re.search(rf"\b{re.escape(ref['symbol'])}\b", code_only(text)):
-        rep.error(f"{where}: {what} symbol '{ref['symbol']}' not in the code of {ref['file']} (comments don't count)")
+    if "symbol" in ref and not has_identifier(text, ref["symbol"]):
+        rep.error(f"{where}: {what} symbol '{ref['symbol']}' is not an identifier in the code of {ref['file']} "
+                  "(comments and string literals don't count)")
         return False
     if "case" in ref:
-        names = _TEST_CASE.findall(text)
+        names = test_case_names(text)
         if not any(n.startswith(ref["case"]) for n in names):
             rep.error(f"{where}: {what} case '{ref['case']}' matches no TEST_CASE in {ref['file']}")
             return False

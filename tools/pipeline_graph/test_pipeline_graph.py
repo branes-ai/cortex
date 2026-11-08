@@ -184,20 +184,61 @@ class PipelineGraphTest(unittest.TestCase):
                 _, _, rep = self.analyse(text)
                 self.assertTrue(any(want in e for e in rep.errors), rep.errors)
 
-    def test_a_symbol_named_only_in_a_comment_does_not_resolve(self) -> None:
-        (self.dir / "a.hpp").write_text("// Result is documented here\n/* and apply\n here */\nstruct Other {};\n"
-                                        'const char* s = "Quoted";\n', encoding="utf-8")
+    def with_file(self, text: str, check) -> None:
+        (self.dir / "a.hpp").write_text(text, encoding="utf-8")
         saved = pg.ROOT
         pg.ROOT = self.dir
+        pg._file_cache.clear()
         try:
-            for sym, ok in [("Result", False), ("apply", False), ("Other", True), ("Quoted", True)]:
-                with self.subTest(sym):
-                    rep = pg.Report()
-                    self.assertEqual(pg.check_ref("here", {"file": "a.hpp", "symbol": sym}, rep, "code"), ok,
-                                     rep.errors)
+            check()
         finally:
             pg.ROOT = saved
             pg._file_cache.clear()
+
+    def resolves(self, ref: dict) -> bool:
+        return pg.check_ref("here", {"file": "a.hpp", **ref}, pg.Report(), "code")
+
+    def test_a_symbol_must_be_an_identifier_in_code(self) -> None:
+        src = textwrap.dedent("""\
+            // Result is documented here
+            /* and apply
+               here */
+            struct Other {};
+            const char* s = "Quoted";
+            const char q = '"'; struct AfterChar {}; // "Hidden
+            const int big = 1'000'000; struct AfterSeparator {};
+            const char* r = R"x(RawBody "not code" )x"; struct AfterRaw {};
+            """)
+
+        def check() -> None:
+            for sym, ok in [("Result", False), ("apply", False), ("Quoted", False), ("Hidden", False),
+                            ("RawBody", False), ("Other", True), ("AfterChar", True), ("AfterSeparator", True),
+                            ("AfterRaw", True), ("Othe", False)]:
+                with self.subTest(sym):
+                    self.assertEqual(self.resolves({"symbol": sym}), ok)
+
+        self.with_file(src, check)
+
+    def test_a_case_must_be_an_active_test_case(self) -> None:
+        src = textwrap.dedent("""\
+            TEST_CASE("live case", "[t]") {}
+            // TEST_CASE("commented out", "[t]") {}
+            /* TEST_CASE("block commented", "[t]") {} */
+            TEMPLATE_TEST_CASE("templated case", "[t]", float, double) {}
+            const char* s = "TEST_CASE(\\"in a string\\")";
+            """)
+
+        def check() -> None:
+            for case, ok in [("live", True), ("templated", True), ("commented out", False),
+                             ("block commented", False), ("in a string", False)]:
+                with self.subTest(case):
+                    self.assertEqual(self.resolves({"case": case}), ok)
+
+        self.with_file(src, check)
+
+    def test_an_unhashable_key_is_an_error_not_a_traceback(self) -> None:
+        _, _, rep = self.analyse("? [schema]\n: x\n" + BASE)
+        self.assertTrue(any("unhashable key" in e for e in rep.errors), rep.errors)
 
     def test_the_figure_draws_an_in_place_update_as_one_arrow(self) -> None:
         spec, _, _ = self.analyse(BASE)

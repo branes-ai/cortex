@@ -77,8 +77,9 @@ default). A failing invariant is reported as a gap together with its note.
 ## References
 
 A reference is `{file, symbol?, case?}`. The file must exist; a `symbol` must occur in its code as
-a whole word (a mention in a comment doesn't count, so prefer a distinctive type or function name);
-a `case` must be the beginning of one of its `TEST_CASE` names. A broken reference is an
+an identifier (a mention in a comment or a string literal doesn't count, so prefer a distinctive
+type or function name); a `case` must be the beginning of the name of one of its active `TEST_CASE`
+or `TEMPLATE_TEST_CASE` calls (a commented-out case doesn't count). A broken reference is an
 error, so a rename in the code fails the spec's check rather than leaving a stale page.
 
 ## Delta specs
