@@ -5,7 +5,7 @@
 # 0.25–0.45 px against the gyro over 0.25 s in the Vicon rooms. Here every
 # input to the filter is generated from one smooth truth, a B-spline through
 # the ground truth, so R and Q are exactly the noise injected.
-# Written before the code (#613): nodes marked planned do not exist yet.
+# Written before the code (#613); the following commits implemented it.
 # Format: docs/methodology/spec-format.mdx.
 
 schema: branes.pipeline/1
@@ -77,17 +77,25 @@ edges:
   - id: TruthSpline
     contents: >-
       a uniform cumulative cubic B-spline on SO(3) × ℝ³ with control poses at
-      ground-truth samples; pose, angular velocity and acceleration at any time
-      inside its span
+      ground-truth samples every 0.05 s; pose, angular velocity and acceleration
+      at any time inside its span
+    code: tools/include/branes/tools/gt_spline.hpp
+    symbol: PoseSpline
     invariants:
       - text: "C² in position and rotation; ω and a match finite differences of its pose"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: velocity, acceleration and body rate are the derivatives of its pose"}
       - text: "stays within a stated bound of the ground truth (it approximates, it is not fitted)"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: it stays close to the ground truth it was built from"}
 
   - id: ImuStream
-    contents: "200 Hz samples ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks"
+    contents: "at the real IMU timestamps, ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks from zero"
+    code: tools/include/branes/tools/gt_spline.hpp
+    symbol: synthesize_imu
     invariants:
       - text: "noise-free, integrated by the shipped S2, it reproduces the spline's pose"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
       - text: "the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness)"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
 
   - id: TrackStream
     contents: per image time, pixel observations of fixed landmarks seen from the truth's camera pose, plus N(0, S²) per axis
@@ -95,7 +103,9 @@ edges:
     symbol: IdealTracks
     invariants:
       - text: "noise-free, each observation is the exact projection of its landmark"
-      - text: the added noise is N(0, S²) per axis and nothing else
+        check: {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks are projections of fixed landmarks"}
+      - text: "the added noise is N(0, (S/fx)²) per axis in normalized coordinates and nothing else"
+        check: {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks can draw the noise in normalized coordinates"}
 
   - id: Estimate
     contents: the backend's trajectory (TUM) and per-frame pose covariance in its own error convention
@@ -131,8 +141,12 @@ nodes:
       - "the ground truth covers the sequence; no gap longer than one knot interval"
     post:
       - "pose, ω and a are defined on the span; ω and a agree with finite differences of the pose"
-      - "the deviation from the ground truth is reported"
-    status: planned
+      - "it stays within a bound of the ground truth"
+    code: tools/include/branes/tools/gt_spline.hpp
+    tests:
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: velocity, acceleration and body rate are the derivatives of its pose"}
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: it stays close to the ground truth it was built from"}
+    status: implemented
 
   - id: synth_imu
     stage: G2
@@ -144,9 +158,13 @@ nodes:
     pre:
       - "the IMU timestamps lie inside the spline's span"
     post:
-      - "noise-free, the shipped S2 integrates it back to the spline's pose"
+      - "noise-free, the shipped S2 integrates it back to the spline's pose (to its first-order discretization)"
       - "the noise statistics match the densities"
-    status: planned
+    code: tools/include/branes/tools/gt_spline.hpp
+    tests:
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
+    status: implemented
 
   - id: synth_tracks
     stage: G3
@@ -163,9 +181,8 @@ nodes:
     tests:
       - {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks are projections of fixed landmarks"}
       - {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks add the noise and only the noise"}
+      - {file: tests/tools/ideal_tracks.cpp, case: "ideal tracks can draw the noise in normalized coordinates"}
     status: implemented
-    deviations:
-      - "reads the raw ground truth today, not the spline (#613)"
 
   - id: run_filter
     stage: G4
@@ -182,9 +199,7 @@ nodes:
     code: tools/src/vio_pipeline.cpp
     tests:
       - {file: tests/tools/pose_consistency.cpp, case: "Pose consistency: errors drawn from the covariance give an ANEES"}
-    status: partial
-    deviations:
-      - "the IMU is the real one, not synthesized from the truth, so matched R and Q are not the true noise (#613)"
+    status: implemented
 
   - id: score
     stage: G5
@@ -200,9 +215,8 @@ nodes:
     code: tools/include/branes/tools/pose_consistency.hpp
     tests:
       - {file: tests/tools/pose_consistency.cpp, case: "Pose consistency: the gauge anchor absorbs yaw and position"}
-    status: partial
-    deviations:
-      - "ATE is scored against the raw ground truth (traj_eval --dataset), not the truth the filter was given (#613)"
+    status: implemented
+    note: "traj_eval --truth scores against the run's truth.tum"
 
   - id: verdict
     stage: G6
@@ -235,16 +249,19 @@ schedule:
 system_invariants:
   - id: nis_band
     text: "converged runs with matched R have normalized NIS ≈ 1 (the noise model is true)"
-    status: failing
-    note: "1.65–4.3 with the real IMU and the raw ground truth (#613)"
+    status: holds
+    note: "median 1.03 for both backends (was 1.65–4.3 with the real IMU and the raw ground truth); 1.1–1.9 on the fast V1_03, V2_02 and V2_03, where S2's first-order integration at 200 Hz is the residual (1.02 at 1 kHz)"
   - id: s2_closure
     text: "the synthesized IMU, noise-free, integrates back to the truth"
-    status: unknown
+    check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the noise-free IMU integrated by the shipped S2 reproduces the spline"}
+    status: holds
+    note: "to S2's first-order discretization: 1.3e-4 rad over 0.6 s on the test trajectory, halving with the step"
   - id: same_gate
     text: every backend runs with the same S6d gate line
+    check: {file: scripts/euroc-consistency.sh}
     status: holds
     note: "since #608 both use the χ² quantile; before it the R-IEKF used 16 per dof"
   - id: verdict_attributable
     text: "each condition's result changes with the estimator, not with the gate's line"
-    status: failing
-    note: "conditions 1 and 2 flip with the gate line (#613)"
+    status: holds
+    note: "each remaining failure checked with the gate loosened to 5 per dof: the MSCKF's MH_04 divergences vanish, but with a true noise model that is the MSCKF tipped over by its own over-confidence; every other failure persists, so all are the estimators' (#613)"

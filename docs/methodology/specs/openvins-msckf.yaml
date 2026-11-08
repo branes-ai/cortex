@@ -437,7 +437,7 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "the MSCKF fails all three conditions as recorded (#605); conditions 1 and 2 are confounded by the χ² gate (#613)"
+    note: "with one truth (#613, median NIS 1.03): fails 1 (4 of 66), passes 2, fails 3 (yaw σ ratio 0.108: the yaw leak, #480)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}

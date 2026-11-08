@@ -210,10 +210,17 @@ The ideal-track split above showed that the body-frame filter gets worse when it
 is told the truth about its measurements. `scripts/euroc-consistency.sh` (#605)
 turns that into a pass/fail check that any backend can be run through:
 
+- **One truth (#613).** Every input comes from a cubic B-spline through the
+  ground truth (`vio_pipeline --imu gt`): the IMU is synthesized from it at the
+  real IMU timestamps with the filter's own noise densities, the ideal tracks
+  are seen from it with noise drawn in normalized coordinates (σ = S / fx, what
+  a matched `R` says), and the run is scored against it (`traj_eval --truth`).
+  `R` and `Q` are then the true noise. The bench is itself a
+  [transformation graph](../methodology/euroc-consistency-gate.mdx).
 - **Runs:** ideal tracks at S = 1 and 0.5 px, track seeds 1–3, on all 11
   sequences. Each runs twice: with the filter's `R` matched to S, and with its
-  default `R` (4.6 px). That is 132 runs of about 11 s each, since ideal-track
-  runs read no images.
+  default `R` (4.6 px). Every backend uses the same, shipped S6d gate. That is
+  132 runs of about 11 s each, since ideal-track runs read no images.
 - **Pass condition** (bounds in `scripts/euroc-consistency.json`):
   1. no matched run is worse than 10× OpenVINS mono's window 4-DoF ATE (a run
      that writes no trajectory counts as diverged);
@@ -247,9 +254,63 @@ turns that into a pass/fail check that any backend can be run through:
     collapse.
   - Every verdict below is the same at any bound between 0.13 and 0.9.
 
-Results as recorded in #605 (commit db7ccdc; the estimator code is unchanged
-since 58f2a20), median over the three seeds (window ratio to OpenVINS mono).
-**These verdicts are largely an artifact of the S6d gate: see
+### Results with one truth
+
+Recorded at d6aa255 (#613) for both backends, median over the three seeds. With
+the noise model true, the median NIS of the matched runs is **1.03 for both**
+(it was 1.65–4.3 before), so the gate now measures the estimators:
+
+| Gate condition | MSCKF | R-IEKF |
+|---|---|---|
+| 1. No divergence (66 matched runs) | **fail:** 4 diverge (MH_04 1 px ×2, MH_03, V1_03) | **fail:** 1 diverges (MH_03, 1 px, seed 2) |
+| 2. Matched beats default (median, 1 px / 0.5 px) | **pass:** 1.03× vs 1.03×; 0.85× vs 0.92× | **fail** at 1 px: 1.03× vs 0.87×; pass at 0.5 px: 0.49× vs 0.63× |
+| 3. No yaw collapse (median yaw σ min ÷ anchor ≥ 0.5) | **fail:** 0.108 | **pass:** 0.989 |
+| Median NIS, matched runs | 1.03 | 1.03 |
+| Roll/pitch NEES, matched runs | 2–19 | 2–18 |
+
+At 0.5 px, matched `R`, per sequence (window ATE ratio to OpenVINS mono, yaw σ
+min ÷ anchor, NIS):
+
+| Sequence | MSCKF ratio | MSCKF yaw σ | MSCKF NIS | R-IEKF ratio | R-IEKF yaw σ | R-IEKF NIS |
+|---|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.5× | 0.08 | 1.03 | 0.5× | 0.85 | 1.03 |
+| MH_02_easy | 0.2× | 0.06 | 1.03 | 0.2× | 0.89 | 1.03 |
+| MH_03_medium | 0.5× | 0.09 | 1.04 | 0.3× | 0.76 | 1.04 |
+| MH_04_difficult | 0.9× | 0.11 | 1.03 | 0.4× | 0.90 | 1.03 |
+| MH_05_difficult | 0.3× | 0.14 | 1.02 | 0.1× | 0.95 | 1.02 |
+| V1_01_easy | 1.0× | 0.16 | 1.02 | 0.5× | 0.86 | 1.02 |
+| V1_02_medium | 1.6× | 0.14 | 1.10 | 0.6× | 0.96 | 1.12 |
+| V1_03_difficult | 1.6× | 0.10 | 1.23 | 2.1× | 0.96 | 1.30 |
+| V2_01_easy | 0.4× | 0.16 | 1.03 | 0.1× | 0.96 | 1.03 |
+| V2_02_medium | 2.1× | 0.10 | 1.44 | 2.4× | 0.94 | 1.43 |
+| V2_03_difficult | 1.0× | 0.11 | 1.77 | 1.5× | 0.97 | 1.89 |
+
+Each remaining failure was rerun with the gate loosened to 5 per dof, to check
+that it belongs to the estimator:
+
+- **The MSCKF's yaw collapses** to 6–16% of its anchor σ on every sequence while
+  the R-IEKF holds 76–97%. This is the yaw leak #480 attributed to S6 moving the
+  mean, now measured with a true noise model.
+- **Two of the MSCKF's divergences (MH_04, 1 px) vanish with the looser gate**
+  (0.36–0.43 m, NIS 1.02). The noise model is true, so a consistent filter
+  would lose only 5% of its inliers to the gate. The MSCKF, over-confident in
+  yaw, loses enough to diverge. Its other two (MH_03 5.7 m, V1_03 1.07 m) and the
+  R-IEKF's one (MH_03 12 m) stay with either gate.
+- **The R-IEKF's matched `R` loses at 1 px on the fast sequences** (V2_02: 0.075–
+  0.097 m matched against 0.066–0.089 m default, with either gate). There the NIS
+  is 1.1–1.9 for both backends, against 1.02–1.04 on the Machine Hall. The
+  residual is S2's first-order integration at 200 Hz: the same V2_03 run
+  synthesized at 1 kHz has NIS 1.02 for both backends and a 4-DoF ATE of
+  0.02–0.03 m instead of 0.14–0.35 m. The noise-free synthetic IMU closes on
+  the spline only to that order (`tests/tools/gt_spline.cpp`).
+- **Roll/pitch NEES is now 2–19** for both, against 17–3161 before: the real
+  IMU's accelerometer bias and its disagreement with the ground truth (#609) are
+  no longer in the bench. They remain on real data.
+
+### The #605 results (superseded)
+
+Recorded in #605 (commit db7ccdc), median over the three seeds (window ratio to
+OpenVINS mono). **These verdicts were largely an artifact of the S6d gate: see
 [the correction](#correction-the-verdict-was-mostly-the-s6d-gate) below.**
 
 | Sequence | MSCKF 1 px matched | MSCKF 1 px default | R-IEKF 1 px matched | R-IEKF 1 px default | R-IEKF 0.5 px matched |
@@ -335,7 +396,8 @@ V2_03, where the R-IEKF reaches 0.26–0.30 m against the MSCKF's 0.68–1.27 m 
 half its NIS. The gate stays as recorded until #613 measures the ground truth's
 residual floor, folds it into matched `R`, runs every backend with the same gate
 line and re-records both. Condition 3 does not depend on the gate's line in the
-same way, but it is re-measured there too.
+same way, but it is re-measured there too. #613 did this by removing the floor
+rather than modelling it: see [Results with one truth](#results-with-one-truth).
 
 This is the fourth result in the VIO work that came from the test setup rather
 than the estimator ([the storyline](../first-principles/storyline.mdx)).
