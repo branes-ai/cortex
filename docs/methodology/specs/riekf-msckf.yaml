@@ -246,8 +246,8 @@ system_invariants:
   - id: nis
     text: NIS ≈ dim(measurement) per update
     check: {file: sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp, symbol: nis_consistency}
-    status: unknown
-    note: "reported since #608; measured on EuRoC below"
+    status: failing
+    note: "real KLT tracks: normalized NIS 0.97–2.55 on MH, V1_01 and V2_01; 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03 (#608)"
   - id: whiteness
     text: innovations zero-mean and white
     check: {file: sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp, symbol: innovation_whiteness}
@@ -261,9 +261,9 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "passes conditions 2 and 3 (yaw σ ratio 0.90); fails 1 on one MH_01 run, a moving start the adapter seeds at rest (#605)"
+    note: "fails 1 and 2 (9 of 66 diverge), passes 3 (0.73); conditions 1 and 2 are confounded by the χ² gate starving the filter, since matched R omits the ground truth's error (#613)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}
     status: failing
-    note: "worse than the body-frame MSCKF on real KLT tracks: V1_01 0.563 m vs 0.217 m (#608)"
+    note: "median 2.62× OpenVINS mono (the MSCKF 2.83×; 7 of 11 sequences better); rotation RPE 0.90° vs 2.21° (#608)"

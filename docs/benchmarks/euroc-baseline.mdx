@@ -247,8 +247,10 @@ turns that into a pass/fail check that any backend can be run through:
     collapse.
   - Every verdict below is the same at any bound between 0.13 and 0.9.
 
-Results (commit db7ccdc; the estimator code is unchanged since 58f2a20), median
-over the three seeds (window ratio to OpenVINS mono):
+Results as recorded in #605 (commit db7ccdc; the estimator code is unchanged
+since 58f2a20), median over the three seeds (window ratio to OpenVINS mono).
+**These verdicts are largely an artifact of the S6d gate: see
+[the correction](#correction-the-verdict-was-mostly-the-s6d-gate) below.**
 
 | Sequence | MSCKF 1 px matched | MSCKF 1 px default | R-IEKF 1 px matched | R-IEKF 1 px default | R-IEKF 0.5 px matched |
 |---|---:|---:|---:|---:|---:|
@@ -301,6 +303,43 @@ over the three seeds (window ratio to OpenVINS mono):
   disagrees with the accelerometer's gravity by 0.1–0.9° at rest. That caps
   the roll/pitch NEES any filter can reach against it.
 
+### Correction: the verdict was mostly the S6d gate
+
+Running the R-IEKF through the shipped real-data path (#608) put it on the same
+χ² quantile gate as the MSCKF, and it then failed conditions 1 and 2 as well:
+9 of 66 matched runs diverge, and matched `R` scores 3.62× OpenVINS mono
+against 2.45× for the default at 1 px (2.59× vs 2.18× at 0.5 px). Its yaw σ
+ratio is 0.73, still a pass. Reverting one piece at a time on V1_01 at 0.5 px
+puts the whole difference on the gate. The R-IEKF converges whichever init and
+S8 it runs, as long as the gate is the old 16-per-dof line, and diverges with
+the χ² quantile whichever init and S8 it runs.
+
+The reason is that "matched `R`" is not the noise the filter sees. The ideal
+tracks are synthesized from the ground-truth trajectory but the IMU is real, so
+every observation also carries the ground truth's error relative to the IMU.
+Even converged runs have NIS well above their degrees of freedom. A gate at
+α = 0.05 assumes NIS ≈ dof, so it rejects a large share of valid long tracks,
+and the filter's heading flips on what is left:
+
+| Run (0.5 px, matched `R`), 4-DoF ATE (m), seeds 1 / 2 / 3 | χ² quantile, α = 0.05 | α = 10⁻³ | α = 10⁻⁶ | 5 per dof | NIS (5 per dof) |
+|---|---|---|---|---|---:|
+| R-IEKF, V1_01 | 99.4 / 4.7 / 83.4 | 0.14 / 0.16 / 0.16 | 0.13 / 0.14 / 0.13 | 0.12 / 0.13 / 0.13 | 1.65–1.67 |
+| MSCKF, V1_01 | 9.0 / 22.7 / 4.0 | | | 0.14 / 0.16 / 0.16 | 1.65–1.67 |
+| R-IEKF, V2_03 | 30.3 / 8.8 / 7.8 | 1.91 / 0.84 / 0.59 | 0.34 / 0.46 / 0.43 | 0.30 / 0.26 / 0.26 | 3.8–3.9 |
+| MSCKF, V2_03 | 16.5 / 8.3 / 19.2 | | | 0.68 / 1.25 / 1.27 | 7.5–10.5 |
+
+So conditions 1 and 2 above mostly compared gate lines. The pre-#608 R-IEKF
+adapter gated at 16 per dof and the MSCKF at the χ² quantile. With the same
+line the two converge to the same accuracy on V1_01. A difference survives on
+V2_03, where the R-IEKF reaches 0.26–0.30 m against the MSCKF's 0.68–1.27 m with
+half its NIS. The gate stays as recorded until #613 measures the ground truth's
+residual floor, folds it into matched `R`, runs every backend with the same gate
+line and re-records both. Condition 3 does not depend on the gate's line in the
+same way, but it is re-measured there too.
+
+This is the fourth result in the VIO work that came from the test setup rather
+than the estimator ([the storyline](../first-principles/storyline.mdx)).
+
 ```sh
 scripts/euroc-consistency.sh                    # MSCKF; ~8 min at 3 jobs
 scripts/euroc-consistency.sh --backend riekf    # the R-IEKF (--invariant)
@@ -309,6 +348,67 @@ scripts/euroc-consistency.sh --record           # record this backend's results
 
 The script exits non-zero while the gate fails. Like the baseline, it needs
 the dataset on disk and is not in CI.
+
+## The R-IEKF on the shipped real-data path
+
+Before #608 the R-IEKF reached EuRoC through a harness that gated at 16 per dof,
+seeded a zero velocity from its own 150-sample static window, and had no S8. It
+now runs the MSCKF's own initializer (static, vibrating-rest gyro bias,
+gravity-align fallback, dynamic VI alignment), seeds its error state from that
+seed's prior mapped into the right-invariant error, gates with the same χ²
+quantile, and has the zero-velocity update. The change was planned as a
+[delta on the OpenVINS transformation graph](../methodology/riekf-msckf.mdx).
+`--riekf-legacy gate,init,zupt` puts any piece back, so each was measured on its
+own, cumulatively, on the real KLT front end:
+
+| R-IEKF configuration | Median window ATE ÷ OpenVINS mono | Sequences better than the MSCKF | Median rotation RPE |
+|---|---:|---:|---:|
+| Before #608 (`--riekf-legacy gate,init,zupt`) | 7.76× (V1_02 diverges, 1729 m) | 0 / 11 | 4.18° |
+| + χ² gate (`--riekf-legacy init,zupt`) | 2.71× | 5 / 11 | 1.65° |
+| + the shipped initializer (`--riekf-legacy zupt`) | 3.22× (MH_05 diverges, 6390 m) | 2 / 11 | 2.46° |
+| + S8: all pieces (`--invariant`) | **2.62×** | **7 / 11** | **0.90°** |
+| *The MSCKF (reference)* | *2.83×* | — | *2.21°* |
+
+Per sequence, window 4-DoF ATE (m) and window rotation RPE (°):
+
+| Sequence | R-IEKF before #608 | MSCKF | R-IEKF | OpenVINS mono | R-IEKF ÷ mono | MSCKF rot | R-IEKF rot | OpenVINS mono rot |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.952 | 0.332 | 0.315 | 0.096 | 3.3× | 1.62 | 0.80 | 1.55 |
+| MH_02_easy | 0.586 | 0.369 | 0.384 | 0.168 | 2.3× | 1.12 | 1.51 | 1.07 |
+| MH_03_medium | 1.455 | 0.439 | 0.392 | 0.147 | 2.7× | 0.65 | 0.67 | 0.61 |
+| MH_04_difficult | 0.883 | 0.396 | 0.377 | 0.147 | 2.6× | 1.19 | 0.42 | 0.83 |
+| MH_05_difficult | 0.944 | 0.645 | 0.619 | 0.458 | 1.4× | 0.81 | 0.70 | 1.06 |
+| V1_01_easy | 0.565 | 0.213 | 0.181 | 0.069 | 2.6× | 4.03 | 3.81 | 2.84 |
+| V1_02_medium | 1728.9 | 0.183 | 0.159 | 0.058 | 2.7× | 2.52 | 0.89 | 0.57 |
+| V1_03_difficult | 1.281 | 0.189 | 0.240 | 0.067 | 3.6× | 2.63 | 0.90 | 1.24 |
+| V2_01_easy | 0.822 | 0.215 | 0.221 | 0.127 | 1.7× | 2.43 | 1.26 | 1.06 |
+| V2_02_medium | 0.565 | 0.330 | 0.274 | 0.073 | 3.8× | 4.55 | 1.35 | 1.55 |
+| V2_03_difficult | 0.497 | 0.181 | 0.210 | 0.181 | 1.2× | 2.21 | 1.81 | 1.56 |
+
+- **The gate is the largest single piece.** At 16 per dof the harness admitted
+  tracks the χ² quantile rejects, and V1_02 diverged. With the shipped gate the
+  R-IEKF reaches the MSCKF's accuracy.
+- **The shipped initializer needs S8.** Alone it is worse than the harness's
+  window: MH_05 diverges, and V1_03 doubles. With S8 holding the rest periods it
+  is the best configuration. On MH_01 and MH_02 it starts by dynamic alignment,
+  on MH_03 by the gravity fallback, elsewhere statically.
+- **With every piece, the R-IEKF is slightly ahead of the MSCKF:** 2.62× against
+  2.83× OpenVINS mono, better on 7 of 11 sequences, and with less than half the
+  rotation drift (median 0.90° against 2.21°; OpenVINS mono 1.07°). It is still
+  2.62× OpenVINS mono's ATE.
+- **Its NIS is now reported.** It averages 0.97–2.55 on the Machine Hall and on
+  V1_01 and V2_01, and 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03, where the filter
+  is over-confident or the gate admits outliers.
+- **Roll/pitch is still wrong at the start:** V1_01 has a roll/pitch NEES near
+  3000 in every configuration, the tilt and accelerometer-bias seed of #609.
+
+```sh
+CORTEX_VIO_ARGS="--invariant" scripts/euroc-baseline.sh --no-build                       # all pieces
+CORTEX_VIO_ARGS="--invariant --riekf-legacy gate,init,zupt" scripts/euroc-baseline.sh   # before #608
+```
+
+The baseline compares each sequence with the recorded MSCKF numbers, so it
+exits non-zero whenever the R-IEKF is worse on any of them.
 
 ## The regression benchmark
 
