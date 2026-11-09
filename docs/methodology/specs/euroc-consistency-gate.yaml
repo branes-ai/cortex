@@ -92,8 +92,8 @@ edges:
     code: tools/include/branes/tools/gt_spline.hpp
     symbol: synthesize_imu
     invariants:
-      - text: "noise-free, integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window (rotation only: the shipped S2 step's position still drifts at first order, and the shipped end-sample hold fails, see s2_closure, #616)"
-        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound"}
+      - text: "noise-free, integrated by the shipped S2 from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window, in rotation and position (see s2_closure, #616)"
+        check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)"}
       - text: "the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness)"
         check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
 
@@ -158,11 +158,11 @@ nodes:
     pre:
       - "the IMU timestamps lie inside the spline's span"
     post:
-      - "noise-free and integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window"
+      - "noise-free and integrated by the shipped S2 from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window"
       - "the noise statistics match the densities"
     code: tools/include/branes/tools/gt_spline.hpp
     tests:
-      - {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound"}
+      - {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)"}
       - {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
     status: implemented
 
@@ -264,8 +264,8 @@ system_invariants:
       value: "1.09e-4 rad rotation, 0.22 mm position at 2 m, over a 0.55 s clone window"
       consumer: run_filter
       derivation: "the backend's update resolves a clone pose only to the track noise, 0.5 px at fx = 458.654 (1.09e-3 rad); propagation error must stay a tenth of that over the clone window so it never competes with the measurement, and the same angle at a 2 m landmark depth is 0.22 mm"
-    status: failing
-    note: "the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616"
+    status: holds
+    note: "since #616, S2 integrates each interval from both samples by RK4: 0.27 of the rotation bound and 0.10 of the position bound at 200 Hz on a 1.3 rad/s roll/pitch flight, converging at second order. Before it, the end-sample hold missed the rotation bound 28× at first order; the companion tests pin that, and that centring the input fixes the rotation while the integrator fixes the position"
   - id: same_gate
     text: every backend runs with the same S6d gate line
     check: {file: scripts/euroc-consistency.sh}

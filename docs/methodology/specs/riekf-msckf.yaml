@@ -83,7 +83,7 @@ nodes:
     op: replace
     stage: S2
     title: Invariant IMU propagation
-    does: one IMU sample → the propagated SE₂(3) mean; P ← Φ P Φᵀ + L Lᵀ with Φ independent of the estimate
+    does: one IMU interval (the samples at both of its ends) → the propagated SE₂(3) mean; P ← Φ P Φᵀ + L Lᵀ with Φ independent of the estimate
     reads: [FilterState, ImuSample]
     writes: [FilterState]
     source: {ref: hartley2020, where: the right-invariant IMU error dynamics}
@@ -98,6 +98,15 @@ nodes:
       - {file: tests/sdk/invariant_propagator.cpp, case: "invariant propagation: Phi preserves the gauge null space at any state"}
       - {file: tests/sdk/invariant_propagator.cpp, case: "invariant propagation: the predicted covariance matches a Monte-Carlo"}
     status: implemented
+    decisions:
+      - question: the IMU input over each interval and the mean's integrator
+        chosen: "the base's: both samples interpolated linearly, integrated by RK4 (#616)"
+        alternatives: ["the sample that starts the interval, held (#608 to #616)"]
+        reason: "the mean is the same strapdown physics in either error convention, and one convention for both backends keeps a time-offset state (#332) from learning a backend-specific skew"
+      - question: Φ and L over the interval
+        chosen: "unchanged: Φ's nav block does not depend on the input, and its bias lever arms are taken at the start of the interval"
+        alternatives: ["lever arms at the interval's midpoint"]
+        reason: "the lever-arm terms move by v·Δt over 5 ms, far below what the update resolves; the gauge test holds at any state"
 
   - id: augment
     op: replace
@@ -221,7 +230,7 @@ schedule:
       steps:
         - {call: initialize, when: not initialized, note: the base's initializer, run by a bootstrap MsckfBackend}
         - {call: seed_state, when: a seed is ready}
-        - {call: propagate, when: initialized, note: on the held previous sample}
+        - {call: propagate, when: initialized, note: "the base's interval convention: both samples, RK4 (#616)"}
     - event: image
       rate_hz: 20
       steps:
@@ -229,7 +238,7 @@ schedule:
         - {call: track}
         - {call: initialize, when: not initialized, note: try the dynamic VI alignment}
         - {call: seed_state, when: a seed is ready, note: then return}
-        - {call: propagate, note: to the image time, on the held IMU sample}
+        - {call: propagate, note: to the image time, the last sample held, as in the base}
         - {call: zero_velocity, when: at rest, note: then return; the frame adds no clone}
         - {call: msckf_update, foreach: track touching the oldest clone, when: window full}
         - {call: marginalize, when: window full}
