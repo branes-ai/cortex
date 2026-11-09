@@ -260,6 +260,14 @@ class PipelineGraphTest(unittest.TestCase):
         _, _, rep = self.analyse(bad)
         self.assertTrue(any("needs a question and what was chosen" in e for e in rep.errors), rep.errors)
 
+        for chosen in ("0", "false"):
+            with self.subTest(chosen=chosen):
+                zero = edit(BASE, "    does: propagate the state\n",
+                            "    does: propagate the state\n    decisions:\n"
+                            f"      - {{question: substeps, chosen: {chosen}, reason: one is enough}}\n")
+                _, _, rep = self.analyse(zero)
+                self.assertEqual(rep.errors, [])
+
     def test_a_bound_needs_its_derivation_and_a_consumer(self) -> None:
         good = BASE + ("system_invariants:\n"
                        "  - id: closure\n"
@@ -273,6 +281,8 @@ class PipelineGraphTest(unittest.TestCase):
             "needs a value and its derivation": good.replace(", derivation: a tenth of 0.5 px", ""),
             "consumer must name the node": good.replace("consumer: correct", "consumer: nobody"),
         }
+        _, _, rep = self.analyse(good.replace("value: 1.1e-4 rad", "value: 0"))
+        self.assertEqual(rep.errors, [])
         for want, text in cases.items():
             with self.subTest(want):
                 _, _, rep = self.analyse(text)

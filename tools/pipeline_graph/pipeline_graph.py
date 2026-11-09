@@ -297,11 +297,16 @@ def strings(node: object, where: str = ""):
             yield from strings(v, f"{where}[{i}]")
 
 
+def stated(x: object) -> bool:
+    """A field is stated when it is present and not blank: 0 and false are values."""
+    return x is not None and str(x).strip() != ""
+
+
 def lint_decision(where: str, d: object, rep: Report) -> None:
     """A design choice the paper leaves open, recorded with its reason (#610):
     {question, chosen, alternatives, reason}. A missing reason is a gap: the
     choice was made by default, not decided."""
-    if not isinstance(d, dict) or not d.get("question") or not d.get("chosen"):
+    if not isinstance(d, dict) or not stated(d.get("question")) or not stated(d.get("chosen")):
         rep.error(f"{where}: a decision needs a question and what was chosen")
         return
     if not isinstance(d.get("alternatives", []), list):
@@ -320,7 +325,7 @@ def lint_bound(where: str, inv: dict, nodes: dict, rep: Report) -> None:
     b = inv.get("bound")
     if b is None:
         return
-    if not isinstance(b, dict) or not b.get("value") or not b.get("derivation"):
+    if not isinstance(b, dict) or not stated(b.get("value")) or not stated(b.get("derivation")):
         rep.error(f"{where}: a bound needs a value and its derivation")
         return
     for k in b:
