@@ -287,14 +287,12 @@ public:
 
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& prop,
-               const Vec3& gyro,
-               const Vec3& accel,
-               T dt,
+               const sdk::msckf::ImuInterval<T>& interval,
                const St& after) override {
         using B = S2PropagationBench;
         typename B::template Input<T> in;
         in.state = before;
-        in.samples.push_back({dt, gyro, accel});
+        in.samples.push_back(B::template Sample<T>::of(interval));
         in.noise = prop.noise();
         in.gravity = prop.gravity();
         Group g(next_frame_, after.timestamp);
@@ -572,11 +570,9 @@ public:
     }
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& p,
-               const Vec3& g,
-               const Vec3& a,
-               T dt,
+               const sdk::msckf::ImuInterval<T>& interval,
                const St& after) override {
-        each(sdk::msckf::TapStage::S2_propagation, [&](Base* x) { x->on_s2(before, p, g, a, dt, after); });
+        each(sdk::msckf::TapStage::S2_propagation, [&](Base* x) { x->on_s2(before, p, interval, after); });
     }
     void on_s3(const St& before,
                double t,

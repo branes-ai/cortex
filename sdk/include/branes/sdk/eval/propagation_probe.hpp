@@ -63,19 +63,41 @@ void place3(DynMat<T>& M, std::size_t r0, std::size_t c0, const Mat3<T>& B) {
             M(r0 + i, c0 + j) += B(i, j);
 }
 
-/// The 15×15 error-state transition Φ = I + A·Δt, reconstructed to match
-/// sdk/msckf/propagator.hpp exactly (FEJ off ⇒ linearize at the passed state).
+/// The 15×15 error-state transition of one RK4 step on a constant input,
+/// reconstructed in closed form to match sdk/msckf/propagator.hpp (#616; FEJ
+/// off ⇒ linearize at the passed state). With ω and a constant (bias removed),
+/// E(u) = Exp(ω·uΔt), Δv = Δt/6·(I + 4E(½) + E(1))·a, Δp = Δt²/6·(I + 2E(½))·a,
+/// and ∂θ(u)/∂bg = −uΔt·I, the body-frame right-perturbation Jacobian is
+///   δθ′ = E(1)ᵀδθ − Δt·J_r(ωΔt)·δbg
+///   δv′ = δv − R[Δv]×δθ + R·∂Δv/∂b·δb,  δp′ = δp + Δt·δv − R[Δp]×δθ + R·∂Δp/∂b·δb.
 template <math::Scalar T>
 [[nodiscard]] DynMat<T> imu_F(const SO3<T>& R, const Vec3<T>& w_lin, const Vec3<T>& a_lin, T dt) {
+    using math::lie::detail::hat;
     DynMat<T> F = DynMat<T>::identity(kImu);
     const Mat3<T> R_m = R.matrix();
-    place3(F, kTheta, kTheta, math::lie::detail::hat(w_lin) * (-dt));
-    for (std::size_t i = 0; i < 3; ++i)
-        F(kTheta + i, kBg + i) += -dt;
-    for (std::size_t i = 0; i < 3; ++i)
-        F(kPos + i, kVel + i) += dt;
-    place3(F, kVel, kTheta, (R_m * math::lie::detail::hat(a_lin)) * (-dt));
-    place3(F, kVel, kBa, R_m * (-dt));
+    const Mat3<T> I3 = Mat3<T>::identity();
+    const Vec3<T> th_m = w_lin * (dt / T{2}), th_1 = w_lin * dt;
+    const Mat3<T> Em = SO3<T>::exp(th_m).matrix(), E1 = SO3<T>::exp(th_1).matrix();
+    const T h6 = dt / T{6}, hh6 = dt * dt / T{6};
+    const Vec3<T> dv = (I3 + Em * T{4} + E1) * a_lin * h6;
+    const Vec3<T> dp = (I3 + Em * T{2}) * a_lin * hh6;
+    // ∂(E(u)·a)/∂bg = −E(u)[a]×·J_r(θ(u))·(−uΔt) = uΔt·E(u)[a]×J_r(θ(u)).
+    const Mat3<T> Gm = Em * hat(a_lin) * SO3<T>::right_jacobian(th_m) * (dt / T{2});
+    const Mat3<T> G1 = E1 * hat(a_lin) * SO3<T>::right_jacobian(th_1) * dt;
+    auto set3 = [&](std::size_t r0, std::size_t c0, const Mat3<T>& B) {
+        for (std::size_t i = 0; i < 3; ++i)
+            for (std::size_t j = 0; j < 3; ++j)
+                F(r0 + i, c0 + j) = B(i, j);
+    };
+    set3(kTheta, kTheta, math::lie::detail::transpose(E1));
+    set3(kTheta, kBg, SO3<T>::right_jacobian(th_1) * (-dt));
+    set3(kVel, kTheta, (R_m * hat(dv)) * T{-1});
+    set3(kVel, kBg, R_m * (Gm * T{4} + G1) * h6);
+    set3(kVel, kBa, R_m * (I3 + Em * T{4} + E1) * (-h6));
+    set3(kPos, kTheta, (R_m * hat(dp)) * T{-1});
+    set3(kPos, kVel, I3 * dt);
+    set3(kPos, kBg, R_m * Gm * (T{2} * hh6));
+    set3(kPos, kBa, R_m * (I3 + Em * T{2}) * (-hh6));
     return F;
 }
 
@@ -333,9 +355,13 @@ struct GtInjectionPoint {
 /// ω_b and constant BODY-frame specific force f_b, so the world acceleration
 /// R(t)·f_b + g rotates within every step — through the REAL Propagator at the
 /// test `dt` and at a 32× finer reference dt. The coarse-vs-fine difference is
-/// the integrator's discretization error (the scheme holds the measurement
-/// constant over each step, so a rotating trajectory is NOT integrated exactly);
-/// sweeping dt reveals the convergence order.
+/// the integrator's discretization error; sweeping dt reveals its convergence
+/// order. The input is constant, so a held sample is the exact input here and
+/// this measures the integrator alone: the pre-#616 Euler step, which rotated
+/// the specific force with the attitude at the start of the step, converged at
+/// first order (59 mm at 50 Hz); RK4 converges at fourth order (5e-7 mm) down
+/// to roundoff. #616's other half, a sample held over an interval it does not
+/// represent, needs a varying rate to show (tests/tools/gt_spline.cpp).
 template <math::Scalar T>
 [[nodiscard]] GtInjectionPoint<T> gt_injection(T dt, T duration_s = T{2}) {
     using namespace pp_detail;

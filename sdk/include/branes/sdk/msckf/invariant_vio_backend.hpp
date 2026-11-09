@@ -76,19 +76,30 @@ public:
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
         have_last_ = false;
+        have_sample_ = false;
     }
 
-    /// Seed the nav state at `t` and hold the IMU sample in effect there (the
-    /// last one at or before `t`), so propagation resumes from `t` without
-    /// waiting for the next sample: an initializer that fires at an image time,
-    /// between IMU samples, otherwise loses that gap (#608).
-    void
-    set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t, const Vec3& hold_gyro, const Vec3& hold_accel) {
+    /// Seed the nav state at `t` with the IMU sample in effect there, the last
+    /// one at or before `t`, taken at `sample_t`, so propagation resumes from
+    /// `t` without waiting for the next sample: an initializer that fires at an
+    /// image time, between IMU samples, otherwise loses that gap (#608). The
+    /// next sample's interval starts from the rate interpolated at `t` (#616).
+    void set_nav(const SE23& X,
+                 const Vec3& bg,
+                 const Vec3& ba,
+                 double t,
+                 const Vec3& hold_gyro,
+                 const Vec3& hold_accel,
+                 double sample_t) {
         be_.set_nav(X, bg, ba, t);
         last_imu_time_ = t;
         have_last_ = true;
-        last_gyro_ = hold_gyro;
-        last_accel_ = hold_accel;
+        remember_sample(hold_gyro, hold_accel, sample_t);
+    }
+    /// The same with the held sample taken at `t` itself.
+    void
+    set_nav(const SE23& X, const Vec3& bg, const Vec3& ba, double t, const Vec3& hold_gyro, const Vec3& hold_accel) {
+        set_nav(X, bg, ba, t, hold_gyro, hold_accel, t);
     }
 
     /// Replace the nav covariance with G·Gᵀ (MsckfInvariantBackend::seed_covariance).
@@ -101,24 +112,30 @@ public:
         be_.enable_calibration(std::move(init), rot_sigma, trans_sigma);
     }
 
-    /// IMU sample: propagate from the previous sample (zero-order hold held over to
-    /// the next image time). Drops out-of-order / duplicate timestamps, and any
-    /// sample older than the time `set_nav` seeded: integrating those would run
-    /// the seeded state forward over an interval that precedes it.
+    /// IMU sample: propagate the interval from the filter clock to `t` from both
+    /// of its ends (#616): the start is the previous sample, or the rate
+    /// interpolated at the clock when an image time or the seed fell between
+    /// the two. Drops out-of-order / duplicate timestamps, and any sample older
+    /// than the time `set_nav` seeded: integrating those would run the seeded
+    /// state forward over an interval that precedes it.
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
         if (have_last_ ? t <= last_imu_time_ : t < last_imu_time_)
             return;
         if (have_last_) {
             const double dt = t - last_imu_time_;
             if (dt > 0.0) {
-                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                Vec3 g0 = gyro, a0 = accel;
+                if (have_sample_) {
+                    g0 = interpolate_sample(last_sample_t_, last_gyro_, t, gyro, last_imu_time_);
+                    a0 = interpolate_sample(last_sample_t_, last_accel_, t, accel, last_imu_time_);
+                }
+                be_.propagate(ImuInterval<T>{g0, a0, gyro, accel, static_cast<T>(dt)});
                 be_.set_timestamp(t);  // the clock stays the double sample time, not Σ T(dt)
             }
         }
         last_imu_time_ = t;
         have_last_ = true;
-        last_gyro_ = gyro;
-        last_accel_ = accel;
+        remember_sample(gyro, accel, t);
     }
 
     /// Image frame: propagate to frame time, bound the window, clone, ingest the
@@ -206,15 +223,23 @@ private:
         return kNoClone;
     }
 
-    // Propagate to an image time on the held IMU sample (zero-order hold).
-    // False for a frame older than the filter clock.
+    // The last IMU sample and its time: the start of the next interval.
+    void remember_sample(const Vec3& gyro, const Vec3& accel, double t) {
+        last_gyro_ = gyro;
+        last_accel_ = accel;
+        last_sample_t_ = t;
+        have_sample_ = true;
+    }
+
+    // Propagate to an image time holding the last IMU sample (the next one has
+    // not arrived; #616's causal hold). False for a frame older than the clock.
     bool propagate_to(double t) {
         if (have_last_) {
             const double dt = t - last_imu_time_;
             if (dt < 0.0)
                 return false;
             if (dt > 0.0) {
-                be_.propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                be_.propagate(ImuInterval<T>::held(last_gyro_, last_accel_, static_cast<T>(dt)));
                 be_.set_timestamp(t);
                 last_imu_time_ = t;
             }
@@ -287,6 +312,8 @@ private:
     Vec3 last_accel_{};
     double last_imu_time_ = 0.0;
     bool have_last_ = false;
+    double last_sample_t_ = 0.0;  ///< the time of last_gyro_ / last_accel_
+    bool have_sample_ = false;
 };
 
 }  // namespace branes::sdk::msckf

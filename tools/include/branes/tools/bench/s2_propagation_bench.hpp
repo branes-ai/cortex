@@ -3,35 +3,39 @@
 // branes/tools/bench/s2_propagation_bench.hpp — the S2_propagation stage bench
 // (issue #455, epic #444).
 //
-// Stage under test: stages::s2_propagation::apply(state, propagator, ω̃, ã, Δt),
-// run over a segment of IMU samples. Contract (#445 §B, S2), checked at every
-// step against the exact Φ and Q_d the filter uses (Propagator::transition):
+// Stage under test: stages::s2_propagation::apply(state, propagator, interval),
+// run over a segment of IMU intervals, each with the samples at both ends (#616). Contract (#445 §B, S2), checked at
+// every step against the exact Φ and Q_d the filter uses (Propagator::transition):
 //   • R stays in SO(3), its quaternion unit-norm;
 //   • Q_d ⪰ 0;
 //   • P' = Φ P Φᵀ + Q_d, and P' stays symmetric and ⪰ 0;
-//   • Φ preserves the global-translation directions of the unobservable
-//     subspace exactly; the yaw direction's leak (first-order Φ, no FEJ) is
-//     reported, the body-frame filter's known O(Δt²) leak;
+//   • Φ preserves the unobservable subspace, global translation and the yaw
+//     about gravity, to roundoff: since #616 it is the exact Jacobian of the
+//     RK4 mean, whose preintegration form commutes with both. (The pre-#616
+//     first-order Φ leaked yaw at O(Δt²); the sweep still reports that leak.)
 //   • the timestamp advances by ΣΔt.
 //
 // Fixtures:
 //   known_answer   level and stationary (specific force cancels gravity): the
 //                  mean is unchanged and P follows a hand-built Φ in closed form
 //   ground_truth   an analytic tumbling, accelerating trajectory with biases:
-//                  truth = the final pose and velocity
+//                  truth = the final pose and velocity (attitude to roundoff;
+//                  position and velocity to what the camera resolves, #616)
 //   captured       an IMU segment of the synthetic world's S2/S3 stage sequence
 //
-// Variants: "shipped" (first-order Φ, the diagonal Q_d), "canonical_qd" (same Φ,
+// Variants: "shipped" (the RK4 mean's Jacobian Φ, the diagonal Q_d), "canonical_qd" (same Φ,
 // the canonical B·Σ·Bᵀ Q_d with the position and v–p terms the diagonal drops),
 // "sqrt_covariance" (the square-root covariance form of the same propagation),
-// "higher_order_phi" (Φ = I + AΔt + ½(AΔt)², the shipped mean) and "invariant"
+// "higher_order_phi" (the pre-#616 Φ expanded, I + AΔt + ½(AΔt)², on the shipped
+// mean, #471's comparison) and "invariant"
 // (the R-IEKF's InvariantPropagator: SE₂(3) mean, its own Φ, on the invariant
 // error ξ, #471). The invariant variant's per-step checks run in ξ, against the
 // invariant unobservable basis; its output P is mapped back to the body-frame
 // error at the final mean, so it compares with the other variants'.
 //
 // Sweep: Δt × trajectory dynamics × Q scale → position error vs the analytic
-// truth, yaw leak (first-order, second-order and exp(AΔt) Φ, and the invariant
+// truth, yaw leak (the shipped Φ, the pre-#616 first-order, second-order and
+// exp(AΔt) Φ, and the invariant
 // filter's), the diagonal-vs-canonical position-σ gap, and λ_min/‖P‖.
 //
 // Header-only, C++20.
@@ -66,6 +70,15 @@ struct S2PropagationBench {
     /// A segment is dozens of dense steps; in software arithmetic one timed run is enough.
     static constexpr int kTimingReps = 1;
 
+    /// What the camera resolves over a clone window (the s2_closure bound of
+    /// docs/methodology/specs/euroc-consistency-gate.yaml): a tenth of the
+    /// 0.5 px track noise at cam0's fx = 458.654 is 1.09e-4 rad, and that angle
+    /// at the nearest landmark depth, 2 m, is 0.22 mm; a velocity error held
+    /// over the 0.55 s window must stay under the same 0.22 mm.
+    static constexpr double kResolvedRotation = 0.1 * 0.5 / 458.654;
+    static constexpr double kResolvedPosition = 2.0 * kResolvedRotation;
+    static constexpr double kResolvedVelocity = kResolvedPosition / 0.55;
+
     template <class T>
     using State = sdk::msckf::State<T>;
     template <class T>
@@ -73,10 +86,25 @@ struct S2PropagationBench {
     template <class T>
     using DynMat = sdk::msckf::DynMat<T>;
 
+    /// One IMU interval (#616): the sample at its start, and, unless the input
+    /// is held constant over it, the sample at its end. A fixture written
+    /// before #616 has no end samples and decodes as held intervals.
     template <class T>
     struct Sample {
         T dt{0};
-        Vec3<T> gyro{}, accel{};
+        Vec3<T> gyro{}, accel{};    ///< the sample at the start of the interval
+        Vec3<T> gyro1{}, accel1{};  ///< the sample at its end (when !held)
+        bool held = true;
+        [[nodiscard]] sdk::msckf::ImuInterval<T> interval() const {
+            return held ? sdk::msckf::ImuInterval<T>::held(gyro, accel, dt)
+                        : sdk::msckf::ImuInterval<T>{gyro, accel, gyro1, accel1, dt};
+        }
+        [[nodiscard]] static Sample of(const sdk::msckf::ImuInterval<T>& in) {
+            bool same = true;
+            for (std::size_t i = 0; i < 3; ++i)
+                same = same && in.gyro0[i] == in.gyro1[i] && in.accel0[i] == in.accel1[i];
+            return Sample{in.dt, in.gyro0, in.accel0, in.gyro1, in.accel1, same};
+        }
     };
     template <class T>
     struct Input {
@@ -90,6 +118,7 @@ struct S2PropagationBench {
     struct Step {
         DynMat<T> P_before, F, Q, P_after;
         DynMat<T> N_before, N_after;  ///< unobservable-subspace bases at both ends
+        DynMat<T> F1;                 ///< the pre-#616 first-order Φ at the same state and mean input, for comparison
     };
     template <class T>
     struct Output {
@@ -98,22 +127,33 @@ struct S2PropagationBench {
         /// The steps are in the invariant error ξ, whose Φ preserves the whole
         /// unobservable subspace by construction (not serialized).
         bool invariant_error = false;
+        /// The steps use a Φ that is not the Jacobian of the mean they propagate
+        /// (the higher_order_phi comparison), so the yaw leak is reported, not
+        /// gated (not serialized).
+        bool phi_leaks_yaw = false;
     };
 
     [[nodiscard]] static std::vector<Variant> variants() {
-        return {{"shipped", "stages::s2_propagation::apply (first-order Phi, diagonal Q_d)"},
-                {"canonical_qd", "same Phi, canonical B*Sigma*B^T Q_d (position and v-p terms)"},
-                {"sqrt_covariance", "the square-root covariance form of the same propagation"},
-                {"higher_order_phi", "Phi = I + A dt + (A dt)^2 / 2, diagonal Q_d, the shipped mean"},
-                {"invariant", "InvariantPropagator (R-IEKF): SE2(3) mean, its Phi, on the invariant error"}};
+        return {
+            {"shipped", "stages::s2_propagation::apply (the RK4 mean's Jacobian Phi, diagonal Q_d)"},
+            {"canonical_qd", "same Phi, canonical B*Sigma*B^T Q_d (position and v-p terms)"},
+            {"sqrt_covariance", "the square-root covariance form of the same propagation"},
+            {"higher_order_phi", "the pre-#616 Phi expanded, I + A dt + (A dt)^2 / 2, diagonal Q_d, the shipped mean"},
+            {"invariant", "InvariantPropagator (R-IEKF): SE2(3) mean, its Phi, on the invariant error"}};
     }
 
     // ── Codec ───────────────────────────────────────────────────────────────
     template <class T>
     [[nodiscard]] static json encode_input(const Input<T>& in) {
         json s = json::array();
-        for (const auto& x : in.samples)
-            s.push_back({{"dt", pack(x.dt)}, {"gyro", pack(x.gyro)}, {"accel", pack(x.accel)}});
+        for (const auto& x : in.samples) {
+            json e{{"dt", pack(x.dt)}, {"gyro", pack(x.gyro)}, {"accel", pack(x.accel)}};
+            if (!x.held) {
+                e["gyro1"] = pack(x.gyro1);
+                e["accel1"] = pack(x.accel1);
+            }
+            s.push_back(std::move(e));
+        }
         return json{{"state", pack(in.state)},
                     {"samples", s},
                     {"noise",
@@ -127,9 +167,16 @@ struct S2PropagationBench {
     [[nodiscard]] static Input<T> decode_input(const json& j) {
         Input<T> in;
         in.state = unpack_state<T>(j.at("state"));
-        for (const auto& x : j.at("samples"))
-            in.samples.push_back(
-                {unpack_scalar<T>(x.at("dt")), unpack_fixed<T, 3>(x.at("gyro")), unpack_fixed<T, 3>(x.at("accel"))});
+        for (const auto& x : j.at("samples")) {
+            Sample<T> smp{
+                unpack_scalar<T>(x.at("dt")), unpack_fixed<T, 3>(x.at("gyro")), unpack_fixed<T, 3>(x.at("accel"))};
+            if (x.contains("gyro1")) {
+                smp.gyro1 = unpack_fixed<T, 3>(x.at("gyro1"));
+                smp.accel1 = unpack_fixed<T, 3>(x.at("accel1"));
+                smp.held = false;
+            }
+            in.samples.push_back(smp);
+        }
         const auto& n = j.at("noise");
         in.noise = {unpack_scalar<T>(n.at("gyro")),
                     unpack_scalar<T>(n.at("accel")),
@@ -152,6 +199,7 @@ struct S2PropagationBench {
     [[nodiscard]] static Output<T> run(const Input<T>& in, std::string_view variant) {
         const sdk::msckf::Propagator<T> prop(in.noise, in.gravity);
         Output<T> out{in.state, {}};
+        out.phi_leaks_yaw = variant == "higher_order_phi";
         auto& s = out.state;
         if (variant == "sqrt_covariance")
             return run_sqrt(in, prop);
@@ -163,23 +211,25 @@ struct S2PropagationBench {
             Step<T> st;
             st.P_before = s.cov.P;
             st.N_before = unobservable_basis(s);
-            const auto tr = prop.transition(s, x.gyro, x.accel, x.dt);
+            const auto tr = prop.transition(s, x.interval());
             st.F = tr.F;
             st.Q = dense_q(s.dim(), tr.q);
+            const auto iv = x.interval();
+            st.F1 = prop.first_order_transition(s, iv.mean_gyro(), iv.mean_accel(), iv.dt).F;
             if (variant == "canonical_qd" || variant == "higher_order_phi") {
                 State<T> mean = s;
-                prop.propagate(mean, x.gyro, x.accel, x.dt);  // the mean is the shipped one
+                prop.propagate(mean, x.interval());  // the mean is the shipped one
                 if (variant == "canonical_qd")
                     st.Q = canonical_q(s.dim(), in.noise, x.dt);
                 else
-                    st.F = second_order(tr.F);
+                    st.F = second_order(st.F1);  // #471's comparison: the first-order Φ, expanded
                 DynMat<T> P =
                     sdk::msckf::add(sdk::msckf::mul(sdk::msckf::mul(st.F, s.cov.P), sdk::msckf::transpose(st.F)), st.Q);
                 sdk::msckf::symmetrize(P);
                 mean.cov.P = std::move(P);
                 s = std::move(mean);
             } else {
-                sdk::msckf::stages::s2_propagation::apply(s, prop, x.gyro, x.accel, x.dt);
+                sdk::msckf::stages::s2_propagation::apply(s, prop, x.interval());
             }
             st.P_after = s.cov.P;
             st.N_after = unobservable_basis(s);
@@ -244,10 +294,10 @@ struct S2PropagationBench {
                                                      kInvStage,
                                                      "observability.translation_preserved"));
             auto y = inv::check_subspace_preserved(st.F, st.N_before, st.N_after, kInvStage, "observability.yaw_leak");
-            if (!out.invariant_error) {
-                y.bound = inv::Bound::Report;  // the body-frame filter's known first-order leak: reported, not gated
+            if (out.phi_leaks_yaw) {
+                y.bound = inv::Bound::Report;  // a comparison Φ off the mean's Jacobian: reported, not gated
                 y.pass = std::isfinite(y.value);
-            }  // the invariant filter's: held to roundoff, like translation
+            }  // the shipped Φ (the RK4 mean's Jacobian, #616) and the invariant one: held to roundoff
             yaw.take(y);
         }
         for (auto* w : {&ident, &trans, &yaw})
@@ -292,8 +342,12 @@ struct S2PropagationBench {
         for (int k = 0; k < 10; ++k)
             in.samples.push_back({0.005, {{0.0, 0.0, 0.0}}, {{0.0, 0.0, 9.81}}});
 
-        // Hand-built Φ for ω = 0, a = (0,0,g), R = I: F[p,v] = I·dt,
-        // F[v,θ] = −[a]× dt, F[θ,bg] = −I·dt, F[v,ba] = −I·dt; Q diagonal.
+        // Hand-built Φ of one RK4 step at rest, ω = 0, a = (0,0,g), R = I (#616):
+        // ΔR = I, Δv = a·dt, Δp = a·dt²/2, and the bias columns of the
+        // increments in closed form, so
+        //   F[θ,bg] = −I·dt,     F[v,θ] = −[a]× dt,     F[v,bg] = [a]× dt²/2, F[v,ba] = −I·dt,
+        //   F[p,v]  = I·dt,      F[p,θ] = −[a]× dt²/2,  F[p,bg] = [a]× dt³/6, F[p,ba] = −I·dt²/2;
+        // Q diagonal.
         const auto& n = in.noise;
         Output<double> want{in.state, {}};
         auto& P = want.state.cov.P;
@@ -302,13 +356,20 @@ struct S2PropagationBench {
             DynMat<double> F = DynMat<double>::identity(d);
             const double dt = x.dt, g = 9.81;
             for (std::size_t i = 0; i < 3; ++i) {
-                F(3 + i, 6 + i) += dt;    // p ← v
-                F(0 + i, 9 + i) += -dt;   // θ ← bg
-                F(6 + i, 12 + i) += -dt;  // v ← ba
+                F(3 + i, 6 + i) += dt;               // p ← v
+                F(0 + i, 9 + i) += -dt;              // θ ← bg
+                F(6 + i, 12 + i) += -dt;             // v ← ba
+                F(3 + i, 12 + i) += -0.5 * dt * dt;  // p ← ba
             }
-            // −[a]× dt with a = (0,0,g): [a]× = [[0,−g,0],[g,0,0],[0,0,0]].
-            F(6, 1) += g * dt;
-            F(7, 0) += -g * dt;
+            // c·[a]× at (r0, c0), with [a]× = [[0,−g,0],[g,0,0],[0,0,0]] for a = (0,0,g).
+            const auto skew = [&](std::size_t r0, std::size_t c0, double c) {
+                F(r0 + 0, c0 + 1) += -g * c;
+                F(r0 + 1, c0 + 0) += g * c;
+            };
+            skew(6, 0, -dt);                 // v ← θ
+            skew(6, 9, 0.5 * dt * dt);       // v ← bg
+            skew(3, 0, -0.5 * dt * dt);      // p ← θ
+            skew(3, 9, dt * dt * dt / 6.0);  // p ← bg
             DynMat<double> Pn = sdk::msckf::mul(sdk::msckf::mul(F, P), sdk::msckf::transpose(F));
             for (std::size_t i = 0; i < 3; ++i) {
                 Pn(0 + i, 0 + i) += n.gyro * n.gyro * dt;
@@ -325,7 +386,7 @@ struct S2PropagationBench {
         f.kind = FixtureKind::KnownAnswer;
         f.variant = "shipped";  // the canonical-Q and sqrt variants propagate a different P
         f.source = "s2_propagation_bench: level, stationary, 10 x 5 ms, one clone";
-        f.description = "mean unchanged; covariance by a hand-built Phi and the diagonal Q_d";
+        f.description = "mean unchanged; covariance by a hand-built RK4-step Phi and the diagonal Q_d";
         f.input = encode_input(in);
         f.expected = encode_output(want);
         return f;
@@ -358,17 +419,25 @@ struct S2PropagationBench {
         s.v = world.gt.front().v;
         s.timestamp = world.imu.front().timestamp_s;
         std::size_t k = 0;
+        const auto gyro = [&](std::size_t i) {
+            const auto& w = world.imu[i].angular_velocity;
+            return Vec3<double>{{w[0], w[1], w[2]}};
+        };
+        const auto accel = [&](std::size_t i) {
+            const auto& a = world.imu[i].linear_acceleration;
+            return Vec3<double>{{a[0], a[1], a[2]}};
+        };
+        // Each interval runs from the previous sample to this one (#616), as the
+        // backends integrate it; the first sample only starts the clock.
         auto imu_to = [&](double t, Input<double>* record) {
             for (; k < world.imu.size() && world.imu[k].timestamp_s <= t; ++k) {
-                const auto& m = world.imu[k];
-                const Sample<double> x{
-                    m.timestamp_s - s.timestamp,
-                    {{m.angular_velocity[0], m.angular_velocity[1], m.angular_velocity[2]}},
-                    {{m.linear_acceleration[0], m.linear_acceleration[1], m.linear_acceleration[2]}}};
+                const std::size_t j = k > 0 ? k - 1 : 0;
+                const auto x =
+                    Sample<double>::of({gyro(j), accel(j), gyro(k), accel(k), world.imu[k].timestamp_s - s.timestamp});
                 if (record)
                     record->samples.push_back(x);
-                st::s2_propagation::apply(s, prop, x.gyro, x.accel, x.dt);
-                s.timestamp = m.timestamp_s;
+                st::s2_propagation::apply(s, prop, x.interval());
+                s.timestamp = world.imu[k].timestamp_s;
             }
         };
         for (std::size_t fr = 0; fr < 3; ++fr) {
@@ -383,7 +452,7 @@ struct S2PropagationBench {
         // The recorded output is what the stage produced on exactly these samples.
         Output<double> got{replay, {}};
         for (const auto& x : in.samples)
-            st::s2_propagation::apply(got.state, prop, x.gyro, x.accel, x.dt);
+            st::s2_propagation::apply(got.state, prop, x.interval());
         return capture(std::string(kStage),
                        "double",
                        "synthetic_world (default config), S2/S3 stage sequence, IMU between frames 3 and 4",
@@ -400,6 +469,7 @@ struct S2PropagationBench {
     [[nodiscard]] static std::vector<std::string> sweep_columns() {
         return {"pos_err_m",
                 "yaw_leak",
+                "yaw_leak_1st_order",
                 "yaw_leak_2nd_order",
                 "yaw_leak_exp",
                 "yaw_leak_invariant",
@@ -427,18 +497,20 @@ struct S2PropagationBench {
         const auto shipped = run<T>(in, kShipped);
         const auto canon = run<T>(in, "canonical_qd");
         const auto invar = run<T>(in, "invariant");
-        double pos_err = 0.0, pos_err_inv = 0.0, leak = 0.0, leak2 = 0.0, leak_exp = 0.0, leak_inv = 0.0;
+        double pos_err = 0.0, pos_err_inv = 0.0, leak = 0.0, leak1 = 0.0, leak2 = 0.0, leak_exp = 0.0, leak_inv = 0.0;
         for (std::size_t i = 0; i < 3; ++i) {
             pos_err = std::max(pos_err, std::abs(static_cast<double>(shipped.state.p[i]) - traj.p_end[i]));
             pos_err_inv = std::max(pos_err_inv, std::abs(static_cast<double>(invar.state.p[i]) - traj.p_end[i]));
         }
-        // The same body-frame steps under each expansion of Φ = exp(AΔt): the
-        // mean, and so the basis at both ends, is the shipped one throughout.
+        // The same body-frame steps under the shipped Φ (the exact Jacobian of
+        // the RK4 mean) and under each expansion of the pre-#616 Φ = exp(AΔt):
+        // the mean, and so the basis at both ends, is the shipped one throughout.
         for (const auto& st : shipped.steps) {
             leak = std::max(leak, inv::check_subspace_preserved(st.F, st.N_before, st.N_after).value);
-            leak2 = std::max(leak2, inv::check_subspace_preserved(second_order(st.F), st.N_before, st.N_after).value);
+            leak1 = std::max(leak1, inv::check_subspace_preserved(st.F1, st.N_before, st.N_after).value);
+            leak2 = std::max(leak2, inv::check_subspace_preserved(second_order(st.F1), st.N_before, st.N_after).value);
             leak_exp =
-                std::max(leak_exp, inv::check_subspace_preserved(exponential(st.F), st.N_before, st.N_after).value);
+                std::max(leak_exp, inv::check_subspace_preserved(exponential(st.F1), st.N_before, st.N_after).value);
         }
         for (const auto& st : invar.steps)
             leak_inv = std::max(leak_inv, inv::check_subspace_preserved(st.F, st.N_before, st.N_after).value);
@@ -452,6 +524,7 @@ struct S2PropagationBench {
         const auto ev = inv::la::symmetric_eigenvalues(shipped.state.cov.P);
         return {pos_err,
                 leak,
+                leak1,
                 leak2,
                 leak_exp,
                 leak_inv,
@@ -665,10 +738,10 @@ private:
             Step<T> st;
             st.P_before = sq.covariance();
             st.N_before = unobservable_basis(out.state);
-            const auto tr = prop.transition(sq, x.gyro, x.accel, x.dt);
+            const auto tr = prop.transition(sq, x.interval());
             st.F = tr.F;
             st.Q = dense_q(sq.dim(), tr.q);
-            sdk::msckf::stages::s2_propagation::apply(sq, prop, x.gyro, x.accel, x.dt);
+            sdk::msckf::stages::s2_propagation::apply(sq, prop, x.interval());
             out.state.R = sq.R;
             out.state.p = sq.p;
             out.state.v = sq.v;
@@ -769,7 +842,7 @@ private:
             }
             P = ms::add(ms::mul(ms::mul(st.F, P), ms::transpose(st.F)), st.Q);
             ms::symmetrize(P);
-            prop.propagate_mean(x, smp.gyro, smp.accel, smp.dt);
+            prop.propagate_mean(x, smp.interval());
             s.timestamp += static_cast<double>(smp.dt);
             st.P_after = P;
             st.N_after = N;
@@ -816,10 +889,12 @@ private:
         in.state.timestamp = 0.0;
         in.state.cov.P = correlated_spd(in.state.dim());
         in.gravity = g;
-        for (std::size_t k = 0; k < n; ++k) {
-            const SO3 R = R0 * SO3::exp(w * (dt * double(k)));
-            in.samples.push_back({dt, w + bg, R.inverse() * (a_w - g) + ba});
-        }
+        // Interval k runs from the sample at kΔt to the one at (k+1)Δt (#616).
+        const auto sample_accel = [&](std::size_t k) {
+            return (R0 * SO3::exp(w * (dt * double(k)))).inverse() * (a_w - g) + ba;
+        };
+        for (std::size_t k = 0; k < n; ++k)
+            in.samples.push_back(Sample<double>::of({w + bg, sample_accel(k), w + bg, sample_accel(k + 1), dt}));
         const double T_end = dt * double(n);
         tr.R_end = R0 * SO3::exp(w * T_end);
         tr.p_end = p0 + v0 * T_end + a_w * (0.5 * T_end * T_end);
@@ -827,11 +902,13 @@ private:
         return tr;
     }
 
-    /// Final pose and velocity against the analytic truth. On this trajectory
-    /// the propagation is exact in exact arithmetic: ω is constant, so
-    /// R ← R·Exp(ωΔt) is exact, and each accel sample is Rₖᵀ(a_w − g) + b_a, so
-    /// Rₖ(ã − b_a) + g = a_w exactly at every step. Any residual is arithmetic,
-    /// held to the type's tolerance accumulated over the `steps` steps.
+    /// Final pose and velocity against the analytic truth. ω is constant, so
+    /// the attitude is exact in exact arithmetic (R ← R·Exp(ωΔt), no coning)
+    /// and held to the type's tolerance accumulated over the `steps` steps.
+    /// The body-frame specific force Rᵀ(a_w − g) is not linear between samples,
+    /// so the interpolated input (#616) leaves an O(Δt²) error in velocity and
+    /// position (5e-6 m/s here); those are held to what the camera resolves,
+    /// not to what RK4 achieves, and the old end-sample hold misses them.
     template <class T>
     [[nodiscard]] static std::vector<inv::InvariantResult>
     truth_checks(const State<T>& s, const json& truth, std::size_t steps) {
@@ -863,13 +940,20 @@ private:
             v_scale = std::max(v_scale, std::abs(v[i]));
         }
         const std::size_t n = std::max<std::size_t>(steps, 1);
-        return {
-            inv::check_scalar(
-                ep, tolerance_vs_double<T>(n, p_scale), inv::Bound::Upper, kInvStage, "truth.position_error", "m"),
-            inv::check_scalar(
-                ev, tolerance_vs_double<T>(n, v_scale), inv::Bound::Upper, kInvStage, "truth.velocity_error", "m/s"),
-            inv::check_scalar(
-                ang, tolerance_vs_double<T>(n, 1.0), inv::Bound::Upper, kInvStage, "truth.attitude_error", "rad")};
+        return {inv::check_scalar(ep,
+                                  std::max(kResolvedPosition, tolerance_vs_double<T>(n, p_scale)),
+                                  inv::Bound::Upper,
+                                  kInvStage,
+                                  "truth.position_error",
+                                  "m"),
+                inv::check_scalar(ev,
+                                  std::max(kResolvedVelocity, tolerance_vs_double<T>(n, v_scale)),
+                                  inv::Bound::Upper,
+                                  kInvStage,
+                                  "truth.velocity_error",
+                                  "m/s"),
+                inv::check_scalar(
+                    ang, tolerance_vs_double<T>(n, 1.0), inv::Bound::Upper, kInvStage, "truth.attitude_error", "rad")};
     }
 };
 

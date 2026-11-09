@@ -86,11 +86,11 @@ public:
                        const sfm::InitWindowResult<T>& /*window*/,
                        bool /*aligned*/) {}
 
+    /// One S2 step: the interval it integrated (both samples, or one held up
+    /// to an image time, #616).
     virtual void on_s2(const St& /*before*/,
                        const Propagator<T>& /*propagator*/,
-                       const Vec3& /*gyro*/,
-                       const Vec3& /*accel*/,
-                       T /*dt*/,
+                       const ImuInterval<T>& /*interval*/,
                        const St& /*after*/) {}
 
     virtual void on_s3(const St& /*before*/,

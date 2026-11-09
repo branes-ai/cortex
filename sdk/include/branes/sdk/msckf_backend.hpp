@@ -17,9 +17,13 @@
 // This is the full-covariance backend. A square-root covariance variant
 // is a separate, larger effort tracked as a follow-up to issue #35.
 //
-// `process_camera` propagates the state to the frame timestamp (zero-order
-// hold on the last IMU sample) before cloning, so each clone is anchored
-// at exactly the image time even on an asynchronous IMU/camera feed.
+// S2 integrates each interval between two IMU samples from both of them, the
+// input interpolated between the samples (#616). `process_camera` propagates
+// the state to the frame timestamp before cloning, holding the last sample
+// (the next one has not arrived), so each clone is anchored at exactly the
+// image time even on an asynchronous IMU/camera feed; the next sample then
+// integrates the rest of its interval from the rate interpolated at the image
+// time (msckf/stages/s2_propagation.hpp states the convention).
 //
 // The backend is the call sequence of the stage transformations in
 // msckf/stages/ (#452): S2_propagation per IMU sample; per frame, S6 + S9 to
@@ -162,6 +166,8 @@ public:
         initialized_ = false;
         have_last_time_ = false;
         last_imu_time_ = 0.0;
+        have_sample_ = false;
+        last_sample_t_ = 0.0;
         init_gyro_.clear();
         init_accel_.clear();
         init_samples_seen_ = 0;
@@ -190,6 +196,7 @@ public:
             }
             init_last_imu_t_ = imu.timestamp_s;
             init_have_imu_t_ = true;
+            remember_sample(gyro, accel, imu.timestamp_s);  // the first interval after the seed starts from it
             try_initialize(gyro, accel, imu.timestamp_s);
             return;
         }
@@ -197,7 +204,15 @@ public:
             const double dt = imu.timestamp_s - last_imu_time_;
             if (!(dt > 0.0))
                 return;  // drop out-of-order / duplicate samples — don't touch filter time
-            propagate(gyro, accel, static_cast<T>(dt));
+            // The interval from the filter clock to this sample, from both of its
+            // ends: the start is the previous sample, or the rate interpolated at
+            // the clock when an image time (or the seed) fell between the two.
+            DVec3 g0 = gyro, a0 = accel;
+            if (have_sample_) {
+                g0 = msckf::interpolate_sample(last_sample_t_, last_gyro_, imu.timestamp_s, gyro, last_imu_time_);
+                a0 = msckf::interpolate_sample(last_sample_t_, last_accel_, imu.timestamp_s, accel, last_imu_time_);
+            }
+            propagate(msckf::ImuInterval<T>{g0, a0, gyro, accel, static_cast<T>(dt)});
         }
         if (config_.zero_velocity_update) {
             zupt_.push_imu(gyro);
@@ -206,8 +221,7 @@ public:
         last_imu_time_ = imu.timestamp_s;
         have_last_time_ = true;
         state_.timestamp = imu.timestamp_s;
-        last_gyro_ = gyro;  // held over to the next frame's image time
-        last_accel_ = accel;
+        remember_sample(gyro, accel, imu.timestamp_s);  // held to the next image time, then interpolated
     }
 
     void process_camera(double timestamp_s, std::span<const FrontendObservation<T>> obs) override {
@@ -224,15 +238,17 @@ public:
             return;
         }
 
-        // S2: propagate to the image time (zero-order hold on the last IMU
-        // sample) so the clone is anchored at exactly `timestamp_s`, even when
-        // the frame falls between IMU samples. Out-of-order frames are ignored.
+        // S2: propagate to the image time, holding the last IMU sample (the
+        // next one has not arrived), so the clone is anchored at exactly
+        // `timestamp_s` even when the frame falls between samples; the next
+        // sample integrates the rest of the interval from the rate
+        // interpolated here (#616). Out-of-order frames are ignored.
         if (have_last_time_) {
             const double dt = timestamp_s - last_imu_time_;
             if (dt < 0.0)
                 return;
             if (dt > 0.0) {
-                propagate(last_gyro_, last_accel_, static_cast<T>(dt));
+                propagate(msckf::ImuInterval<T>::held(last_gyro_, last_accel_, static_cast<T>(dt)));
                 last_imu_time_ = timestamp_s;
             }
         }
@@ -769,26 +785,36 @@ private:
         return stage_tap_ != nullptr && stage_tap_->wants(stage);
     }
 
+    // The last IMU sample and its time: the start of the next interval.
+    void remember_sample(const DVec3& gyro, const DVec3& accel, double t) {
+        last_gyro_ = gyro;
+        last_accel_ = accel;
+        last_sample_t_ = t;
+        have_sample_ = true;
+    }
+
     // S2: one propagation step, reported to the tap when it asks.
-    void propagate(const DVec3& gyro, const DVec3& accel, T dt) {
+    void propagate(const msckf::ImuInterval<T>& in) {
         if (wants(msckf::TapStage::S2_propagation)) {
             const auto before = state_;
-            propagate_step(gyro, accel, dt);
-            stage_tap_->on_s2(before, prop_, gyro, accel, dt, state_);
+            propagate_step(in);
+            stage_tap_->on_s2(before, prop_, in, state_);
             return;
         }
-        propagate_step(gyro, accel, dt);
+        propagate_step(in);
     }
 
     // S2 in its stage type.
-    void propagate_step(const DVec3& gyro, const DVec3& accel, T dt) {
+    void propagate_step(const msckf::ImuInterval<T>& in) {
         if constexpr (kStorage<T2>) {
-            msckf::stages::s2_propagation::apply(state_, prop_, gyro, accel, dt);
+            msckf::stages::s2_propagation::apply(state_, prop_, in);
         } else {
-            const auto g = msckf::rebind<T2>(gyro), a = msckf::rebind<T2>(accel);
-            const T2 h = msckf::scalar_cast<T2>(dt);
-            in_type<T2>(state_,
-                        [&](auto& s) { return msckf::stages::s2_propagation::apply(s, propagator2(), g, a, h); });
+            const msckf::ImuInterval<T2> in2{msckf::rebind<T2>(in.gyro0),
+                                             msckf::rebind<T2>(in.accel0),
+                                             msckf::rebind<T2>(in.gyro1),
+                                             msckf::rebind<T2>(in.accel1),
+                                             msckf::scalar_cast<T2>(in.dt)};
+            in_type<T2>(state_, [&](auto& s) { return msckf::stages::s2_propagation::apply(s, propagator2(), in2); });
         }
     }
 
@@ -861,8 +887,10 @@ private:
     bool initialized_ = false;
     bool have_last_time_ = false;
     double last_imu_time_ = 0.0;
-    DVec3 last_gyro_{};  ///< most recent IMU sample, held over to the image time
+    DVec3 last_gyro_{};  ///< most recent IMU sample: held to an image time, then the start of the next interval
     DVec3 last_accel_{};
+    double last_sample_t_ = 0.0;  ///< the time of last_gyro_ / last_accel_
+    bool have_sample_ = false;
     std::vector<DVec3> init_gyro_;
     std::optional<RestBias<T>> rest_bias_;  ///< stillest vibrating_rest_bias while waiting to init (#591)
     std::vector<DVec3> init_accel_;

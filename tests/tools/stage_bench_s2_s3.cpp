@@ -61,20 +61,30 @@ TEST_CASE("S2 bench: the shipped propagation passes in posit<32,2>", "[tools][be
         require_pass<S2>(nf, bn::kShipped, {"posit32"});
 }
 
-TEST_CASE("S2 bench: analytic truth, exact translation subspace, a reported yaw leak", "[tools][bench][s2]") {
+TEST_CASE("S2 bench: analytic truth within what the camera resolves, the gauge preserved", "[tools][bench][s2]") {
     const auto run = bn::run_fixture<S2>({"gt", S2::ground_truth()}, bn::kShipped, bn::DefaultTypes{}, {"double"});
     REQUIRE(run.pass());
-    REQUIRE(value_of(run, "truth.position_error") < 1e-12);  // constant ω, a_w: ZOH integration is exact here
-    REQUIRE(value_of(run, "observability.translation_preserved") == 0.0);
-    REQUIRE(value_of(run, "observability.yaw_leak") > 0.0);  // first-order Φ at the current estimate
-    REQUIRE(value_of(run, "observability.yaw_leak") < 1e-4);
+    // The body-frame specific force is not linear between samples, so the
+    // interpolated input leaves an O(dt^2) error, far inside the bound (#616).
+    REQUIRE(value_of(run, "truth.position_error") > 0.0);
+    REQUIRE(value_of(run, "truth.position_error") < 0.01 * S2::kResolvedPosition);
+    REQUIRE(value_of(run, "truth.attitude_error") < 1e-12);  // constant rate: no coning, exact
+    // The shipped Phi is the RK4 mean's exact Jacobian: no leak along the gauge.
+    REQUIRE(value_of(run, "observability.translation_preserved") < 1e-12);
+    REQUIRE(value_of(run, "observability.yaw_leak") < 1e-12);
 }
 
 TEST_CASE("S2 bench sweep: the canonical Q_d grows the position sigma the diagonal Q_d drops", "[tools][bench][s2]") {
     const auto m = S2::sweep_point<double>({{"dt", 0.005}, {"dynamics", 1.0}, {"q_scale", 1.0}});
     REQUIRE(m.size() == S2::sweep_columns().size());
-    REQUIRE(m[2] > 0.0);  // pos_sigma_gap_pct
-    REQUIRE(m[3] > 0.0);  // λ_min/‖P‖ stays positive
+    const auto cols = S2::sweep_columns();
+    const auto col = [&](std::string_view name) {
+        const auto it = std::find(cols.begin(), cols.end(), name);
+        REQUIRE(it != cols.end());
+        return m[static_cast<std::size_t>(it - cols.begin())];
+    };
+    REQUIRE(col("pos_sigma_gap_pct") > 0.0);
+    REQUIRE(col("lambda_min_rel") > 0.0);  // λ_min/‖P‖ stays positive
     REQUIRE_THROWS_AS(S2::sweep_point<double>({{"dt", 0.005}, {"dynamics", 3.0}, {"q_scale", 1.0}}),
                       std::invalid_argument);
 }
@@ -100,17 +110,20 @@ TEST_CASE("S2 bench: the invariant error maps the body-frame gauge onto a state-
     REQUIRE(basis_err < 1e-12);
     REQUIRE(inverse_err < 1e-12);
 
-    // On the tumbling trajectory the invariant Φ preserves yaw to roundoff,
-    // where the shipped body-frame Φ leaks it at O(Δt²).
+    // On the tumbling trajectory both Phis preserve yaw to roundoff: the
+    // invariant one by construction, the body-frame one since #616 because it
+    // is the exact Jacobian of the RK4 mean. The pre-#616 first-order Phi leaked
+    // it at O(dt^2) (the higher_order_phi comparison still does).
     const auto gt = S2::ground_truth();
     const auto inv_run = bn::run_fixture<S2>({"gt", gt}, "invariant", bn::AllTypes{}, {"double"});
     const auto body_run = bn::run_fixture<S2>({"gt", gt}, bn::kShipped, bn::AllTypes{}, {"double"});
+    const auto first_order = bn::run_fixture<S2>({"gt", gt}, "higher_order_phi", bn::AllTypes{}, {"double"});
     REQUIRE(value_of(inv_run, "observability.yaw_leak") < 1e-15);
-    REQUIRE(value_of(body_run, "observability.yaw_leak") > 1e-7);
+    REQUIRE(value_of(body_run, "observability.yaw_leak") < 1e-12);
+    REQUIRE(value_of(first_order, "observability.yaw_leak") > 1e-7);
 }
 
-TEST_CASE("S2 bench sweep: a higher-order body-frame Phi leaks more yaw, the invariant one none",
-          "[tools][bench][s2]") {
+TEST_CASE("S2 bench sweep: the mean's own Jacobian leaks no yaw, a truncated Phi does", "[tools][bench][s2]") {
     const auto cols = S2::sweep_columns();
     auto at = [&](const std::vector<double>& m, std::string_view name) {
         const auto it = std::find(cols.begin(), cols.end(), name);
@@ -119,14 +132,20 @@ TEST_CASE("S2 bench sweep: a higher-order body-frame Phi leaks more yaw, the inv
     };
     for (const double dt : {0.0025, 0.01}) {
         const auto m = S2::sweep_point<double>({{"dt", dt}, {"dynamics", 1.0}, {"q_scale", 1.0}});
-        CAPTURE(dt, at(m, "yaw_leak"), at(m, "yaw_leak_2nd_order"), at(m, "yaw_leak_exp"));
-        // The leak is the linearization against the start-of-step Euler mean, not
-        // Φ's truncation: expanding Φ further moves it away from that mean.
-        REQUIRE(at(m, "yaw_leak_2nd_order") > at(m, "yaw_leak"));
+        CAPTURE(dt, at(m, "yaw_leak"), at(m, "yaw_leak_1st_order"), at(m, "yaw_leak_2nd_order"), at(m, "yaw_leak_exp"));
+        // A leak is Phi disagreeing with the mean it propagates, not Phi's
+        // truncation (#471, #616). The shipped Phi is the RK4 mean's exact
+        // Jacobian and leaks nothing. The pre-#616 first-order Phi does: it was
+        // linearized against the one-sample Euler step, and expanding it toward
+        // exp(A dt) only moves it to a third mean, the continuous one.
+        REQUIRE(at(m, "yaw_leak") < 1e-12);
+        REQUIRE(at(m, "yaw_leak_1st_order") > 1e-7);
+        REQUIRE(at(m, "yaw_leak_2nd_order") > 1e-7);
         REQUIRE(std::abs(at(m, "yaw_leak_exp") - at(m, "yaw_leak_2nd_order")) < 0.01 * at(m, "yaw_leak_2nd_order"));
         REQUIRE(at(m, "yaw_leak_invariant") < 1e-15);
-        // Same strapdown physics: the invariant mean lands on the analytic truth too.
-        REQUIRE(at(m, "pos_err_invariant_m") < 1e-12);
+        // Same strapdown physics: the invariant mean lands where the body-frame one does.
+        REQUIRE(std::abs(at(m, "pos_err_invariant_m") - at(m, "pos_err_m")) < 1e-12);
+        REQUIRE(at(m, "pos_err_m") < S2::kResolvedPosition);
     }
 }
 

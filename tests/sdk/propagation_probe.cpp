@@ -53,15 +53,22 @@ TEST_CASE("S2 propagation keeps the mean on SO(3), the covariance PSD, and the p
     REQUIRE(g.pos_underreport_pct_interframe < 25.0);
 }
 
-TEST_CASE("S2 mean integration converges as O(dt) against a fine reference", "[sdk][s2][propagation]") {
+TEST_CASE("S2 mean integration converges at fourth order against a fine reference", "[sdk][s2][propagation]") {
+    // A constant body rate and specific force, so this is the integrator alone
+    // (#616). RK4 converges at fourth order: a sixteenth at half the step, until
+    // it reaches roundoff (about 1e-12 m) at 200 Hz. Before #616 the Euler step
+    // converged at first order, 59 mm at 50 Hz; that is the defect a ratio of
+    // 2 here used to pin as the expected behaviour.
     const auto sweep = ev::gt_injection_dt_sweep<T>();
-    REQUIRE(sweep.size() >= 2);
-    // Error must shrink monotonically as dt shrinks, ~halving each time (O(dt)).
-    for (std::size_t i = 1; i < sweep.size(); ++i)
-        REQUIRE(sweep[i].pos_error_mm < sweep[i - 1].pos_error_mm);
-    const T ratio = sweep[sweep.size() - 2].pos_error_mm / sweep.back().pos_error_mm;
-    REQUIRE(ratio > 1.8);
-    REQUIRE(ratio < 2.2);
+    REQUIRE(sweep.size() == 5);  // 50, 100, 200, 400, 800 Hz
+    for (std::size_t i = 1; i < 3; ++i) {
+        const T ratio = sweep[i - 1].pos_error_mm / sweep[i].pos_error_mm;
+        CAPTURE(i, ratio);
+        REQUIRE(ratio > 14.0);
+        REQUIRE(ratio < 18.0);
+    }
+    for (const auto& p : sweep)
+        REQUIRE(p.pos_error_mm < 1e-6);  // far below the 0.22 mm the camera resolves
 }
 
 TEST_CASE("S2 propagation-only NEES tracks the 1/Q lever and is ~consistent at default Q", "[sdk][s2][propagation]") {

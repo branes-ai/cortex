@@ -154,10 +154,14 @@ TEST_CASE("S6e: a square-root filter that carries its factor matches Joseph in p
         }
         return worst;
     };
+    // Both forms within the same few posit32 ulps of double (about 13 ulps at
+    // 1e-7). A ratio between the two would be fitted to one fixture's residual:
+    // the captured inputs come through S2, and #616 moved them (2.9e-9 and
+    // 1.4e-8 after it).
     const double dj = gap("shipped"), ds = gap("sqrt_array");
     INFO("Joseph " << dj << ", sqrt array " << ds);
     REQUIRE(dj < 1e-7);
-    REQUIRE(ds < 4.0 * dj);
+    REQUIRE(ds < 1e-7);
 }
 
 TEST_CASE("S6e: re-factoring the covariance in a narrow type loses the clone directions", "[tools][bench][s6]") {

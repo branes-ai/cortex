@@ -97,11 +97,9 @@ public:
     }
     void on_s2(const St& b,
                const sdk::msckf::Propagator<double>& p,
-               const Vec3& g,
-               const Vec3& a,
-               double dt,
+               const sdk::msckf::ImuInterval<double>& in,
                const St& af) override {
-        inner_.on_s2(b, p, g, a, dt, af);
+        inner_.on_s2(b, p, in, af);
     }
     void
     on_s3(const St& b, double t, const sdk::msckf::stages::s3_augmentation::Diagnostics& d, const St& af) override {
