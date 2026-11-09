@@ -47,7 +47,7 @@ INVARIANT_STATUSES = {"holds", "failing", "unknown"}
 EDGE_KINDS = {"data", "input", "state", "output"}
 DELTA_OPS = {"add", "replace", "remove"}
 
-NODE_KEYS = {"id", "stage", "title", "does", "reads", "writes", "source", "pre", "post", "code", "bench",
+NODE_KEYS = {"id", "stage", "title", "does", "reads", "writes", "source", "pre", "post", "code", "bench", "decisions",
              "tests", "status", "optional", "precision", "deviations", "op", "note"}
 EDGE_KEYS = {"id", "kind", "contents", "code", "symbol", "invariants", "precision", "deviations", "op", "note"}
 TOP_KEYS = {"schema", "name", "title", "summary", "sources", "edges", "nodes", "schedule", "system_invariants",
@@ -297,6 +297,45 @@ def strings(node: object, where: str = ""):
             yield from strings(v, f"{where}[{i}]")
 
 
+def stated(x: object) -> bool:
+    """A field is stated when it is present and not blank: 0 and false are values."""
+    return x is not None and str(x).strip() != ""
+
+
+def lint_decision(where: str, d: object, rep: Report) -> None:
+    """A design choice the paper leaves open, recorded with its reason (#610):
+    {question, chosen, alternatives, reason}. A missing reason is a gap: the
+    choice was made by default, not decided."""
+    if not isinstance(d, dict) or not stated(d.get("question")) or not stated(d.get("chosen")):
+        rep.error(f"{where}: a decision needs a question and what was chosen")
+        return
+    if not isinstance(d.get("alternatives", []), list):
+        rep.error(f"{where}: decision '{d['question']}': alternatives must be a list")
+    for k in d:
+        if k not in {"question", "chosen", "alternatives", "reason"}:
+            rep.error(f"{where}: decision '{d['question']}': unknown key '{k}'")
+    if not d.get("reason"):
+        rep.gap(f"{where}: decision '{d['question']}' has no recorded reason (chosen: {d['chosen']})")
+
+
+def lint_bound(where: str, inv: dict, nodes: dict, rep: Report) -> None:
+    """A check's tolerance, derived from what the node that consumes the result
+    must resolve, not from what the implementation achieves (#610):
+    {value, consumer, derivation}, consumer a node id."""
+    b = inv.get("bound")
+    if b is None:
+        return
+    if not isinstance(b, dict) or not stated(b.get("value")) or not stated(b.get("derivation")):
+        rep.error(f"{where}: a bound needs a value and its derivation")
+        return
+    for k in b:
+        if k not in {"value", "consumer", "derivation"}:
+            rep.error(f"{where}: bound: unknown key '{k}'")
+    consumer = b.get("consumer")
+    if not isinstance(consumer, str) or consumer not in nodes:
+        rep.error(f"{where}: bound: consumer must name the node whose resolution it comes from")
+
+
 def lint(spec: dict, delta: dict | None, rep: Report) -> None:
     raw = delta if delta is not None else spec
     # YAML ends a plain scalar at " #": "(#474, #574)" silently becomes "(#474,".
@@ -406,6 +445,17 @@ def lint(spec: dict, delta: dict | None, rep: Report) -> None:
             rep.gap(f"node '{nid}' ({n.get('stage', '')}): partially implemented")
         for d in n.get("deviations", []):
             rep.gap(f"node '{nid}': deviates from the paper: {d}")
+    for n in nodes.values():  # decisions are recorded for missing nodes too
+        if not isinstance(n.get("decisions", []), list):
+            rep.error(f"node '{n['id']}': decisions must be a list")
+            continue
+        for d in n.get("decisions", []):
+            lint_decision(f"node '{n['id']}'", d, rep)
+    for eid, e in edges.items():
+        for inv in e.get("invariants", []):
+            lint_bound(f"edge '{eid}' invariant '{inv.get('text')}'", inv, nodes, rep)
+    for inv in spec.get("system_invariants", []):
+        lint_bound(f"system invariant '{inv.get('id')}'", inv, nodes, rep)
 
     # Every edge is produced (an input, or some node writes it) and consumed.
     for eid, e in edges.items():
@@ -517,6 +567,14 @@ def md_escape(s: object) -> str:
     return out
 
 
+def bound_md(inv: dict) -> str:
+    b = inv.get("bound")
+    if not b:
+        return ""
+    return (f" (bound {md_escape(b['value'])}, from what **{md_escape(b.get('consumer', ''))}** resolves: "
+            f"{md_escape(b['derivation'])})")
+
+
 def ref_md(ref: dict | None) -> str:
     if not ref:
         return "—"
@@ -578,7 +636,7 @@ def page_source(spec: dict, delta: dict | None, rep: Report) -> str:
                    f"{ref_md(n.get('bench'))} |")
     out += ["", "### Contracts", ""]
     for n in spec.get("nodes", []):
-        if not (n.get("pre") or n.get("post") or n.get("deviations") or n.get("precision")):
+        if not (n.get("pre") or n.get("post") or n.get("deviations") or n.get("precision") or n.get("decisions")):
             continue
         out.append(f"**{n['id']}** ({n.get('stage', '')}, {n.get('title', '')})")
         out.append("")
@@ -592,6 +650,11 @@ def page_source(spec: dict, delta: dict | None, rep: Report) -> str:
             p = n["precision"]
             out.append(f"- *Precision:* {md_escape(p.get('policy', ''))} — {md_escape(p.get('note', ''))}"
                        if isinstance(p, dict) else f"- *Precision:* {md_escape(p)}")
+        for d in n.get("decisions", []):
+            alts = d.get("alternatives") or []
+            over = f" over {', '.join(md_escape(a) for a in alts)}" if alts else ""
+            why = md_escape(d["reason"]) if d.get("reason") else "**no reason recorded**"
+            out.append(f"- *Decision — {md_escape(d['question'])}:* {md_escape(d['chosen'])}{over}. {why}")
         for d in n.get("deviations", []):
             out.append(f"- *Deviates from the paper:* {md_escape(d)}")
         out.append("")
@@ -599,7 +662,8 @@ def page_source(spec: dict, delta: dict | None, rep: Report) -> str:
             "| Edge | Kind | Contents | Type | Invariants (✓ has a validator) |",
             "|---|---|---|---|---|"]
     for e in spec.get("edges", []):
-        invs = "; ".join(("✓ " if i.get("check") else "✗ ") + md_escape(i["text"]) for i in e.get("invariants", []))
+        invs = "; ".join(("✓ " if i.get("check") else "✗ ") + md_escape(i["text"]) + bound_md(i)
+                         for i in e.get("invariants", []))
         typ = f"`{e['code']}`" + (f" `{e['symbol']}`" if e.get("symbol") else "") if e.get("code") else "—"
         out.append(f"| **{e['id']}** | {e.get('kind', 'data')} | {md_escape(e.get('contents', ''))} | {typ} | "
                    f"{invs or '—'} |")
@@ -634,7 +698,7 @@ def page_source(spec: dict, delta: dict | None, rep: Report) -> str:
         st = inv.get("status", "unknown")
         if inv.get("note"):
             st += f" — {md_escape(inv['note'])}"
-        out.append(f"| {md_escape(inv['text'])} | {ref_md(inv.get('check'))} | {st} |")
+        out.append(f"| {md_escape(inv['text'])}{bound_md(inv)} | {ref_md(inv.get('check'))} | {st} |")
     if delta is not None:
         out += ["", "## Changes from the base", ""]
         for section in ("edges", "nodes"):

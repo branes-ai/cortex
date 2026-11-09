@@ -59,11 +59,13 @@ The decomposition was retrofitted to debug a running filter. What that cost:
 
 1. **Extract the graph from the paper.** Write the spec: every node with the equations and section
    it comes from, its pre- and post-conditions and the failure modes the literature reports; every
-   edge with its contents, units, manifold and invariants; the schedule; the system invariants. A
-   paper that modifies an existing pipeline is a **delta spec** on it (below).
+   edge with its contents, units, manifold and invariants; the schedule; the system invariants. Every
+   choice the paper leaves open is recorded as a **decision** with its reason. A paper that modifies
+   an existing pipeline is a **delta spec** on it (below).
 2. **Contract the edges.** Give each data structure a validator before implementing any node. The
    checks live in `sdk/include/branes/sdk/eval/invariants/`; the spec points at them, and an
-   invariant without one is reported as a gap.
+   invariant without one is reported as a gap. A tolerance is a **bound** derived from what the
+   consuming node must resolve, never set to pass what the implementation does today.
 3. **Stub and bench the nodes.** Each node becomes an `sdk/` transformation header, a
    [stage bench](../debugging/stage-benches.mdx) with its oracle (finite-difference Jacobians, a
    synthetic closed form, a captured fixture) and a sensitivity sweep. The spec records the header,
@@ -96,6 +98,12 @@ Before implementation starts, a spec review answers:
 - Does every edge invariant have a validator, or is the gap accepted for now?
 - Does every node have pre- and post-conditions, a bench and an oracle?
 - Is every deviation from the paper written down, with its issue?
+- **For every option the paper offers, does the spec record which was chosen and why?** A choice
+  without a reason is a default, and the gap report lists it (#616: the IMU mean integrator, a
+  default since #186).
+- **Is every tolerance derived from what the consuming node must resolve?** A threshold fitted to
+  the implementation's current residual blesses its defects (#613's first S2-closure test passed the
+  error #616 found).
 - Is every system invariant tied to a check, with its current status?
 
 ## Running the tool
@@ -124,3 +132,4 @@ change to the graph.
 | [The right-invariant EKF](riekf-msckf.mdx) as a delta spec: written before #608's code, which then closed its gaps | done (#608) |
 | A timed pilot on a new paper | planned |
 | Per-node and per-edge precision fields | in the format; filled for S2, S6 and the state |
+| Decisions with reasons, and bounds derived from the consumer | in the format and the checklist; the OpenVINS spec records S1b, S2 and S6's choices, three of them still undecided defaults (#609, #616) |

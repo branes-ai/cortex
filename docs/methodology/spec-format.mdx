@@ -33,7 +33,7 @@ is `docs/methodology/specs/openvins-msckf.yaml`.
 | `kind` | `data` (default); `input` (a sensor or a calibration: no node writes it); `state` (the shared mutable state); `output` (leaves the graph: no node reads it) |
 | `contents` | what it holds, with units |
 | `code`, `symbol` | the file and the type or function that implements it; the symbol must occur in the file |
-| `invariants` | a list of `{text, check}`; `check` is a [reference](#references). An invariant without a check is a gap |
+| `invariants` | a list of `{text, check, bound?}`; `check` is a [reference](#references), `bound` is [below](#bounds). An invariant without a check is a gap |
 | `precision` | free text: how narrow a type this structure tolerates |
 | `deviations` | how the implementation departs from the paper; each is a gap |
 
@@ -52,6 +52,7 @@ is `docs/methodology/specs/openvins-msckf.yaml`.
 | `status` | `implemented`, `partial`, `planned` (specified ahead of the code: the schedule may call it, and it is reported as a gap) or `missing` (deliberately left out: the schedule must not call it) |
 | `optional` | true for a node the algorithm can run without |
 | `precision` | `{policy, note}`: the node's arithmetic-type policy and what was measured |
+| `decisions` | the choices the paper leaves open, [below](#decisions) |
 | `deviations` | how the implementation departs from the paper; each is a gap |
 
 ## Schedule
@@ -71,8 +72,45 @@ a `missing` node must not be. A spec written before its code calls its `planned`
 
 ## System invariants
 
-`{id, text, check?, status?, note?}`, where `status` is `holds`, `failing` or `unknown` (the
+`{id, text, check?, bound?, status?, note?}`, where `status` is `holds`, `failing` or `unknown` (the
 default). A failing invariant is reported as a gap together with its note.
+
+## Decisions
+
+A paper often leaves a choice open, or names options: a zeroth-order hold or RK4 for the IMU
+mean, a gate line, a prior. Each is recorded on the node that makes it:
+
+```yaml
+decisions:
+  - question: the IMU input over each interval
+    chosen: the sample that ends it, held constant
+    alternatives: [the previous sample held, "both samples, interpolated and integrated by RK4"]
+    reason: "…"   # what was measured or argued; omitted, the choice was a default
+```
+
+`question` and `chosen` are required. A decision **without a `reason` is reported as a gap**: the
+choice was made by default rather than decided. The rule exists because of #616. The VIO mean
+integrator was a one-sample Euler step from the first commit (#186). The canonical pipeline document
+named RK4 as OpenVINS's alternative, but nothing recorded a decision. Five months later the choice
+turned out to hold each IMU sample 2.5 ms off the camera: NIS 1.1–1.9 on the fast sequences, and
+ATE 10–15× worse there than with both samples used.
+
+## Bounds
+
+A check's tolerance comes from what the node that **consumes** the result must resolve, never from
+what the implementation currently achieves:
+
+```yaml
+bound:
+  value: 1.1e-4 rad over a 0.55 s clone window
+  consumer: msckf_update      # a node id: whose resolution the bound comes from
+  derivation: a tenth of the 0.5 px track noise the update resolves, at fx = 458.65
+```
+
+`value` and `derivation` are required, and `consumer` must name a node in the spec. The rule
+exists because of #613. Its first S2-closure test measured S2's first-order error, then set its
+threshold to accept it, and so passed exactly the defect #616 later found. A bound derived from the
+camera's resolution failed it 28×.
 
 ## References
 
