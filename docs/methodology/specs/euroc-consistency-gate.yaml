@@ -251,12 +251,12 @@ system_invariants:
     text: "the median normalized NIS over the matched runs is ≈ 1 (the bench's noise model is true)"
     check: {file: scripts/euroc-consistency.sh}
     status: holds
-    note: "1.03 for both backends at c6b87ec (1.65–4.3 with the real IMU and the raw ground truth)"
+    note: "1.00 for both backends at f1551cc (1.03 at c6b87ec before #616; 1.65–4.3 with the real IMU and the raw ground truth)"
   - id: nis_band_per_sequence
     text: "every sequence's matched runs have normalized NIS within the χ² band for their dof"
     check: {file: scripts/euroc-consistency.sh}
-    status: failing
-    note: "1.01–1.04 on the Machine Hall and V1_01, V2_01; 1.1–1.9 on V1_02, V1_03, V2_02, V2_03 for both backends: S2's sample-hold skew, an estimator defect (#616)"
+    status: holds
+    note: "1.00 on every sequence for both backends at f1551cc. Before #616 it was 1.1–1.9 on V1_02, V1_03, V2_02, V2_03: S2's sample-hold skew, an estimator defect"
   - id: s2_closure
     text: "the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order"
     check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves"}
@@ -274,4 +274,4 @@ system_invariants:
   - id: verdict_attributable
     text: "each condition's result changes with the estimator, not with the gate's line"
     status: holds
-    note: "each remaining failure rerun with the gate at 5 per dof: one divergence per backend vanishes (with a true noise model, the estimator's transient over-confidence made the 5% gate fatal), the others persist; condition 2's fast-sequence loss is #616's S2 skew. Conditions 1 and 2 still depend on the noise draw at three seeds (#613)"
+    note: "at c6b87ec each remaining failure was rerun with the gate at 5 per dof: one divergence per backend vanished, the others persisted, and condition 2's fast-sequence loss was #616's S2 skew. At f1551cc condition 2 passes for both; both backends diverge on the same two noise draws, from the shared initializer's seed (#609); the MSCKF's condition 3 is S6's yaw leak. Conditions 1 and 2 still depend on the noise draw at three seeds (#613)"
