@@ -169,7 +169,7 @@ on image (20 Hz):
 | NIS ≈ dim(measurement) per update | `sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp` `nis_consistency` | failing — real KLT tracks: normalized NIS 0.97–2.55 on MH, V1_01 and V2_01; 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03 (#608) |
 | innovations zero-mean and white | `sdk/include/branes/sdk/msckf/invariant_vio_backend.hpp` `innovation_whiteness` | unknown — reported since #608 |
 | no information gained along global yaw and translation (the 4-D unobservable space) | `tests/sdk/msckf_invariant_backend.cpp` “invariant backend: the marginalized joint update annihilates the 4-DoF gauge…” | holds |
-| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth (#613, median NIS 1.03): fails 1 (3 of 66 at 1 px; MH_04's vanishes with a looser gate), fails 2 at 1 px (1.04× vs 0.84×; S2's sample-hold skew on the fast sequences, #616), passes 3 (0.985) |
+| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the MSCKF: the shared tilt and bias seed, #609), passes 2 (0.40× vs 0.41×; 0.18× vs 0.36×), passes 3 (0.984) |
 | 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences | `scripts/euroc-baseline.sh` | failing — median 2.62× OpenVINS mono (the MSCKF 2.83×; 7 of 11 sequences better); rotation RPE 0.90° vs 2.21° (#608) |
 
 ## Changes from the base
@@ -209,5 +209,5 @@ What `pipeline_graph.py gaps` reports for this spec (22 items):
 - node 'slam_update' (S7): not implemented
 - node 'online_calib' (S10): not implemented
 - system invariant 'nis': failing — real KLT tracks: normalized NIS 0.97–2.55 on MH, V1_01 and V2_01; 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03 (#608)
-- system invariant 'consistency_gate': failing — with one truth (#613, median NIS 1.03): fails 1 (3 of 66 at 1 px; MH_04's vanishes with a looser gate), fails 2 at 1 px (1.04× vs 0.84×; S2's sample-hold skew on the fast sequences, #616), passes 3 (0.985)
+- system invariant 'consistency_gate': failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the MSCKF: the shared tilt and bias seed, #609), passes 2 (0.40× vs 0.41×; 0.18× vs 0.36×), passes 3 (0.984)
 - system invariant 'accuracy': failing — median 2.62× OpenVINS mono (the MSCKF 2.83×; 7 of 11 sequences better); rotation RPE 0.90° vs 2.21° (#608)

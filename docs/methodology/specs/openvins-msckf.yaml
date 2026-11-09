@@ -475,7 +475,7 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "with one truth (#613, median NIS 1.03): fails 1 (2 of 66, MH_03 at 1 px), fails 2 (1.09× vs 0.97×; 0.84× vs 0.69×), fails 3 (yaw σ ratio 0.107: the yaw leak, #480)"
+    note: "with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}
