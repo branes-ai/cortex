@@ -331,7 +331,8 @@ def lint_bound(where: str, inv: dict, nodes: dict, rep: Report) -> None:
     for k in b:
         if k not in {"value", "consumer", "derivation"}:
             rep.error(f"{where}: bound: unknown key '{k}'")
-    if b.get("consumer") not in nodes:
+    consumer = b.get("consumer")
+    if not isinstance(consumer, str) or consumer not in nodes:
         rep.error(f"{where}: bound: consumer must name the node whose resolution it comes from")
 
 
