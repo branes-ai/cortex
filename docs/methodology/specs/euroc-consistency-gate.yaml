@@ -92,7 +92,7 @@ edges:
     code: tools/include/branes/tools/gt_spline.hpp
     symbol: synthesize_imu
     invariants:
-      - text: "noise-free, integrated from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window"
+      - text: "noise-free, integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window (rotation only: the shipped S2 step's position still drifts at first order, and the shipped end-sample hold fails, see s2_closure, #616)"
         check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound"}
       - text: "the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness)"
         check: {file: tests/tools/gt_spline.cpp, case: "gt spline: the synthesized noise has the configured densities"}
@@ -248,9 +248,15 @@ schedule:
 
 system_invariants:
   - id: nis_band
-    text: "converged runs with matched R have normalized NIS ≈ 1 (the noise model is true)"
+    text: "the median normalized NIS over the matched runs is ≈ 1 (the bench's noise model is true)"
+    check: {file: scripts/euroc-consistency.sh}
     status: holds
-    note: "median 1.03 for both backends (was 1.65–4.3 with the real IMU and the raw ground truth); 1.1–1.9 on the fast V1_03, V2_02 and V2_03, where S2's first-order integration at 200 Hz is the residual (1.02 at 1 kHz)"
+    note: "1.03 for both backends at c6b87ec (1.65–4.3 with the real IMU and the raw ground truth)"
+  - id: nis_band_per_sequence
+    text: "every sequence's matched runs have normalized NIS within the χ² band for their dof"
+    check: {file: scripts/euroc-consistency.sh}
+    status: failing
+    note: "1.01–1.04 on the Machine Hall and V1_01, V2_01; 1.1–1.9 on V1_02, V1_03, V2_02, V2_03 for both backends: S2's sample-hold skew, an estimator defect (#616)"
   - id: s2_closure
     text: "the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order"
     check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves"}
@@ -264,4 +270,4 @@ system_invariants:
   - id: verdict_attributable
     text: "each condition's result changes with the estimator, not with the gate's line"
     status: holds
-    note: "each remaining failure checked with the gate loosened to 5 per dof: the MSCKF's MH_04 divergences vanish, but with a true noise model that is the MSCKF tipped over by its own over-confidence; every other failure persists, so all are the estimators' (#613)"
+    note: "each remaining failure rerun with the gate at 5 per dof: one divergence per backend vanishes (with a true noise model, the estimator's transient over-confidence made the 5% gate fatal), the others persist; condition 2's fast-sequence loss is #616's S2 skew. Conditions 1 and 2 still depend on the noise draw at three seeds (#613)"

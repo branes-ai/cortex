@@ -261,7 +261,7 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "with one truth (#613, median NIS 1.03): fails 1 on one run (MH_03, 1 px; with either gate line), fails 2 at 1 px (1.03× vs 0.87×; likely S2's first-order integration on the fast sequences), passes 3 (0.989)"
+    note: "with one truth (#613, median NIS 1.03): fails 1 (3 of 66 at 1 px; MH_04's vanishes with a looser gate), fails 2 at 1 px (1.04× vs 0.84×; S2's sample-hold skew on the fast sequences, #616), passes 3 (0.985)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}
