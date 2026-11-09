@@ -19,8 +19,12 @@ here goes wrong in any MSCKF-style pipeline, and a unit-test suite that passes d
     measurement that decided its cause, and how it was fixed.
   </Card>
   <Card title="Diagnostic signatures" icon="magnifier">
-    [A symptom → cause table and twenty pitfalls](signatures.mdx), so the next person recognizes a
-    failure on sight.
+    [A symptom → cause table and twenty-two pitfalls](signatures.mdx), so the next person
+    recognizes a failure on sight.
+  </Card>
+  <Card title="Aligning sensor samples" icon="warning">
+    [A failure mode of every fusion pipeline](sample-alignment.mdx): integrating a sample over an
+    interval it doesn't represent, how it hid here for five months, and a checklist.
   </Card>
   <Card title="The regression suite" icon="approve-check">
     [Every functional test a VIO pipeline must pass](regression-suite.mdx), with its pass
@@ -30,10 +34,12 @@ here goes wrong in any MSCKF-style pipeline, and a unit-test suite that passes d
 
 ## The main lesson
 
-Over about six months, **three results that looked solid turned out to be artifacts of the
+Over about six months, **five results that looked solid turned out to be artifacts of the
 test setup**: a compiler "bug" that was an unsequenced random draw, a filter "inconsistency" that
-was a velocity step in the synthetic world, and a "consistent" control that fed the filter exact
-sensors. Each time, the filter was blamed first. The storyline states every revision next to the
+was a velocity step in the synthetic world, a "consistent" control that fed the filter exact
+sensors, a consistency verdict whose "true noise" left out the ground truth's own error, and an
+S2 closure test whose threshold was fitted to the very defect it should have caught. Each time,
+the filter or the test was trusted first. The storyline states every revision next to the
 claim it revises, because how a wrong conclusion was reached is as useful as the right one.
 
 The other lessons, in one line each:
@@ -44,6 +50,10 @@ The other lessons, in one line each:
   times too small. Report NEES and NIS beside ATE, always.
 - **Measure before fixing; ship candidates default-off.** Several textbook fixes made things worse
   once they were measured end to end.
+- **Know what time each sample stands for.** Holding an IMU sample over an interval it doesn't
+  represent skewed the IMU 2.5 ms against the camera in both backends, and it passed for
+  ground-truth error and over-confidence until a continuous truth exposed it
+  ([Aligning Sensor Samples](sample-alignment.mdx)).
 
 ## Vocabulary
 

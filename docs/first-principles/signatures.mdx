@@ -1,6 +1,6 @@
 ---
 title: Diagnostic Signatures and Pitfalls
-description: A symptom-to-cause table for VIO failures, each with the measurement that confirms it, and twenty pitfalls distilled from getting cortex's pipeline to work.
+description: A symptom-to-cause table for VIO failures, each with the measurement that confirms it, and twenty-two pitfalls distilled from getting cortex's pipeline to work.
 ---
 
 import Issue from '@site/components/Issue.astro';
@@ -32,6 +32,7 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
 | Over-confident only on a slow start | Bad triangulation of low-parallax windows | Oracle-landmark substitution; per-track depth error against parallax | <Issue id={548} /> |
 | A "consistent" control with NEES ≪ dof | Noise-free inputs: the control measures nothing | Inject noise matched to the filter's model | <Issue id={551} /> |
 | Position variance under-predicted far from the origin | Process noise not mapped through the [p̂]× lever arm (invariant error) | Monte-Carlo of the propagated error about 20 m from the origin | <Issue id={537} /> |
+| NIS ≈ 1 on slow sequences, 1.1–1.9 on fast ones, with R and Q exact | An IMU sample held over an interval it doesn't represent: a half-sample IMU–camera skew | Close S2 on a continuous truth at the real rate; average the interval's two samples and watch NIS return to 1.00 | <Issue id={616} /> |
 | Most new tracks die on their first frame | Detector margin narrower than the KLT pyramid footprint | Fraction of tracks lost on their first frame | <Issue id={474} /> |
 
 ## Pitfalls
@@ -50,9 +51,10 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
    innovations.
 7. **A body-frame EKF leaks yaw.** The leak comes from the update moving the linearization point
    under a basis the filter's Jacobians keep (95–99% on EuRoC); S2's Φ, linearized against the mean's
-   Euler step, adds the rest, and
-   S3 and S9 add none (<Issue id={480} />). A more accurate Φ makes it worse; the cure is a different
-   error state.
+   Euler step, added the rest until <Issue id={616} /> made it the RK4 mean's exact Jacobian (now
+   0.0%), and S3 and S9 add none (<Issue id={480} />). Φ must be the Jacobian of the mean it
+   propagates: a better truncation of the continuous Φ leaked more against the Euler mean. The cure
+   for S6's share is a different error state.
 8. **Partial FEJ is worse than none.**
 9. **A fix that cures the symptom can worsen the disease.** Inflating R and gating on parallax both
    did.
@@ -78,3 +80,9 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
 20. **Measure first, and ship candidates default-off.** A/B test on a slow (V1_01), a medium
     (MH_05) and an aggressive (V2_03) sequence: slow sequences expose gauge problems, aggressive
     ones expose R.
+21. **Know what time each sample stands for, and integrate between samples.** Holding one IMU sample
+    over the interval it ends or starts is a half-sample time offset against the camera. It hid for
+    five months as ground-truth error and over-confidence
+    ([Aligning Sensor Samples](sample-alignment.mdx), <Issue id={616} />).
+22. **Take every tolerance from what the next stage resolves, never from the current residual.** A
+    closure test fitted to what S2 achieved blessed the skew in item 21.

@@ -246,8 +246,15 @@ yaw / accel-bias / scale variance; an over-tight init `P` is a first-frame over-
 
 **Signature.** `propagate(x⁻, P⁻, imu[t_k, t_{k+1}]) → (x⁻_{k+1}, P⁻_{k+1})`.
 
-**What it does — mean.** OpenVINS uses a **zeroth-order hold** (measurement constant over the
-sample) or RK4 for the mean; debias, then strapdown-integrate `R, v, p`.
+**What it does — mean.** OpenVINS offers a **zeroth-order hold** (one measurement constant over
+the interval) or RK4 on the input interpolated between the interval's two samples; debias, then
+strapdown-integrate `R, v, p`. **cortex's decision (#616):** RK4 on the interpolated input, in both
+backends. A sample is the rate at its timestamp, so holding either end of the interval integrates
+the IMU half a sample (2.5 ms at 200 Hz) early or late against the camera. Until #616 the MSCKF
+held the end sample and the R-IEKF the start sample, which inflated NIS to 1.1–1.9 on the fast
+EuRoC sequences. An image between two samples is reached by holding the last sample; the next
+sample integrates the rest of the interval from the rate interpolated at the image time. The
+failure mode, and how it hid, is on [Aligning Sensor Samples](../first-principles/sample-alignment.mdx).
 
 **What it does — covariance.** `P⁻_{k+1} = Φ P⁺_k Φᵀ + Q_d`, with the canonical block structure
 (rows/cols `[θ, p, v, b_g, b_a]`):
@@ -286,7 +293,10 @@ none, as the troubleshooting confirmed.
   the null space of the linearized propagation; with FEJ, `Φ` does not inject information along
   yaw. Probe by propagating the analytic nullspace vectors and checking they stay in the null space.
 - **GT-injection identity:** with ground-truth IMU and zero noise, propagation reproduces the GT
-  trajectory within integration tolerance over the interval.
+  trajectory over a clone window within what the camera resolves there: a tenth of the 0.5 px track
+  noise, 1.09e-4 rad and 0.22 mm at a 2 m depth, converging at second order
+  (`tests/tools/gt_spline.cpp`, #616). The tolerance comes from the consumer, not from what the
+  integrator achieves: a tolerance fitted to the residual blessed the half-sample skew (#616).
 
 **Probes.** `P` min-eigenvalue (PSD monitor); `R` orthonormality residual `‖RᵀR − I‖`; `Q_d`
 symmetry/PSD; nullspace-drift metric (`‖projection of P⁻¹ onto yaw direction‖`); per-step

@@ -204,7 +204,7 @@ What we learned:
 
 ## Chapter 5. When the test lies
 
-Three times, a "filter defect" turned out to be a defect in the test.
+Four times, a "filter defect" turned out to be a defect in the test.
 
 **The compiler was not the cause** (<Issue id={437} />). The R-IEKF end-to-end test passed on GCC
 (3.44 m) and failed on Clang (58.48 m), with each compiler deterministic and the sanitizers clean.
@@ -280,11 +280,40 @@ there.
 So the cause is the textbook EKF inconsistency. An update corrects the mean, the next Jacobians are
 evaluated at the corrected mean, and the basis they annihilate is no longer the one the earlier
 Jacobians carried. S2's share, Φ linearized against the mean's Euler step (a higher-order Φ leaks more, not
-less), grows with rotation rate (V2_03); it isn't the driver. Three remedies act on that mechanism:
+less), grows with rotation rate (V2_03); it isn't the driver. Since <Issue id={616} /> Φ is the exact
+Jacobian of the RK4 mean, and S2's share is 0.0% on MH_05 and V2_03. Three remedies act on that mechanism:
 
 - First-estimates Jacobians, which were tried and refuted on ATE (<Issue id={280} />, <Issue id={339} />).
 - Projecting each H off the carried basis, the observability-constrained EKF, which hasn't been tried.
 - An error state whose basis doesn't depend on the estimate: the R-IEKF, the chosen path (<Issue id={365} />).
+
+**The truth wasn't true, and then the test blessed the defect** (<Issue id={605} />,
+<Issue id={613} />, <Issue id={616} />). The consistency gate feeds a filter ideal tracks made from
+the ground truth and tells it the true noise. Its first verdict was that the R-IEKF passed and the
+MSCKF failed.
+
+- **The truth:** with the real IMU, the "true noise" wasn't true. EuRoC's ground truth disagrees
+  with the gyro by 0.25–0.45 px over 0.25 s in the Vicon rooms, so matched R and Q were wrong by an
+  unmodelled, time-correlated error, and the χ² gate starved both filters.
+- **The fix:** one truth for everything (<Issue id={613} />). A B-spline through the ground truth
+  feeds the synthesized IMU, the tracks and the score. Median NIS became 1.03 for both backends.
+- **What that exposed:** NIS was 1.00 on the slow sequences and 1.1–1.9 on the three fast ones.
+  Both backends held one IMU sample over each 5 ms interval, the MSCKF the end sample and the
+  R-IEKF the start sample: a ±2.5 ms IMU–camera skew. Averaging the two samples gave NIS 1.00 and
+  cut V2_03's ATE 10–15× (<Issue id={616} />).
+- **The test that blessed it:** the S2 closure test written for #613 measured the first-order
+  error, and its threshold was set just above it. Its bound now comes from what the camera resolves,
+  a tenth of 0.5 px over a clone window. The S2 probe had also recorded the first-order error in
+  June, as a metric with no bound.
+
+- **The fix and its limit:** both backends now integrate each interval from both samples by
+  RK4, with Φ that mean's exact Jacobian. On the spline truth NIS is 1.00 on every sequence and
+  the fast sequences' ATE drops 4–24×. On the real IMU and tracks the median ATE improves only
+  7–9%, and the real NIS doesn't move (6.7–15.5 on the fast sequences), so the skew isn't what
+  makes the filters over-confident on real data.
+
+The whole account, with a checklist for any fusion pipeline, is
+[Aligning Sensor Samples](sample-alignment.mdx).
 
 **Smaller ones:**
 
