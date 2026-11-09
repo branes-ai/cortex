@@ -277,15 +277,15 @@ class PipelineGraphTest(unittest.TestCase):
         self.assertEqual(rep.errors, [])
         self.assertIn("(bound 1.1e-4 rad, from what **correct** resolves: a tenth of 0.5 px)",
                       pg.page_source(spec, delta, rep))
-        cases = {
-            "needs a value and its derivation": good.replace(", derivation: a tenth of 0.5 px", ""),
-            "consumer must name the node": good.replace("consumer: correct", "consumer: nobody"),
-            "consumer must name the node ": good.replace("consumer: correct", "consumer: [correct]"),
-        }
+        cases = [
+            ("needs a value and its derivation", good.replace(", derivation: a tenth of 0.5 px", "")),
+            ("consumer must name the node", good.replace("consumer: correct", "consumer: nobody")),
+            ("consumer must name the node", good.replace("consumer: correct", "consumer: [correct]")),
+        ]
         _, _, rep = self.analyse(good.replace("value: 1.1e-4 rad", "value: 0"))
         self.assertEqual(rep.errors, [])
-        for want, text in cases.items():
-            with self.subTest(want):
+        for want, text in cases:
+            with self.subTest(want, text=text):
                 _, _, rep = self.analyse(text)
                 self.assertTrue(any(want in e for e in rep.errors), rep.errors)
 
