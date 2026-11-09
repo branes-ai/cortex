@@ -260,6 +260,10 @@ system_invariants:
   - id: s2_closure
     text: "the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order"
     check: {file: tests/tools/gt_spline.cpp, case: "gt spline: S2 closure, the shipped S2 within what the camera resolves"}
+    bound:
+      value: "1.09e-4 rad rotation, 0.22 mm position at 2 m, over a 0.55 s clone window"
+      consumer: run_filter
+      derivation: "the backend's update resolves a clone pose only to the track noise, 0.5 px at fx = 458.654 (1.09e-3 rad); propagation error must stay a tenth of that over the clone window so it never competes with the measurement, and the same angle at a 2 m landmark depth is 0.22 mm"
     status: failing
     note: "the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616"
   - id: same_gate
