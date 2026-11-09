@@ -144,3 +144,47 @@ TEST_CASE("ideal tracks add the noise and only the noise", "[tools][ideal_tracks
     REQUIRE(std::abs(mean) < 0.1);
     REQUIRE(std::abs(sd - 1.0) < 0.1);
 }
+
+TEST_CASE("ideal tracks can draw the noise in normalized coordinates", "[tools][ideal_tracks]") {
+    // noise_normalized (#613): unprojected, the noisy observation differs from
+    // the clean one by N(0, (sigma / fx)^2) per axis everywhere in the image,
+    // which is what a filter with R = sigma / fx is told. Pixel noise instead
+    // is stretched by undistortion toward the edges.
+    const auto cam = branes::tools::euroc_cam0<T>();
+    const SE3 T_ic(cam.R_imu_cam, cam.p_imu_cam);
+    const auto run = [&](bool normalized) {
+        auto noisy = clean();
+        noisy.sigma_px = 1.0;
+        noisy.noise_normalized = normalized;
+        Tracks a(gt(0.3, 0.5), cam.intrinsics, T_ic, clean());
+        Tracks b(gt(0.3, 0.5), cam.intrinsics, T_ic, noisy);
+        double sum2_edge = 0, sum2_center = 0;
+        std::size_t n_edge = 0, n_center = 0;
+        for (const double t : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+            const auto oa = a.observe(t);
+            const auto ob = b.observe(t);
+            REQUIRE(oa.size() == ob.size());
+            for (std::size_t i = 0; i < oa.size(); ++i) {
+                const auto qa = cam.intrinsics.unproject({oa[i].u, oa[i].v});
+                const auto qb = cam.intrinsics.unproject({ob[i].u, ob[i].v});
+                const double xa = qa[0] / qa[2], ya = qa[1] / qa[2];
+                const double dx = qb[0] / qb[2] - xa, dy = qb[1] / qb[2] - ya;
+                const bool edge = xa * xa + ya * ya > 0.25;  // normalized radius > 0.5
+                (edge ? sum2_edge : sum2_center) += dx * dx + dy * dy;
+                (edge ? n_edge : n_center) += 2;
+            }
+        }
+        REQUIRE(n_edge > 200);
+        REQUIRE(n_center > 200);
+        const double s = 1.0 / cam.intrinsics.fx();
+        return std::pair{std::sqrt(sum2_center / static_cast<double>(n_center)) / s,
+                         std::sqrt(sum2_edge / static_cast<double>(n_edge)) / s};
+    };
+    const auto [center_n, edge_n] = run(true);
+    CAPTURE(center_n, edge_n);
+    CHECK(std::abs(center_n - 1.0) < 0.1);
+    CHECK(std::abs(edge_n - 1.0) < 0.1);
+    const auto [center_p, edge_p] = run(false);
+    CAPTURE(center_p, edge_p);
+    CHECK(edge_p > 1.1);  // pixel noise grows in the normalized plane toward the edges
+}
