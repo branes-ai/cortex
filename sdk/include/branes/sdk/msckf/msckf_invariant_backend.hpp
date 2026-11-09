@@ -187,10 +187,11 @@ public:
 
     // ── filter operations ────────────────────────────────────────────
     /// S2_propagation: propagate the live nav state and the joint covariance over
-    /// one IMU sample.
+    /// one IMU interval, the samples at both of its ends (#616).
     /// The clone block is static under propagation (cross-covariance via the joint
     /// Φ = blkdiag(Φ_nav, I)); only the nav rows/cols evolve.
-    void propagate(const Vec3& gyro, const Vec3& accel, T dt) {
+    void propagate(const ImuInterval<T>& in) {
+        const T dt = in.dt;
         if (!(dt > T{0}))
             return;
         const std::size_t d = dim();
@@ -207,8 +208,12 @@ public:
             for (std::size_t j = 0; j < Ln.cols; ++j)
                 L(i, j) = Ln(i, j);
         cov_.predict_factor(F, L);
-        prop_.propagate_mean(nav_, gyro, accel, dt);  // joint covariance handled above
+        prop_.propagate_mean(nav_, in);  // joint covariance handled above
         nav_.timestamp += static_cast<double>(dt);
+    }
+    /// The same over `dt` on one sample held constant (ImuInterval::held).
+    void propagate(const Vec3& gyro, const Vec3& accel, T dt) {
+        propagate(ImuInterval<T>::held(gyro, accel, dt));
     }
 
     /// S3_augmentation: append a clone of the current nav pose to the window (then

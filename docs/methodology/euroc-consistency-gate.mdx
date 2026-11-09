@@ -44,8 +44,8 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 **synth_imu** (G2, Synthesize the IMU)
 
 - *Pre:* the IMU timestamps lie inside the spline's span
-- *Post:* noise-free and integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window; the noise statistics match the densities
-- *Test:* `tests/tools/gt_spline.cpp` “gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound…”
+- *Post:* noise-free and integrated by the shipped S2 from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window; the noise statistics match the densities
+- *Test:* `tests/tools/gt_spline.cpp` “gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)…”
 - *Test:* `tests/tools/gt_spline.cpp` “gt spline: the synthesized noise has the configured densities…”
 
 **synth_tracks** (G3, Synthesize the tracks)
@@ -81,7 +81,7 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 | **NoiseModel** | input | the gyro and accelerometer noise densities and bias random walks (VioConfig's), the track pixel σ S, and the seed | `sdk/include/branes/sdk/vio_backend.hpp` `VioConfig` | ✗ the filter's Q and the synthesis use the same densities; matched R equals S |
 | **CameraCalib** | input | EuRoC cam0 intrinsics, distortion and camera↔IMU extrinsic | `tools/include/branes/tools/euroc_cam0.hpp` `euroc_cam0` | ✓ R_imu_cam ∈ SO(3) |
 | **TruthSpline** | data | a uniform cumulative cubic B-spline on SO(3) × ℝ³ with control poses at ground-truth samples every 0.05 s; pose, angular velocity and acceleration at any time inside its span | `tools/include/branes/tools/gt_spline.hpp` `PoseSpline` | ✓ C² in position and rotation; ω and a match finite differences of its pose; ✓ stays within a stated bound of the ground truth (it approximates, it is not fitted) |
-| **ImuStream** | data | at the real IMU timestamps, ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks from zero | `tools/include/branes/tools/gt_spline.hpp` `synthesize_imu` | ✓ noise-free, integrated from both samples of each interval, it closes on the spline's rotation within a tenth of 0.5 px over a clone window (rotation only: the shipped S2 step's position still drifts at first order, and the shipped end-sample hold fails, see s2_closure, #616); ✓ the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness) |
+| **ImuStream** | data | at the real IMU timestamps, ω_m = ω + b_g + n_g, a_m = Rᵀ(p̈ − g) + b_a + n_a, with b_g, b_a random walks from zero | `tools/include/branes/tools/gt_spline.hpp` `synthesize_imu` | ✓ noise-free, integrated by the shipped S2 from both samples of each interval, it closes on the spline within a tenth of 0.5 px over a clone window, in rotation and position (see s2_closure, #616); ✓ the noise matches NoiseModel's densities (per-axis variance, per-sample whiteness) |
 | **TrackStream** | data | per image time, pixel observations of fixed landmarks seen from the truth's camera pose, plus N(0, S²) per axis | `tools/include/branes/tools/ideal_tracks.hpp` `IdealTracks` | ✓ noise-free, each observation is the exact projection of its landmark; ✓ the added noise is N(0, (S/fx)²) per axis in normalized coordinates and nothing else |
 | **Estimate** | data | the backend's trajectory (TUM) and per-frame pose covariance in its own error convention | `tools/src/vio_pipeline.cpp` `write_tum` | ✗ finite; one pose per tracked frame |
 | **Score** | data | window 4-DoF ATE ÷ OpenVINS mono, the pose NEES split, the world-yaw σ over the run, NIS | `tools/include/branes/tools/pose_consistency.hpp` `PoseConsistencySummary` | ✗ scored against TruthSpline, not the raw ground truth; ✗ a run with no trajectory counts as diverged; one that cannot be scored is unavailable |
@@ -108,15 +108,15 @@ on grid complete:
 
 | Invariant | Check | Status |
 |---|---|---|
-| the median normalized NIS over the matched runs is ≈ 1 (the bench's noise model is true) | `scripts/euroc-consistency.sh` | holds — 1.03 for both backends at c6b87ec (1.65–4.3 with the real IMU and the raw ground truth) |
-| every sequence's matched runs have normalized NIS within the χ² band for their dof | `scripts/euroc-consistency.sh` | failing — 1.01–1.04 on the Machine Hall and V1_01, V2_01; 1.1–1.9 on V1_02, V1_03, V2_02, V2_03 for both backends: S2's sample-hold skew, an estimator defect (#616) |
-| the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order (bound 1.09e-4 rad rotation, 0.22 mm position at 2 m, over a 0.55 s clone window, from what **run_filter** resolves: the backend's update resolves a clone pose only to the track noise, 0.5 px at fx = 458.654 (1.09e-3 rad); propagation error must stay a tenth of that over the clone window so it never competes with the measurement, and the same angle at a 2 m landmark depth is 0.22 mm) | `tests/tools/gt_spline.cpp` “gt spline: S2 closure, the shipped S2 within what the camera resolves…” | failing — the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616 |
+| the median normalized NIS over the matched runs is ≈ 1 (the bench's noise model is true) | `scripts/euroc-consistency.sh` | holds — 1.00 for both backends at f1551cc (1.03 at c6b87ec before #616; 1.65–4.3 with the real IMU and the raw ground truth) |
+| every sequence's matched runs have normalized NIS within the χ² band for their dof | `scripts/euroc-consistency.sh` | holds — 1.00 on every sequence for both backends at f1551cc. Before #616 it was 1.1–1.9 on V1_02, V1_03, V2_02, V2_03: S2's sample-hold skew, an estimator defect |
+| the shipped S2, fed the synthesized IMU noise-free, closes on the truth within what the camera resolves (a tenth of 0.5 px over a 0.55 s clone window: 1.1e-4 rad, 0.22 mm at 2 m), at second order (bound 1.09e-4 rad rotation, 0.22 mm position at 2 m, over a 0.55 s clone window, from what **run_filter** resolves: the backend's update resolves a clone pose only to the track noise, 0.5 px at fx = 458.654 (1.09e-3 rad); propagation error must stay a tenth of that over the clone window so it never competes with the measurement, and the same angle at a 2 m landmark depth is 0.22 mm) | `tests/tools/gt_spline.cpp` “gt spline: S2 closure, the shipped S2 within what the camera resolves…” | holds — since #616, S2 integrates each interval from both samples by RK4: 0.27 of the rotation bound and 0.10 of the position bound at 200 Hz on a 1.3 rad/s roll/pitch flight, converging at second order. Before it, the end-sample hold missed the rotation bound 28× at first order; the companion tests pin that, and that centring the input fixes the rotation while the integrator fixes the position |
 | every backend runs with the same S6d gate line | `scripts/euroc-consistency.sh` | holds — since #608 both use the χ² quantile; before it the R-IEKF used 16 per dof |
-| each condition's result changes with the estimator, not with the gate's line | — | holds — each remaining failure rerun with the gate at 5 per dof: one divergence per backend vanishes (with a true noise model, the estimator's transient over-confidence made the 5% gate fatal), the others persist; condition 2's fast-sequence loss is #616's S2 skew. Conditions 1 and 2 still depend on the noise draw at three seeds (#613) |
+| each condition's result changes with the estimator, not with the gate's line | — | holds — at c6b87ec each remaining failure was rerun with the gate at 5 per dof: one divergence per backend vanished, the others persisted, and condition 2's fast-sequence loss was #616's S2 skew. At f1551cc condition 2 passes for both; both backends diverge on the same two noise draws, from the shared initializer's seed (#609); the MSCKF's condition 3 is S6's yaw leak. Conditions 1 and 2 still depend on the noise draw at three seeds (#613) |
 
 ## Gap report
 
-What `pipeline_graph.py gaps` reports for this spec (14 items):
+What `pipeline_graph.py gaps` reports for this spec (12 items):
 
 - edge 'NoiseModel': no validator for "the filter's Q and the synthesis use the same densities; matched R equals S"
 - edge 'Estimate': no validator for "finite; one pose per tracked frame"
@@ -129,6 +129,4 @@ What `pipeline_graph.py gaps` reports for this spec (14 items):
 - node 'score': no stage bench
 - node 'verdict': no stage bench
 - node 'verdict': no unit tests
-- system invariant 'nis_band_per_sequence': failing — 1.01–1.04 on the Machine Hall and V1_01, V2_01; 1.1–1.9 on V1_02, V1_03, V2_02, V2_03 for both backends: S2's sample-hold skew, an estimator defect (#616)
-- system invariant 's2_closure': failing — the shipped S2 holds each interval's end sample: 3.1e-3 rad (28× the bound) at first order on a 1.3 rad/s roll/pitch flight; averaging the two samples meets the rotation bound at second order, the position still needs the integrator's fix (#616). The test is a [!shouldfail] tripwire until #616
 - system invariant 'verdict_attributable': no check

@@ -9,9 +9,10 @@
 //     match finite differences of its own pose;
 //   * it stays close to the ground truth it was built from;
 //   * s2_closure, with a bound taken from what the camera resolves (a tenth of
-//     0.5 px over a clone window), not from what S2 achieves: averaging each
-//     interval's two samples meets it for rotation; the shipped S2 does not
-//     (#616), and a [!shouldfail] tripwire records that until it does;
+//     0.5 px over a clone window), not from what S2 achieves: the shipped S2
+//     (both samples, RK4, #616) meets it at second order; the pre-#616 held
+//     sample misses it at first order, and the two errors a held sample makes
+//     (the input's skew, the integrator's start attitude) are pinned apart;
 //   * the injected noise has the configured densities and is white, and the
 //     biases walk at the configured rate.
 //
@@ -122,14 +123,29 @@ constexpr double kWindowS = 0.55;
 constexpr double kRotBound = 0.1 * 0.5 / 458.654;
 constexpr double kPosBound = 2.0 * kRotBound;
 
-enum class Hold { end_sample, both_samples };
+// The S2 schemes the closure compares. The pre-#616 step is reproduced here,
+// one Euler step on a held sample with the specific force rotated at the start
+// attitude, so the test can pin that it misses the bound: S2 no longer ships it.
+enum class Scheme {
+    euler_end,      // pre-#616 MsckfBackend: the sample that ends the interval, held
+    euler_start,    // pre-#616 InvariantVioBackend: the sample that starts it, held
+    euler_average,  // the #616 probe: the two samples' average, held, one Euler step
+    rk4_average,    // the two samples' average, held, through the shipped RK4
+    shipped,        // the shipped S2: both samples, interpolated, RK4 (#616)
+};
 
-// Integrate a window of noise-free samples at `rate` Hz with the shipped S2,
-// seeded from the spline at the first sample, and return the {rotation,
-// position} error against the spline at the last. end_sample feeds each
-// interval the sample that ends it (MsckfBackend today); both_samples feeds it
-// the average of its two samples.
-std::pair<double, double> closure(const Spline& s, double rate, Hold hold) {
+void euler_step(ms::State<T>& st, const Vec3& w, const Vec3& f, double dt) {
+    const Vec3 g{{0.0, 0.0, -9.81}};
+    const Vec3 a = st.R * f + g;
+    st.p = st.p + st.v * dt + a * (0.5 * dt * dt);
+    st.v = st.v + a * dt;
+    st.R = st.R * SO3::exp(w * dt);
+}
+
+// Integrate a window of noise-free samples at `rate` Hz with `scheme`, seeded
+// from the spline at the first sample, and return the {rotation, position}
+// error against the spline at the last.
+std::pair<double, double> closure(const Spline& s, double rate, Scheme scheme) {
     std::vector<double> times;
     for (int k = 0; k <= static_cast<int>(std::lround(kWindowS * rate)); ++k)
         times.push_back(2.0 + k / rate);
@@ -143,70 +159,87 @@ std::pair<double, double> closure(const Spline& s, double rate, Hold hold) {
     const ms::Propagator<T> prop;
     const auto vec = [](const auto& a) { return Vec3{{a[0], a[1], a[2]}}; };
     for (std::size_t k = 1; k < imu.size(); ++k) {
-        Vec3 w = vec(imu[k].angular_velocity), f = vec(imu[k].linear_acceleration);
-        if (hold == Hold::both_samples) {
-            w = (w + vec(imu[k - 1].angular_velocity)) * 0.5;
-            f = (f + vec(imu[k - 1].linear_acceleration)) * 0.5;
+        const Vec3 w0 = vec(imu[k - 1].angular_velocity), f0 = vec(imu[k - 1].linear_acceleration);
+        const Vec3 w1 = vec(imu[k].angular_velocity), f1 = vec(imu[k].linear_acceleration);
+        const double dt = imu[k].timestamp_s - imu[k - 1].timestamp_s;
+        switch (scheme) {
+        case Scheme::euler_end:
+            euler_step(st, w1, f1, dt);
+            break;
+        case Scheme::euler_start:
+            euler_step(st, w0, f0, dt);
+            break;
+        case Scheme::euler_average:
+            euler_step(st, (w0 + w1) * 0.5, (f0 + f1) * 0.5, dt);
+            break;
+        case Scheme::rk4_average:
+            (void)ms::stages::s2_propagation::apply(st, prop, (w0 + w1) * 0.5, (f0 + f1) * 0.5, dt);
+            break;
+        case Scheme::shipped:
+            (void)ms::stages::s2_propagation::apply(st, prop, ms::ImuInterval<T>{w0, f0, w1, f1, dt});
+            break;
         }
-        (void)ms::stages::s2_propagation::apply(st, prop, w, f, imu[k].timestamp_s - imu[k - 1].timestamp_s);
     }
     const SE3 P1 = s.pose(imu.back().timestamp_s);
     return {norm((P1.rotation().inverse() * st.R).log()), norm(st.p - P1.translation())};
 }
 }  // namespace
 
-TEST_CASE("gt spline: S2 closure, averaging each interval's two samples, holds the rotation bound",
-          "[tools][gt_spline]") {
-    // The rotation bound is attainable at EuRoC's 200 Hz: the shipped S2 step,
-    // fed the average of each interval's two samples, closes on a fast spline
-    // within it, and converges at second order. This also checks the
-    // synthesized IMU against the spline it came from. Its position still
-    // drifts at first order (about 5 mm over the window): the specific force is
-    // rotated with the attitude at the start of the interval, which #616's
-    // integrator must fix as well.
+// #616's acceptance test: the shipped S2, fed both samples of each interval as
+// both backends now do, closes on the fast flight within what the camera
+// resolves, in rotation and in position, and converges at second order. Second,
+// not fourth: RK4 integrates the line between the samples to fourth order, but
+// the line itself follows the true rate only to second order, and that is the
+// error left (about a quarter of the bound in rotation, a tenth in position).
+TEST_CASE("gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)", "[tools][gt_spline]") {
     const Spline s(fast_sampled(), 0.05);
-    const auto [rot, pos] = closure(s, 200.0, Hold::both_samples);
-    const auto [rot2, pos2] = closure(s, 400.0, Hold::both_samples);
-    CAPTURE(rot, rot2, pos, pos2, kRotBound, kPosBound);
-    CHECK(rot < kRotBound);
-    CHECK(rot / rot2 > 3.5);  // second order: a quarter at half the step
-}
-
-// What the shipped S2 does today (#616), pinned so the tripwire below can only
-// turn green because S2 changed: [!shouldfail] passes on any failing check, so
-// this case asserts the specific miss. On the fast flight the end-sample hold
-// misses the rotation bound by about 28x and converges at first order (the
-// error halves with the step). When #616 fixes S2 this case fails, and both it
-// and the tripwire's tag must be updated together.
-TEST_CASE("gt spline: S2 closure, the shipped S2 misses the rotation bound at first order (#616)",
-          "[tools][gt_spline]") {
-    const Spline s(fast_sampled(), 0.05);
-    const auto [rot, pos] = closure(s, 200.0, Hold::end_sample);
-    const auto [rot2, pos2] = closure(s, 400.0, Hold::end_sample);
-    CAPTURE(rot, rot2, pos, pos2, kRotBound);
-    CHECK(rot > 20.0 * kRotBound);
-    CHECK(rot < 40.0 * kRotBound);
-    CHECK(rot / rot2 > 1.8);
-    CHECK(rot / rot2 < 2.2);
-}
-
-// A tripwire for #616: the shipped S2, fed each interval the sample that ends
-// it as MsckfBackend does, must close within what the camera resolves, at
-// second order or better. Today it misses the rotation bound 28x (a sample held
-// over the wrong interval is a 2.5 ms IMU-camera skew) and converges at first
-// order, so this case fails and [!shouldfail] reports that as a pass. When #616
-// fixes S2 the case passes, [!shouldfail] turns that into a failure, and the
-// tag must come off: the test then guards the fix.
-TEST_CASE("gt spline: S2 closure, the shipped S2 within what the camera resolves (#616)",
-          "[tools][gt_spline][!shouldfail]") {
-    const Spline s(fast_sampled(), 0.05);
-    const auto [rot, pos] = closure(s, 200.0, Hold::end_sample);
-    const auto [rot2, pos2] = closure(s, 400.0, Hold::end_sample);
+    const auto [rot, pos] = closure(s, 200.0, Scheme::shipped);
+    const auto [rot2, pos2] = closure(s, 400.0, Scheme::shipped);
     CAPTURE(rot, rot2, pos, pos2, kRotBound, kPosBound);
     CHECK(rot < kRotBound);
     CHECK(pos < kPosBound);
-    CHECK(rot / rot2 > 3.5);
+    CHECK(rot / rot2 > 3.5);  // second order: a quarter at half the step
     CHECK(pos / pos2 > 3.5);
+}
+
+// The pre-#616 S2, pinned: one Euler step on a held sample, the end sample
+// (MsckfBackend) or the start sample (InvariantVioBackend). Either hold is a
+// half-sample IMU-camera skew, which misses the rotation bound about 28x and
+// converges at first order: the error halves with the step.
+TEST_CASE("gt spline: S2 closure, a held sample misses the rotation bound at first order", "[tools][gt_spline]") {
+    const Spline s(fast_sampled(), 0.05);
+    for (const Scheme scheme : {Scheme::euler_end, Scheme::euler_start}) {
+        const auto [rot, pos] = closure(s, 200.0, scheme);
+        const auto [rot2, pos2] = closure(s, 400.0, scheme);
+        CAPTURE(static_cast<int>(scheme), rot, rot2, pos, pos2, kRotBound, kPosBound);
+        CHECK(rot > 20.0 * kRotBound);
+        CHECK(pos > kPosBound);
+        CHECK(rot / rot2 > 1.8);
+        CHECK(rot / rot2 < 2.2);
+    }
+}
+
+// The two errors a held sample makes, separated. Centring the input (the
+// average of the interval's two samples) removes the rotation error. The
+// position error is the integrator's: one Euler step rotates the specific force
+// with the attitude at the start of the interval, which misses the position
+// bound and converges at first order; RK4 rotates it along the interval and
+// meets the bound. The shipped S2 interpolates rather than averaging: the same
+// order, a little closer (tests above).
+TEST_CASE("gt spline: S2 closure, centring fixes the rotation and the integrator the position", "[tools][gt_spline]") {
+    const Spline s(fast_sampled(), 0.05);
+    const auto [rot_e, pos_e] = closure(s, 200.0, Scheme::euler_average);
+    const auto [rot_e2, pos_e2] = closure(s, 400.0, Scheme::euler_average);
+    CAPTURE(rot_e, pos_e, pos_e2, kRotBound, kPosBound);
+    CHECK(rot_e < kRotBound);
+    CHECK(pos_e > 10.0 * kPosBound);
+    CHECK(pos_e / pos_e2 > 1.8);
+    CHECK(pos_e / pos_e2 < 2.2);
+
+    const auto [rot_r, pos_r] = closure(s, 200.0, Scheme::rk4_average);
+    CAPTURE(rot_r, pos_r);
+    CHECK(rot_r < kRotBound);
+    CHECK(pos_r < kPosBound);
 }
 
 TEST_CASE("gt spline: the synthesized noise has the configured densities", "[tools][gt_spline]") {

@@ -19,7 +19,7 @@ The numbers come from `scripts/euroc-baseline.json`, which
 
 - **Data:** the 11 EuRoC MAV sequences, cam0 and imu0, ground truth from
   `state_groundtruth_estimate0`.
-- **cortex** (commit 37bd455, 2026-11-07; every sequence changed from the first baseline at 348c774, see below): `vio_pipeline --source euroc` with
+- **cortex** (commit f1551cc, 2026-11-09, with S2 integrating each IMU interval from both of its samples, #616; every sequence changed from the first baseline at 348c774, see below): `vio_pipeline --source euroc` with
   its defaults, monocular, the MSCKF with double stages and a full covariance.
   Every run starts at the first frame.
 - **OpenVINS v2.7:** the unmodified upstream binary, run outside every Branes
@@ -52,17 +52,17 @@ The numbers come from `scripts/euroc-baseline.json`, which
 
 | Sequence | cortex, whole run | cortex, window | OpenVINS mono | OpenVINS stereo | cortex ÷ OV mono |
 |---|---:|---:|---:|---:|---:|
-| MH_01_easy | 0.322 | 0.332 | 0.096 | 0.072 | 3.5× |
-| MH_02_easy | 0.420 | 0.369 | 0.168 | 0.117 | 2.2× |
-| MH_03_medium | 0.471 | 0.439 | 0.147 | 0.096 | 3.0× |
-| MH_04_difficult | 0.376 | 0.396 | 0.147 | 0.127 | 2.7× |
-| MH_05_difficult | 0.690 | 0.645 | 0.458 | 0.281 | 1.4× |
-| V1_01_easy | 0.217 | 0.213 | 0.069 | 0.063 | 3.1× |
-| V1_02_medium | 0.183 | 0.183 | 0.058 | 0.048 | 3.1× |
-| V1_03_difficult | 0.188 | 0.189 | 0.067 | 0.059 | 2.8× |
-| V2_01_easy | 0.224 | 0.215 | 0.127 | 0.060 | 1.7× |
-| V2_02_medium | 0.331 | 0.330 | 0.073 | 0.044 | 4.5× |
-| V2_03_difficult | 0.178 | 0.181 | 0.181 | 0.087 | 1.0× |
+| MH_01_easy | 0.331 | 0.333 | 0.096 | 0.072 | 3.5× |
+| MH_02_easy | 0.456 | 0.393 | 0.168 | 0.117 | 2.3× |
+| MH_03_medium | 0.500 | 0.472 | 0.147 | 0.096 | 3.2× |
+| MH_04_difficult | 0.375 | 0.379 | 0.147 | 0.127 | 2.6× |
+| MH_05_difficult | 0.671 | 0.629 | 0.458 | 0.281 | 1.4× |
+| V1_01_easy | 0.200 | 0.197 | 0.069 | 0.063 | 2.8× |
+| V1_02_medium | 0.163 | 0.162 | 0.058 | 0.048 | 2.8× |
+| V1_03_difficult | 0.158 | 0.161 | 0.067 | 0.059 | 2.4× |
+| V2_01_easy | 0.223 | 0.215 | 0.127 | 0.060 | 1.7× |
+| V2_02_medium | 0.338 | 0.334 | 0.073 | 0.044 | 4.6× |
+| V2_03_difficult | 0.173 | 0.175 | 0.181 | 0.087 | 1.0× |
 
 The ratio compares cortex's window with OpenVINS mono; both are monocular.
 
@@ -72,22 +72,22 @@ Over the window:
 
 | Sequence | cortex | OpenVINS mono | OpenVINS stereo |
 |---|---:|---:|---:|
-| MH_01_easy | 0.377 m / 1.62° | 0.137 m / 1.55° | 0.141 m / 1.67° |
-| MH_02_easy | 0.461 m / 1.12° | 0.173 m / 1.07° | 0.132 m / 0.86° |
-| MH_03_medium | 0.388 m / 0.65° | 0.178 m / 0.61° | 0.159 m / 0.62° |
-| MH_04_difficult | 0.583 m / 1.19° | 0.206 m / 0.83° | 0.213 m / 0.50° |
-| MH_05_difficult | 0.705 m / 0.81° | 0.506 m / 1.06° | 0.300 m / 0.85° |
-| V1_01_easy | 0.342 m / 4.03° | 0.262 m / 2.84° | 0.229 m / 2.83° |
-| V1_02_medium | 0.233 m / 2.52° | 0.110 m / 0.57° | 0.106 m / 0.73° |
-| V1_03_difficult | 0.272 m / 2.63° | 0.125 m / 1.24° | 0.125 m / 1.02° |
-| V2_01_easy | 0.448 m / 2.43° | 0.220 m / 1.06° | 0.102 m / 0.89° |
-| V2_02_medium | 0.295 m / 4.55° | 0.090 m / 1.55° | 0.061 m / 1.27° |
-| V2_03_difficult | 0.249 m / 2.21° | 0.201 m / 1.56° | 0.108 m / 1.38° |
+| MH_01_easy | 0.370 m / 1.57° | 0.137 m / 1.55° | 0.141 m / 1.67° |
+| MH_02_easy | 0.478 m / 1.35° | 0.173 m / 1.07° | 0.132 m / 0.86° |
+| MH_03_medium | 0.386 m / 0.75° | 0.178 m / 0.61° | 0.159 m / 0.62° |
+| MH_04_difficult | 0.548 m / 1.03° | 0.206 m / 0.83° | 0.213 m / 0.50° |
+| MH_05_difficult | 0.701 m / 0.95° | 0.506 m / 1.06° | 0.300 m / 0.85° |
+| V1_01_easy | 0.330 m / 4.04° | 0.262 m / 2.84° | 0.229 m / 2.83° |
+| V1_02_medium | 0.209 m / 2.31° | 0.110 m / 0.57° | 0.106 m / 0.73° |
+| V1_03_difficult | 0.235 m / 2.56° | 0.125 m / 1.24° | 0.125 m / 1.02° |
+| V2_01_easy | 0.447 m / 2.41° | 0.220 m / 1.06° | 0.102 m / 0.89° |
+| V2_02_medium | 0.301 m / 4.09° | 0.090 m / 1.55° | 0.061 m / 1.27° |
+| V2_03_difficult | 0.225 m / 1.74° | 0.201 m / 1.56° | 0.108 m / 1.38° |
 
 ## What the baseline says
 
 - **The typical gap is 2–3.5×** in 4-DoF ATE: the median over the 11
-  sequences is 2.8×. V2_03, MH_05 and V2_01 are within 2×.
+  sequences is 2.6× (2.8× before #616). V2_03, MH_05 and V2_01 are within 2×.
 - **Initialization costs the most.**
   - MH_03 diverged in the first baseline (348c774: 29,804 m). Rotor vibration
     kept its still start out of static init, and the gravity-align fallback
@@ -136,8 +136,10 @@ Over the window:
   0.396 m); the median ratio stays 2.8×. MH_05's rotation RPE over the whole
   run goes from 1.07° to 1.89°.
 - **Rotation drift is the next gap.** In the Vicon rooms cortex's rotation
-  RPE is 1.4–4.4× OpenVINS mono's (V1_02: 2.52° against 0.57°). That is
-  consistent with the body-frame MSCKF's yaw observability leak (#212, #480).
+  RPE is 1.1–4.1× OpenVINS mono's (V1_02: 2.31° against 0.57°; before #616
+  1.4–4.4×, V1_02 2.52°). That is consistent with the body-frame MSCKF's yaw
+  observability leak (#212, #480). The R-IEKF's is 0.88° at the median
+  ([below](#the-r-iekf-on-the-shipped-real-data-path)).
 - **Starting at the first frame matters for OpenVINS too.** Run monocular
   from the first frame, it diverges on MH_04 (4-DoF ATE 9,889 m) and is
   otherwise within 0.035 m of its start-offset score. Its start offsets hide
@@ -254,7 +256,57 @@ turns that into a pass/fail check that any backend can be run through:
     collapse.
   - Every verdict below is the same at any bound between 0.13 and 0.9.
 
-### Results with one truth
+### Results with one truth, and S2 integrating both samples (#616)
+
+Recorded at f1551cc for both backends, median over the three seeds. #616 made S2
+integrate each IMU interval from both of its samples (RK4 on the line between
+them) instead of holding one, and made Φ that mean's exact Jacobian
+([Aligning Sensor Samples](../first-principles/sample-alignment.mdx)). The
+matched-run NIS is now **1.00 on every sequence for both backends** (1.1–1.9 on
+the fast ones before):
+
+| Gate condition | MSCKF | R-IEKF |
+|---|---|---|
+| 1. No divergence (66 matched runs) | **fail:** 2 diverge (MH_03 1 px seed 2, 26.8 m; MH_04 1 px seed 3, 8.8 km) | **fail:** the same 2 (MH_03 2.3 m; MH_04 9.0 km) |
+| 2. Matched beats default (median, 1 px / 0.5 px) | **pass:** 0.45× vs 0.52×; 0.33× vs 0.53× | **pass:** 0.40× vs 0.41×; 0.18× vs 0.36× |
+| 3. No yaw collapse (median yaw σ min ÷ anchor ≥ 0.5) | **fail:** 0.179 | **pass:** 0.984 |
+| Median NIS, matched runs (range) | 1.00 (1.00–1.11) | 1.00 (1.00–1.02) |
+| Roll/pitch NEES, matched runs | 1.1–24 | 0.9–6.8 |
+
+At 0.5 px, matched `R`, per sequence (window ATE ratio to OpenVINS mono, yaw σ
+min ÷ anchor, NIS):
+
+| Sequence | MSCKF ratio | MSCKF yaw σ | MSCKF NIS | R-IEKF ratio | R-IEKF yaw σ | R-IEKF NIS |
+|---|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.4× | 0.09 | 1.00 | 0.4× | 0.84 | 1.00 |
+| MH_02_easy | 0.4× | 0.17 | 1.00 | 0.2× | 0.90 | 1.00 |
+| MH_03_medium | 0.3× | 0.17 | 1.00 | 0.2× | 0.89 | 1.00 |
+| MH_04_difficult | 0.2× | 0.16 | 1.00 | 0.2× | 0.91 | 1.00 |
+| MH_05_difficult | 0.1× | 0.21 | 1.00 | 0.0× | 0.93 | 1.00 |
+| V1_01_easy | 0.4× | 0.23 | 1.00 | 0.3× | 0.88 | 1.00 |
+| V1_02_medium | 0.5× | 0.28 | 1.00 | 0.2× | 0.94 | 1.00 |
+| V1_03_difficult | 0.4× | 0.23 | 1.00 | 0.2× | 0.94 | 1.00 |
+| V2_01_easy | 0.2× | 0.23 | 1.00 | 0.1× | 0.95 | 1.00 |
+| V2_02_medium | 0.4× | 0.21 | 1.00 | 0.1× | 0.94 | 1.00 |
+| V2_03_difficult | 0.1× | 0.21 | 1.00 | 0.1× | 0.97 | 1.00 |
+
+- **The fast sequences recovered.** At 0.5 px the MSCKF's V2_03, V2_02 and V1_03
+  went from 0.9×, 2.1× and 1.7× OpenVINS mono to 0.1×, 0.4× and 0.4×; the
+  R-IEKF's from 1.4×, 2.4× and 2.0× to 0.1×, 0.1× and 0.2×. Condition 2, which
+  both failed at 1 px, now passes for both.
+- **The MSCKF's yaw still collapses**, to 9–28% of its anchor σ (0.107 → 0.179
+  at the median). The observability ledger books none of it to S2 any more: on
+  MH_04 it puts 5e-21 rad⁻² of the spurious yaw information on S2 and 100% on
+  S6's mean shift, against 0.6–5.3% on S2 before. What is left is #480's S6
+  leak, which the body-frame error state can't avoid.
+- **Both backends diverge on the same two noise draws.** On MH_04 (1 px, seed
+  3) both start from the same dynamic alignment, at the same instant (the
+  R-IEKF runs the MSCKF's initializer since #608), and both reach a roll/pitch
+  NEES of 34,000–40,000 and about 9 km: the seed, not either filter. MH_03
+  (1 px, seed 2) starts by gravity alignment; the MSCKF reaches 26.8 m, the
+  R-IEKF 2.3 m. Both point at the tilt and bias seed of #609.
+
+### Results with one truth, before #616
 
 Recorded at c6b87ec (#613) for both backends, median over the three seeds. With
 the noise model true, the median NIS of the matched runs is **1.03 for both**
@@ -303,9 +355,7 @@ that it belongs to the estimator:
   1.1–1.9, against 1.01–1.04 on the Machine Hall. The cause is #616: S2 holds the
   sample that ends each interval (the R-IEKF the one that starts it), a 2.5 ms
   IMU–camera skew. Averaging the two samples gives NIS 1.00 everywhere and cuts
-  V2_03's ATE 10–15×, and `tests/tools/gt_spline.cpp` holds S2 to a closure bound
-  taken from what the camera resolves, which the shipped S2 misses 28× (a
-  `[!shouldfail]` tripwire until #616).
+  V2_03's ATE 10–15×. Fixed in #616 (above).
 - **Conditions 1 and 2 depend on the noise draw at three seeds.** The first
   recording drew the IMU noise and the track noise from the same random stream
   (a seeding bug found in review); drawing them independently moved which runs
@@ -406,7 +456,8 @@ half its NIS. The gate stays as recorded until #613 measures the ground truth's
 residual floor, folds it into matched `R`, runs every backend with the same gate
 line and re-records both. Condition 3 does not depend on the gate's line in the
 same way, but it is re-measured there too. #613 did this by removing the floor
-rather than modelling it: see [Results with one truth](#results-with-one-truth).
+rather than modelling it: see [Results with one truth, before #616](#results-with-one-truth-before-616), and
+[after it](#results-with-one-truth-and-s2-integrating-both-samples-616).
 
 This is the fourth result in the VIO work that came from the test setup rather
 than the estimator ([the storyline](../first-principles/storyline.mdx)).
@@ -472,6 +523,40 @@ Per sequence, window 4-DoF ATE (m) and window rotation RPE (°):
   is over-confident or the gate admits outliers.
 - **Roll/pitch is still wrong at the start:** V1_01 has a roll/pitch NEES near
   3000 in every configuration, the tilt and accelerometer-bias seed of #609.
+
+### After #616: S2 integrates both samples
+
+#616 changed S2 in both backends (each IMU interval integrated from both of its
+samples by RK4, and Φ the exact Jacobian of that mean). On the real KLT front
+end, window 4-DoF ATE (m) and window rotation RPE (°), before → after:
+
+| Sequence | MSCKF ATE | R-IEKF ATE | OpenVINS mono | MSCKF ÷ mono | R-IEKF ÷ mono | MSCKF rot | R-IEKF rot |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.332 → 0.333 | 0.315 → 0.312 | 0.096 | 3.5× | 3.3× | 1.62 → 1.57 | 0.80 → 0.82 |
+| MH_02_easy | 0.369 → 0.393 | 0.384 → 0.370 | 0.168 | 2.3× | 2.2× | 1.12 → 1.35 | 1.51 → 1.37 |
+| MH_03_medium | 0.439 → 0.472 | 0.392 → 0.402 | 0.147 | 3.2× | 2.7× | 0.65 → 0.75 | 0.67 → 0.66 |
+| MH_04_difficult | 0.396 → 0.379 | 0.377 → 0.359 | 0.147 | 2.6× | 2.4× | 1.19 → 1.03 | 0.42 → 0.46 |
+| MH_05_difficult | 0.645 → 0.629 | 0.619 → 0.612 | 0.458 | 1.4× | 1.3× | 0.81 → 0.95 | 0.70 → 0.68 |
+| V1_01_easy | 0.213 → 0.197 | 0.181 → 0.182 | 0.069 | 2.8× | 2.6× | 4.03 → 4.04 | 3.81 → 3.74 |
+| V1_02_medium | 0.183 → 0.162 | 0.159 → 0.146 | 0.058 | 2.8× | 2.5× | 2.52 → 2.31 | 0.89 → 0.81 |
+| V1_03_difficult | 0.189 → 0.161 | 0.240 → 0.131 | 0.067 | 2.4× | 2.0× | 2.63 → 2.56 | 0.90 → 0.88 |
+| V2_01_easy | 0.215 → 0.215 | 0.221 → 0.219 | 0.127 | 1.7× | 1.7× | 2.43 → 2.41 | 1.26 → 1.33 |
+| V2_02_medium | 0.330 → 0.334 | 0.274 → 0.261 | 0.073 | 4.6× | 3.6× | 4.55 → 4.09 | 1.35 → 1.37 |
+| V2_03_difficult | 0.181 → 0.175 | 0.210 → 0.177 | 0.181 | 1.0× | 1.0× | 2.21 → 1.74 | 1.81 → 1.80 |
+| **median** | | | | **2.83× → 2.57×** | **2.62× → 2.44×** | **2.21 → 1.74** | **0.90 → 0.88** |
+
+- **On real data the gain is real but small.** On the spline truth #616 cut the
+  fast sequences' ATE 4–24×; here the medians move 9% (MSCKF) and 7% (R-IEKF).
+  The R-IEKF's V1_03 halves (0.240 → 0.131 m) and V2_03 gains 16%; the MSCKF's
+  rotation drift falls 21% at the median (V2_03 2.21° → 1.74°). The MSCKF's MH_02
+  and MH_03 are 7% worse. The R-IEKF is now ahead of the MSCKF on 9 of 11
+  sequences (7 before).
+- **The real-data NIS did not move.** Both backends stay at 0.93–2.55 on the
+  Machine Hall, V1_01 and V2_01, and at 6.7–15.5 on V1_02, V1_03, V2_02 and
+  V2_03. On the spline truth the same sequences went from 1.1–1.9 to 1.00, so
+  the half-sample skew is not what makes the filters over-confident on the real
+  IMU and the real tracks. What does is still open: the front end's outliers, R, the
+  ADIS16448's own filter delay, the camera–IMU time offset (#332).
 
 ```sh
 CORTEX_VIO_ARGS="--invariant" scripts/euroc-baseline.sh --no-build                       # all pieces

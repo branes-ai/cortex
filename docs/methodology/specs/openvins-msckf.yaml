@@ -240,7 +240,7 @@ nodes:
   - id: propagate
     stage: S2
     title: IMU propagation
-    does: one IMU sample → the propagated mean, P ← Φ P Φᵀ + Q_d
+    does: one IMU interval (the samples at both of its ends) → the propagated mean, P ← Φ P Φᵀ + Q_d
     reads: [FilterState, ImuSample]
     writes: [FilterState]
     source: {ref: li2013, where: "§III, the IMU model; Φ at first estimates"}
@@ -259,22 +259,27 @@ nodes:
     precision: {policy: "T2 (msckf/stage_types.hpp)", note: "posit<32,2> passes the bench; P must be written in double on EuRoC (#532)"}
     decisions:
       - question: the IMU input over each interval
-        chosen: "the sample that ends it, held constant (#186)"
-        alternatives: ["the previous sample held", "both samples, interpolated and integrated by RK4 (geneva2020)"]
+        chosen: "ω and a interpolated linearly between the samples at t_{k−1} and t_k (#616)"
+        alternatives: ["the sample that ends the interval, held (#186 to #616)", "the sample that starts it, held"]
+        reason: "a sample is the rate at its timestamp: holding either end over the interval integrates the IMU half a sample (2.5 ms) early or late against the camera, NIS 1.1–1.9 on the fast sequences (#616, docs/first-principles/sample-alignment.mdx)"
       - question: the mean's integrator
-        chosen: one Euler step, the specific force rotated with the attitude at the start of the interval
-        alternatives: [midpoint, RK4]
+        chosen: "RK4 on the interpolated input: the attitude in closed form (the rate's integral plus the coning term), velocity and position by the RK4 quadrature (geneva2020)"
+        alternatives: ["one Euler step on a held sample (#186 to #616)", "one Euler step on the two samples' average", "RK4 on the two samples' average, held"]
+        reason: "measured against the S2 closure bound (a tenth of 0.5 px over a clone window, tests/tools/gt_spline.cpp) on a 1.3 rad/s flight: an Euler step on the average meets it in rotation but misses position 24×, because it rotates the specific force with the start attitude; RK4 on the average or on the line meets both at second order (0.16 and 0.10 of the position bound). The line is OpenVINS's choice and the closer of the two"
+      - question: an image time between two IMU samples
+        chosen: "the last sample held up to the image time; the rest of the interval integrated from the rate interpolated at the image time once the next sample arrives"
+        alternatives: ["hold the frame until the next sample arrives, then interpolate exactly (one IMU sample of latency)"]
+        reason: "no added latency; the residual skew lives only on the partial interval before the image, zero on EuRoC, whose image and IMU stamps coincide (#616)"
       - question: the transition Φ
-        chosen: first order, I + A·dt
-        alternatives: ["closed form", "a higher-order series"]
-        reason: "#471: a higher-order Φ leaks more yaw in the body-frame error state"
+        chosen: "the exact Jacobian of the shipped RK4 mean (#616)"
+        alternatives: ["first order, I + A·dt (#186 to #616)", "I + A·dt at the interval's mean input", "a higher-order series of A·dt"]
+        reason: "a yaw leak is Φ disagreeing with the mean it propagates. #471 found the first-order Φ the least leaky because it sat closest to the one-sample Euler mean; against the RK4 mean it leaks 7× more than before (4.4e-6 per step at 2.5 ms, the S2 sweep). The RK4 mean has the preintegration form, which commutes with a rotation about gravity, so its exact Jacobian preserves the unobservable subspace to roundoff (tests/sdk/imu_interval.cpp, the S2 bench)"
       - question: the discrete process noise Q_d
         chosen: "diagonal, σ²·dt per state"
         alternatives: ["G·Q·Gᵀ with the θ–v–p correlations (geneva2020)"]
         reason: "#212's S2 probe found the full Q_d did not change the over-confidence (docs/pipeline/stages/s2-imu-propagation.mdx)"
     deviations:
       - "no first-estimates Jacobians on Φ (FEJ, #606)"
-      - "the sample that ends each interval is held over it: a 2.5 ms IMU–camera skew, NIS 1.1–1.9 on the fast sequences (#616)"
 
   - id: augment
     stage: S3
@@ -440,7 +445,7 @@ schedule:
         - {call: track}
         - {call: initialize, when: not initialized, note: try the dynamic VI alignment}
         - {call: seed_state, when: a seed is ready, note: then return}
-        - {call: propagate, note: to the image time, on the held IMU sample}
+        - {call: propagate, note: to the image time, the last sample held (the rest of the interval follows on the next sample)}
         - {call: zero_velocity, when: at rest, note: then return; the frame adds no clone}
         - {call: msckf_update, foreach: track touching the oldest clone, when: window full}
         - {call: marginalize, when: window full}
@@ -470,7 +475,7 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "with one truth (#613, median NIS 1.03): fails 1 (2 of 66, MH_03 at 1 px), fails 2 (1.09× vs 0.97×; 0.84× vs 0.69×), fails 3 (yaw σ ratio 0.107: the yaw leak, #480)"
+    note: "with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}

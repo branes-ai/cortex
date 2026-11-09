@@ -189,13 +189,11 @@ public:
 
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& prop,
-               const Vec3& gyro,
-               const Vec3& accel,
-               T dt,
+               const sdk::msckf::ImuInterval<T>& interval,
                const St& after) override {
         enter(before);
-        if (dt > T{0}) {
-            const auto tr = prop.transition(before, gyro, accel, dt);
+        if (interval.dt > T{0}) {
+            const auto tr = prop.transition(before, interval);
             Mat F(tr.F.rows, tr.F.cols);
             for (std::size_t i = 0; i < F.d.size(); ++i)
                 F.d[i] = static_cast<double>(tr.F.d[i]);

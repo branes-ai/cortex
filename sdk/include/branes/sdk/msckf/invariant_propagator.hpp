@@ -136,35 +136,38 @@ public:
     }
 
     /// Propagate the mean (SE₂(3) strapdown) and the right-invariant covariance
-    /// P ← Φ P Φᵀ + L Lᵀ over one IMU sample. Ignores non-positive dt.
+    /// P ← Φ P Φᵀ + L Lᵀ over one IMU interval (#616). Φ's nav block does not
+    /// depend on the input; its bias lever arms are taken at the start of the
+    /// interval. Ignores non-positive dt.
+    template <class Cov>
+    void propagate(State& s, Cov& cov, const ImuInterval<T>& in) const {
+        if (!(in.dt > T{0}))
+            return;
+        const SO3& R = s.X.rotation();
+        const DynMat<T> F = phi(R, s.X.velocity(), s.X.position(), in.dt);
+        cov.predict_factor(F, noise_factor(R, s.X.velocity(), s.X.position(), in.dt));
+        propagate_mean(s, in);
+    }
+    /// The same over `dt` on one sample held constant (ImuInterval::held).
     template <class Cov>
     void propagate(State& s, Cov& cov, const Vec3& gyro, const Vec3& accel, T dt) const {
-        if (!(dt > T{0}))
-            return;
-        const SO3& R = s.X.rotation();
-        const DynMat<T> F = phi(R, s.X.velocity(), s.X.position(), dt);
-        cov.predict_factor(F, noise_factor(R, s.X.velocity(), s.X.position(), dt));
-        propagate_mean(s, gyro, accel, dt);
+        propagate(s, cov, ImuInterval<T>::held(gyro, accel, dt));
     }
 
-    /// Propagate ONLY the SE₂(3) mean (no covariance) — the same strapdown
-    /// integration as the body-frame filter (identical physics). Exposed so a
+    /// Propagate ONLY the SE₂(3) mean (no covariance) — the same RK4 strapdown
+    /// as the body-frame filter (rk4_strapdown; identical physics). Exposed so a
     /// backend that carries a joint covariance can advance the mean without
     /// touching a nav-only covariance. Ignores non-positive dt.
-    void propagate_mean(State& s, const Vec3& gyro, const Vec3& accel, T dt) const {
-        if (!(dt > T{0}))
+    void propagate_mean(State& s, const ImuInterval<T>& in) const {
+        if (!(in.dt > T{0}))
             return;
-        const Vec3 w = gyro - s.bg;
-        const Vec3 a = accel - s.ba;
-        const SO3& R = s.X.rotation();
-        const Vec3 v = s.X.velocity();
-        const Vec3 p = s.X.position();
-        const Vec3 a_world = R * a + gravity_;
-        const Vec3 p_next{{p[0] + v[0] * dt + a_world[0] * (T{1} / T{2} * dt * dt),
-                           p[1] + v[1] * dt + a_world[1] * (T{1} / T{2} * dt * dt),
-                           p[2] + v[2] * dt + a_world[2] * (T{1} / T{2} * dt * dt)}};
-        const Vec3 v_next{{v[0] + a_world[0] * dt, v[1] + a_world[1] * dt, v[2] + a_world[2] * dt}};
-        s.X = SE23(R * SO3::exp(w * dt), v_next, p_next);
+        const StrapdownMean<T> m =
+            rk4_strapdown(s.X.rotation(), s.X.velocity(), s.X.position(), s.bg, s.ba, in, gravity_);
+        s.X = SE23(m.R, m.v, m.p);
+    }
+    /// The same over `dt` on one sample held constant (ImuInterval::held).
+    void propagate_mean(State& s, const Vec3& gyro, const Vec3& accel, T dt) const {
+        propagate_mean(s, ImuInterval<T>::held(gyro, accel, dt));
     }
 
 private:

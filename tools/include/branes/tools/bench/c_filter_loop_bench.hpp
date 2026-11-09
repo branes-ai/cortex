@@ -84,13 +84,21 @@ struct CFilterLoopBench {
     struct Op {
         OpKind kind = OpKind::S2;
         std::uint64_t frame = 0;
-        s6::Vec3<T> gyro{}, accel{};  ///< S2
-        T dt{0};                      ///< S2
-        double t = 0.0;               ///< S3: the clone's time
-        std::uint64_t feature = 0;    ///< S6
-        s6::Track<T> track{};         ///< S6 (clone indices into the window at that point)
-        std::size_t index = 0;        ///< S9: the clone removed
+        s6::Vec3<T> gyro{}, accel{};    ///< S2: the sample at the start of the interval
+        s6::Vec3<T> gyro1{}, accel1{};  ///< S2: the sample at its end, unless held (#616)
+        bool held = true;               ///< S2: a constant input (pre-#616 fixtures)
+        T dt{0};                        ///< S2
+        double t = 0.0;                 ///< S3: the clone's time
+        std::uint64_t feature = 0;      ///< S6
+        s6::Track<T> track{};           ///< S6 (clone indices into the window at that point)
+        std::size_t index = 0;          ///< S9: the clone removed
     };
+
+    /// An S2 op as the S2 bench's interval sample.
+    template <class T>
+    [[nodiscard]] static S2PropagationBench::Sample<T> s2_sample(const Op<T>& o) {
+        return S2PropagationBench::Sample<T>{o.dt, o.gyro, o.accel, o.gyro1, o.accel1, o.held};
+    }
 
     template <class T>
     struct Input {
@@ -136,13 +144,19 @@ struct CFilterLoopBench {
         json ops = json::array();
         for (const auto& o : in.ops) {
             switch (o.kind) {
-            case OpKind::S2:
-                ops.push_back({{"op", "S2"},
-                               {"frame", o.frame},
-                               {"gyro", pack(o.gyro)},
-                               {"accel", pack(o.accel)},
-                               {"dt", pack(o.dt)}});
+            case OpKind::S2: {
+                json e{{"op", "S2"},
+                       {"frame", o.frame},
+                       {"gyro", pack(o.gyro)},
+                       {"accel", pack(o.accel)},
+                       {"dt", pack(o.dt)}};
+                if (!o.held) {
+                    e["gyro1"] = pack(o.gyro1);
+                    e["accel1"] = pack(o.accel1);
+                }
+                ops.push_back(std::move(e));
                 break;
+            }
             case OpKind::S3:
                 ops.push_back({{"op", "S3"}, {"frame", o.frame}, {"t", pack_num(o.t)}});
                 break;
@@ -189,6 +203,11 @@ struct CFilterLoopBench {
                 op.gyro = unpack_fixed<T, 3>(o.at("gyro"));
                 op.accel = unpack_fixed<T, 3>(o.at("accel"));
                 op.dt = unpack_scalar<T>(o.at("dt"));
+                if (o.contains("gyro1")) {
+                    op.gyro1 = unpack_fixed<T, 3>(o.at("gyro1"));
+                    op.accel1 = unpack_fixed<T, 3>(o.at("accel1"));
+                    op.held = false;
+                }
                 if (!(op.dt > T{0}))
                     throw std::invalid_argument("c_filter_loop bench: an S2 step needs dt > 0");
             } else if (kind == "S3") {
@@ -243,12 +262,12 @@ struct CFilterLoopBench {
             switch (op.kind) {
             case OpKind::S2: {
                 const auto before = s;
-                st::s2_propagation::apply(s, prop, op.gyro, op.accel, op.dt);
+                st::s2_propagation::apply(s, prop, s2_sample(op).interval());
                 out.checks.push_back({k, [before, after = s, op, noise = in.noise, gravity = in.gravity] {
                                           using B = S2PropagationBench;
                                           typename B::template Input<T> bi;
                                           bi.state = before;
-                                          bi.samples.push_back({op.dt, op.gyro, op.accel});
+                                          bi.samples.push_back(s2_sample(op));
                                           bi.noise = noise;
                                           bi.gravity = gravity;
                                           // The step's Φ and Q_d from the input; the loop's own P after.
@@ -820,19 +839,21 @@ public:
     }
     void on_s2(const St& before,
                const sdk::msckf::Propagator<T>& prop,
-               const Vec3& g,
-               const Vec3& a,
-               T dt,
+               const sdk::msckf::ImuInterval<T>& in,
                const St& after) override {
         begin(before);
         in_.noise = prop.noise();
         in_.gravity = prop.gravity();
+        const auto smp = S2PropagationBench::Sample<T>::of(in);
         typename B::template Op<T> op;
         op.kind = B::OpKind::S2;
         op.frame = next_frame_;
-        op.gyro = g;
-        op.accel = a;
-        op.dt = dt;
+        op.gyro = smp.gyro;
+        op.accel = smp.accel;
+        op.gyro1 = smp.gyro1;
+        op.accel1 = smp.accel1;
+        op.held = smp.held;
+        op.dt = smp.dt;
         in_.ops.push_back(op);
         end(after);
     }

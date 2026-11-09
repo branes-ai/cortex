@@ -1,0 +1,220 @@
+---
+title: Aligning Sensor Samples
+description: How integrating a sensor sample over an interval it does not represent becomes an unmodelled time offset, why that error hides as ground-truth error, over-confidence or a calibration problem, how cortex was caught by it for five months (#616), and a checklist for any sensor-fusion pipeline.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import Issue from '@site/components/Issue.astro';
+
+A sensor-fusion pipeline combines streams that sample the world at different times: an IMU at
+200 Hz, a camera at 20 Hz, perhaps a GNSS receiver at 10 Hz. **Every sample stands for a time.**
+A computation that uses a sample at any other time adds a skew between the streams. That skew is
+an unmodelled time offset, and its error grows with how fast the signal changes.
+
+cortex's IMU propagation did exactly this from its first version until
+<Issue id={616} />. Both VIO backends held one IMU sample constant over each 5 ms interval, and
+they held different samples. This page explains the failure mode, how it stayed hidden, how it
+was caught, and what to do in any pipeline that integrates one sensor between the samples of
+another.
+
+## What a sample stands for
+
+Before integrating a stream, write down the time each sample represents. It is not always the
+timestamp.
+
+| Sample | What it stands for | Use it as |
+|---|---|---|
+| An instantaneous rate (most MEMS gyros as delivered, a synthetic IMU) | the rate at its timestamp | one end of the interval it bounds; interpolate between samples |
+| An increment, Δθ or Δv (many tactical IMUs) | the integral over the interval that ends at its timestamp | that interval's increment, with a coning correction; never as a rate held over the next interval |
+| A filtered or decimated sample (the ADIS16448 on EuRoC's rig) | the rate a filter group delay earlier | an instantaneous rate shifted by that delay, which calibration has to find |
+| A global-shutter image | the middle of the exposure, offset from the trigger stamp | a measurement at that time, through the camera–IMU time offset t_d |
+| A rolling-shutter image | a different time on each row | per-row times, or a model of the readout |
+
+When two devices are synchronized in hardware, as on EuRoC, the clock is right but the meaning of
+each sample can still be off by a fraction of its interval.
+
+## How a hold becomes a skew
+
+An IMU interval [t₍ₖ₋₁₎, tₖ] of length Δt has a sample at each end. Propagation has to choose
+an input over the interval, and each choice implies a time:
+
+| Input over the interval | Equivalent to | Who did it in cortex |
+|---|---|---|
+| The end sample, held | the IMU read Δt/2 **early** | `MsckfBackend`, <Issue id={186} /> to <Issue id={616} /> |
+| The start sample, held | the IMU read Δt/2 **late** | `InvariantVioBackend`, <Issue id={608} /> to <Issue id={616} /> |
+| The line between the two samples | no skew to first order | both backends since <Issue id={616} />; OpenVINS |
+
+At 200 Hz, Δt/2 is 2.5 ms. Holding the end sample integrates ∫ω dt as ω(t_k)·Δt, which is
+ω(t_mid)·Δt + ω̇·Δt²/2. Summed over a window, the rotation error is the change in rate over the
+window times the skew: **δθ ≈ Δω · Δt/2**. EuRoC's fast sequences roll and pitch at up to
+1.3 rad/s (the 95th percentile). On a test flight at that rate the rate changes by about 1.2 rad/s
+across a 0.55 s clone window, and the error reaches 3.1 mrad: 1.4 px at cam0's focal length, 28×
+what the camera resolves. The camera then measures the attitude far more precisely than
+propagation delivers it.
+
+The integrator adds a second, separate error. A single Euler step rotates the specific force with
+the attitude at the *start* of the interval. With the body turning at 1.3 rad/s, that rotation is
+2.5 ms stale on average too, and it shows up as a first-order drift in velocity and position.
+Centring the input doesn't fix it; integrating along the interval does.
+
+## Why it hides
+
+A half-sample skew rarely looks like itself. In cortex it appeared as four other things:
+
+- **Ground-truth error.** EuRoC's Vicon ground truth disagrees with the gyro by 0.25–0.45 px over
+  0.25 s in the Vicon rooms. The skew sits at the same size, so a consistency test against the real
+  IMU can't tell the two apart (<Issue id={613} />).
+- **A calibration problem.** A constant skew between IMU and camera is exactly what the
+  camera–IMU time offset t_d models. An online t_d estimator (<Issue id={332} />) would have learned
+  a backend-specific 2.5 ms, and the defect would have looked calibrated away.
+- **Over-confidence.** NIS was 1.02–1.04 on the slow Machine Hall sequences but 1.1–1.9 on V1_03,
+  V2_02 and V2_03, which turn 3.5–4× faster. The over-confidence investigation of
+  <Issue id={212} /> had a dozen candidates, and a speed-dependent NIS fits several of them.
+- **Nothing at all.** The error scales with angular *acceleration*. The synthetic test world only
+  yaws, gently, so it never excited the error, and every unit test of S2 passed.
+
+<Aside type="caution" title="The tell">
+  An error that grows with how fast the signal *changes*, and is small on slow segments, points at
+  timing before it points at noise models. Split NIS, NEES and the closure error by motion speed
+  before tuning anything.
+</Aside>
+
+## How cortex was caught
+
+| When | What happened | Issue |
+|---|---|---|
+| 2026-05 | The MSCKF backend was built in a day from the standard error-state EKF derivation. The one-sample Euler step is the first thing those texts derive. The driver passes each interval the sample that ends it. | <Issue id={186} /> |
+| 2026-06 | The S0–S10 stage contracts state that OpenVINS integrates "with a zeroth-order hold or RK4". The S2 probe went after the covariance suspects of #212 (the diagonal Q_d, the structure of Φ) and cleared S2. The mean was never checked against a continuous truth at the real rate. | <Issue id={212} />, <Issue id={283} /> |
+| 2026-06 | The same S2 probe measured the mean against ground-truth injection and recorded "integrator order O(Δt): the error halves with Δt, 59 → 30 → 15 → 7 mm". First order is the defect itself. It went into a metrics table with no bound, so nothing failed. | <Issue id={283} /> |
+| 2026-10 | "A more accurate Φ makes the yaw leak worse" (#471) came to read as "a higher-order S2 doesn't help". The lesson was about the covariance, not the mean. | <Issue id={471} /> |
+| 2026-11 | The R-IEKF backend got its own driver, which holds the *previous* sample. The two backends now disagreed by 5 ms. | <Issue id={608} /> |
+| 2026-11 | The consistency gate was rebuilt on one smooth truth: a B-spline through the ground truth feeds the synthesized IMU, the ideal tracks and the score, so R and Q are exact. NIS was 1.00 on the slow sequences and 1.1–1.9 on the fast ones. | <Issue id={613} /> |
+| 2026-11 | Probes changed one thing at a time (below). Only centring the input removed the excess. | <Issue id={616} /> |
+
+The probes ran on the MSCKF on #613's exact truth, at 0.5 px with matched R:
+
+| S2 variant | V2_03 4-DoF ATE | V2_03 NIS | MH_01 NIS |
+|---|---|---|---|
+| shipped before #616: end sample held, start attitude | 0.19–0.24 m | 1.77–1.80 | 1.03 |
+| specific force rotated at the midpoint attitude | 0.18–0.21 m | 1.76–1.80 | 1.03 |
+| 5 substeps on the same held sample | 0.19–0.23 m | 1.79–1.80 | — |
+| **the average of the interval's two samples** | **0.013–0.018 m** | **1.00** | **1.00** |
+| IMU synthesized at 1 kHz, shipped S2 | 0.03 m | 1.02 | — |
+
+Substeps didn't help, so the integrator's order wasn't the cause. The attitude the specific force
+is rotated with didn't help either. The cause was the input: a sample held over an interval it
+doesn't represent.
+
+### The test that blessed the defect
+
+While building #613's gate, I wrote an S2 closure test: integrate the spline's own noise-free IMU
+and compare with the spline. It measured S2's error, saw that the error halved when the step
+halved, and called it "discretization, not a disagreement". I set its threshold just above what
+S2 achieved. The test was reporting a first-order defect at 28× what the camera resolves, and I
+signed it off, because I took its tolerance from the code's current residual rather than from what
+the next stage has to resolve.
+
+This was the fifth result in cortex's VIO work that came from the test setup rather than the
+estimator ([Chapter 5](storyline.mdx#chapter-5-when-the-test-lies)). It produced two rules in the
+[paper-to-pipeline method](../methodology/overview.mdx) (<Issue id={617} />):
+
+- **Every option the paper offers is a recorded decision with a reason.** "Zeroth-order hold or
+  RK4" named the choice, but nobody made it, and two drivers made it differently by default.
+- **Every tolerance comes from what the consuming stage must resolve.** The closure bound is a
+  tenth of the 0.5 px track noise over a clone window: 1.09e-4 rad, and 0.22 mm at a 2 m depth.
+
+## What fixed it
+
+Both backends now integrate each interval from both of its samples, with one convention stated in
+`sdk/include/branes/sdk/msckf/stages/s2_propagation.hpp`:
+
+- **The input** is the line between the two samples.
+- **The mean** is RK4 on that input (`rk4_strapdown` in `propagator.hpp`). With a rate linear in
+  time, the attitude has a closed form: the rate's integral plus the coning term. Velocity and
+  position are then quadratures, evaluated at the start, middle and end of the interval.
+- **The covariance** propagates with Φ, the exact Jacobian of that mean. The first-order Φ had
+  been chosen (#471) because it agreed best with the old Euler mean. Against the RK4 mean it leaked
+  7× more yaw per step, so Φ had to follow the mean. Now it preserves the unobservable directions
+  to roundoff.
+- **An image between two samples:** propagate to the image time holding the last sample, since the
+  next one hasn't arrived. When it does, integrate the rest of the interval from the rate
+  interpolated at the image time. The residual skew lives only on that partial interval, and is
+  zero on EuRoC, where image and IMU stamps coincide.
+
+The closure test (`tests/tools/gt_spline.cpp`) separates the two errors, on a flight that rolls
+and pitches at about 1.3 rad/s, against the camera-derived bound:
+
+| Scheme | Rotation ÷ bound (200 Hz) | Position ÷ bound | Order |
+|---|---|---|---|
+| End sample held, one Euler step (MSCKF before #616) | 28.6 | 41 | first |
+| Start sample held, one Euler step (R-IEKF before #616) | 28.0 | 6.9 | first |
+| The two samples' average, one Euler step | 0.28 | 24 | first, in position |
+| The two samples' average, RK4 | 0.28 | 0.16 | second |
+| **The line between the samples, RK4 (shipped)** | **0.27** | **0.10** | **second** |
+
+Centring the input fixes the rotation. Integrating along the interval fixes the position. The
+order is second, not fourth: RK4 integrates the line exactly enough, but the line follows the true
+rate only to second order between samples, and that is the error that remains, a quarter of the
+bound.
+
+## What it changed
+
+On the consistency gate's spline truth, where R and Q are exact (recorded at f1551cc,
+[EuRoC Baseline](../benchmarks/euroc-baseline.mdx#results-with-one-truth-and-s2-integrating-both-samples-616)):
+
+| | MSCKF before → after | R-IEKF before → after |
+|---|---|---|
+| NIS on V1_03, V2_02, V2_03 (0.5 px) | 1.23–1.80 → **1.00** | 1.30–1.87 → **1.00** |
+| V2_03 window ATE ÷ OpenVINS mono (0.5 px) | 0.9× → **0.1×** | 1.4× → **0.1×** |
+| Matched R beats the default R (condition 2) | fail → **pass** | fail at 1 px → **pass** |
+| S2's share of the spurious yaw information, real EuRoC MH_05 / V2_03 (observability ledger, #480) | 0.9% / 5.3% → **0.0%** | — (no leak by construction) |
+
+On the real EuRoC IMU and the real KLT tracks the gain is much smaller: the median
+window ATE goes from 2.83× to 2.57× OpenVINS mono for the MSCKF and from 2.62× to
+2.44× for the R-IEKF, and the R-IEKF's V1_03 halves. **The real-data NIS doesn't
+move:** it stays at 6.7–15.5 on the same fast sequences where the spline truth went
+to 1.00. So the half-sample skew was real and is gone, but it isn't what makes the
+filters over-confident on real data. That remains open, and the candidates are the
+ones this page warns about: the ADIS16448's own filter delay, the camera–IMU time
+offset, and the front end's outliers. The last item of the checklist below is not
+hypothetical.
+
+## A checklist for any fusion pipeline
+
+1. **Write down what time each sample stands for**: instantaneous, an increment over the past
+   interval, delayed by a filter, the middle of an exposure. Put it in the stage contract.
+2. **State one integration convention, and use it everywhere.** Say what input the integrator sees
+   over an interval, and what happens to an event between two samples. Two implementations of the
+   same stage must not choose differently by default.
+3. **Interpolate between samples; never hold one over an interval it doesn't represent.** An
+   increment sample is already its interval's integral: use it as one.
+4. **Integrate along the interval.** Rotate the specific force with the attitude at each point of
+   the interval, not the attitude at its start.
+5. **Re-derive the covariance from the new mean.** A transition matrix chosen because it agreed
+   with the old integrator disagrees with the new one, and the disagreement is an information
+   leak. Take Φ as the exact Jacobian of the mean you ship, and check it against finite differences.
+6. **Test against a continuous truth at the real rate and the real dynamics.** Integrate a smooth
+   trajectory's own noise-free samples and close on the trajectory. Take the bound from what the
+   next measurement resolves, check the convergence order, and pin the alternative you rejected as
+   failing.
+7. **Excite the error.** It scales with angular acceleration times the skew, so test on the
+   fastest segments, not only on a gentle synthetic world.
+8. **Split the consistency metrics by motion speed.** An NIS that rises with speed points at
+   timing before it points at noise.
+9. **Sweep the skew.** Shift one stream by fractions of its interval and watch NIS. The minimum is
+   the effective offset the pipeline is running with.
+10. **Fix the convention before estimating t_d.** An online time-offset state absorbs any constant
+   skew, including a software one, and then the calibration carries the bug.
+11. **Don't assume synthetic gains carry over.** A real IMU's internal filtering adds its own
+    delay, and the dataset's calibration has its own time shift; measure the change on real data.
+
+## Where it lives
+
+| What | Where |
+|---|---|
+| The convention | `sdk/include/branes/sdk/msckf/stages/s2_propagation.hpp` |
+| `ImuInterval`, `interpolate_sample`, `rk4_strapdown` | `sdk/include/branes/sdk/msckf/propagator.hpp` |
+| Both drivers | `MsckfBackend::process_imu` / `process_camera`, `InvariantVioBackend::process_imu` / `propagate_to` |
+| The closure tests | `tests/tools/gt_spline.cpp` |
+| The decisions and their reasons | the `propagate` node of the [OpenVINS MSCKF spec](../methodology/openvins-msckf.mdx) |
+| The stage page | [S2 — IMU Propagation](../pipeline/stages/s2-imu-propagation.mdx) |

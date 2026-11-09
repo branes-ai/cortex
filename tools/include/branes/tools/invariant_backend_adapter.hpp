@@ -300,7 +300,7 @@ private:
         const auto G = sdk::msckf::mul(body_to_invariant_jacobian<T>(s.R, s.v, s.p), L);
         const SE23 X(s.R, s.v, s.p);
         if (have_imu_)
-            impl_.set_nav(X, s.bg, s.ba, s.timestamp, hold_gyro_, hold_accel_);
+            impl_.set_nav(X, s.bg, s.ba, s.timestamp, hold_gyro_, hold_accel_, last_imu_t_);
         else
             impl_.set_nav(X, s.bg, s.ba, s.timestamp);
         impl_.seed_covariance(G);

@@ -1,6 +1,6 @@
 ---
 title: S2 — IMU Propagation
-description: Predicting the mean and covariance forward between images — the Φ/Q_d covariance propagation, and the measured verdict that its diagonal-Q simplification is a minor, cleared #212 candidate.
+description: Predicting the mean and covariance forward between images — the Φ/Q_d covariance propagation and its cleared diagonal-Q candidate, and the half-sample skew in the mean that the probe measured but did not catch (#616).
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -14,8 +14,10 @@ for the [#212 over-confidence](../engineering-status.mdx) — and the probe
 
 ## What it does
 
-- **Mean** — debias the IMU sample, then strapdown-integrate `R, v, p` (zeroth-order
-  hold or RK4).
+- **Mean** — integrate each IMU interval from **both** of its samples: debias, interpolate
+  the input linearly between the samples at t₍ₖ₋₁₎ and tₖ, and integrate `R, v, p` by RK4
+  (#616). An image between two samples is reached by holding the last sample; the next sample
+  integrates the rest of its interval from the rate interpolated at the image time.
 - **Covariance** — `P⁻_{k+1} = Φ P⁺_k Φᵀ + Q_d`. The transition matrix `Φ` carries
   the **off-diagonal skew blocks** coupling orientation error into velocity and
   position error — gravity leakage living inside the covariance. The discrete noise
@@ -38,8 +40,8 @@ to measure it against a canonical reference.
 |---|---|
 | **Signature** | `propagate(x⁻, P⁻, imu[t_k, t_{k+1}]) → (x⁻_{k+1}, P⁻_{k+1})` |
 | **Pre** | `Δt > 0`, monotonic timestamps; measurements debiased; `P⁺_k` symmetric PSD |
-| **Post / invariants** | `R ∈ SO(3)` (orthonormal, det 1) · `P⁻` symmetric PSD · `Q_d` PSD with `θ–v–p` cross-correlations · the 4-D unobservable subspace (global position + yaw) stays in the propagation null space · GT-injection: zero-noise propagation reproduces the GT trajectory within integration tolerance |
-| **cortex** | `msckf/propagator.hpp` (Φ assembly, Q, FEJ) |
+| **Post / invariants** | `R ∈ SO(3)` (orthonormal, det 1) · `P⁻` symmetric PSD · `Q_d` PSD with `θ–v–p` cross-correlations · the 4-D unobservable subspace (global position + yaw) stays in the propagation null space · GT-injection: zero-noise propagation closes on a continuous truth over a clone window within what the camera resolves (1.09e-4 rad, 0.22 mm at 2 m), at second order |
+| **cortex** | `msckf/stages/s2_propagation.hpp` (the convention), `msckf/propagator.hpp` (`ImuInterval`, `rk4_strapdown`, Φ, Q) |
 
 ## Metrics
 
@@ -55,7 +57,16 @@ on the synthetic world.
 | `R` orthonormality `‖RᵀR − I‖` @0.5 s | 2.2e-16 — **pass** |
 | `P` min-eigenvalue @0.5 s | > 0 — **PSD** |
 | global-position nullspace leak | 0 — **preserved** |
-| GT-injection integrator order | O(Δt) (error halves with Δt: 59→30→15→7 mm @ 50→800 Hz) |
+| GT-injection integrator order | O(Δt) (error halves with Δt: 59→30→15→7 mm @ 50→800 Hz) — **this was #616's defect**, see below |
+
+<Aside type="caution" title="The row that should have failed">
+  First order means the error halves with the step. For an integrator that should be second order
+  or better, that is a defect, not a property: each interval held one sample constant, the one
+  that ends it, which integrates the IMU half a sample (2.5 ms) early against the camera. The probe
+  measured it in June 2026 and recorded it as a metric with no bound, so nothing failed. It was
+  found in November by the consistency gate's spline truth (#613), and fixed in #616. The full
+  account is [Aligning Sensor Samples](../../first-principles/sample-alignment.mdx).
+</Aside>
 
 ### The diagonal-Q deficit — real, but small
 
@@ -120,7 +131,40 @@ This is the real-data check on the synthetic finding below: on EuRoC the envelop
 covers the inter-frame drift, confirming propagation is essentially honest on its
 own — the #212 over-confidence enters elsewhere.
 
-<Aside type="tip" title="Status — cleared (with a small fix outstanding)">
+## The mean: integrating from both samples (#616)
+
+The probe above cleared S2's **covariance**. Its **mean** carried a defect the probe measured and
+nobody bounded. Both backends held one IMU sample over each 5 ms interval, and they held different
+ones: `MsckfBackend` the sample that ends the interval, `InvariantVioBackend` the one that starts
+it. Either is a half-sample (2.5 ms) skew between IMU and camera. On the EuRoC consistency gate,
+with exact R and Q from one spline truth, NIS was 1.00 on the slow sequences and 1.1–1.9 on the
+fast ones (V1_03, V2_02, V2_03).
+
+The closure test (`tests/tools/gt_spline.cpp`) integrates a spline's own noise-free IMU over a
+0.55 s clone window on a flight that rolls and pitches at about 1.3 rad/s, against what the camera
+resolves (a tenth of 0.5 px: 1.09e-4 rad, 0.22 mm at 2 m):
+
+| Scheme | Rotation ÷ bound | Position ÷ bound | Order |
+|---|---|---|---|
+| End sample held, Euler (MSCKF before #616) | 28.6 | 41 | first |
+| Start sample held, Euler (R-IEKF before #616) | 28.0 | 6.9 | first |
+| The two samples' average, Euler | 0.28 | 24 | first in position |
+| **The line between the samples, RK4 (shipped)** | **0.27** | **0.10** | **second** |
+
+Centring the input removes the rotation error. The position error is the integrator's: an Euler
+step rotates the specific force with the attitude at the start of the interval. RK4 rotates it
+along the interval.
+
+**Φ followed the mean.** #471 found that a higher-order Φ leaks more yaw than the first-order
+I + A·Δt. That was true against the one-sample Euler mean, which the first-order Φ approximately
+linearizes. Against the RK4 mean the first-order Φ leaks 7× more than it used to (4.4e-6 per step
+at 2.5 ms, from 6.0e-7), so the lesson was about the agreement between Φ and the mean, not about
+truncation. The RK4 mean has the preintegration form R′ = R·ΔR, v′ = v + gΔt + R·Δv,
+p′ = p + vΔt + ½gΔt² + R·Δp, which a rotation about gravity commutes with. Φ is now that mean's
+exact Jacobian, and it preserves the whole unobservable subspace, yaw included, to roundoff
+(`tests/sdk/imu_interval.cpp` checks it against finite differences).
+
+<Aside type="tip" title="Status — covariance cleared; mean fixed in #616">
   S2 is **not** a primary source of the #212 over-confidence. The diagonal-`Q`
   simplification is real but costs &lt;1% of position-σ over a frame, every
   structural invariant passes, and propagation-only NEES is consistent at the
