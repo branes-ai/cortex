@@ -172,6 +172,24 @@ TEST_CASE("gt spline: S2 closure, averaging each interval's two samples, holds t
     CHECK(rot / rot2 > 3.5);  // second order: a quarter at half the step
 }
 
+// What the shipped S2 does today (#616), pinned so the tripwire below can only
+// turn green because S2 changed: [!shouldfail] passes on any failing check, so
+// this case asserts the specific miss. On the fast flight the end-sample hold
+// misses the rotation bound by about 28x and converges at first order (the
+// error halves with the step). When #616 fixes S2 this case fails, and both it
+// and the tripwire's tag must be updated together.
+TEST_CASE("gt spline: S2 closure, the shipped S2 misses the rotation bound at first order (#616)",
+          "[tools][gt_spline]") {
+    const Spline s(fast_sampled(), 0.05);
+    const auto [rot, pos] = closure(s, 200.0, Hold::end_sample);
+    const auto [rot2, pos2] = closure(s, 400.0, Hold::end_sample);
+    CAPTURE(rot, rot2, pos, pos2, kRotBound);
+    CHECK(rot > 20.0 * kRotBound);
+    CHECK(rot < 40.0 * kRotBound);
+    CHECK(rot / rot2 > 1.8);
+    CHECK(rot / rot2 < 2.2);
+}
+
 // A tripwire for #616: the shipped S2, fed each interval the sample that ends
 // it as MsckfBackend does, must close within what the camera resolves, at
 // second order or better. Today it misses the rotation bound 28x (a sample held

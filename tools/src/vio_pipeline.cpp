@@ -828,13 +828,39 @@ void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
 // --truth. The IMU noise is seeded from the track seed but drawn separately.
 constexpr double kTruthKnotS = 0.05;  ///< spline knot interval: smooths Vicon jitter, keeps the motion
 
-void use_spline_truth(const Args& args,
+static_assert(branes::tools::kImuNoiseSeedSalt != branes::tools::kTrackNoiseSeedSalt,
+              "the IMU and track noise must come from independent streams");
+
+void spline_truth(const Args& args,
+                  const VioConfig& cfg,
+                  std::vector<ImuMeasurement<T>>& imu,
+                  const std::vector<euroc::ImageEntry>& images,
+                  std::vector<ev::StampedPose<T>>& gt);
+
+// Returns false, after printing why, when the ground truth cannot carry a
+// spline (shorter than four knots, or a gap longer than a knot interval) or
+// the IMU timestamps are not increasing.
+bool use_spline_truth(const Args& args,
                       const VioConfig& cfg,
                       std::vector<ImuMeasurement<T>>& imu,
                       const std::vector<euroc::ImageEntry>& images,
                       std::vector<ev::StampedPose<T>>& gt) {
     if (!args.gt_imu)
-        return;
+        return true;
+    try {
+        spline_truth(args, cfg, imu, images, gt);
+    } catch (const std::exception& e) {
+        std::cout << "  --imu gt: cannot build the spline truth from '" << args.dataset << "': " << e.what() << "\n";
+        return false;
+    }
+    return true;
+}
+
+void spline_truth(const Args& args,
+                  const VioConfig& cfg,
+                  std::vector<ImuMeasurement<T>>& imu,
+                  const std::vector<euroc::ImageEntry>& images,
+                  std::vector<ev::StampedPose<T>>& gt) {
     const branes::tools::PoseSpline<T> spline(gt, kTruthKnotS);
     std::vector<double> imu_t;
     imu_t.reserve(imu.size());
@@ -846,7 +872,8 @@ void use_spline_truth(const Args& args,
     o.gyro_bias_random_walk = cfg.gyro_bias_random_walk;
     o.accel_bias_random_walk = cfg.accel_bias_random_walk;
     o.gravity_magnitude = cfg.gravity_magnitude;
-    o.seed = 0x9E3779B97F4A7C15ULL ^ args.ideal.seed;  // independent of the track noise's stream
+    o.seed =
+        args.ideal.seed ^ branes::tools::kImuNoiseSeedSalt;  // independent of the track noise (static_assert above)
     imu = branes::tools::synthesize_imu<T>(spline, imu_t, o);
     // The truth at every ground-truth stamp and image time it covers.
     std::vector<double> truth_t;
@@ -896,7 +923,8 @@ bool run_euroc(const Args& args,
                   << " IMU). Skipping.\n";
         return false;
     }
-    use_spline_truth(args, cfg, imu, images, gt);
+    if (!use_spline_truth(args, cfg, imu, images, gt))
+        return false;
 
     const auto cam0 = euroc_cam0();
     typename Backend::CameraCalibration cal;
@@ -1017,7 +1045,8 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         std::cout << "  EuRoC streams empty at '" << args.dataset << "'. Skipping.\n";
         return false;
     }
-    use_spline_truth(args, cfg, imu, images, gt);
+    if (!use_spline_truth(args, cfg, imu, images, gt))
+        return false;
 
     const auto cam0 = euroc_cam0();
     Estimator est(Adapter(cam0.intrinsics, cam0.R_imu_cam, cam0.p_imu_cam, args.riekf), frontend_of(args));

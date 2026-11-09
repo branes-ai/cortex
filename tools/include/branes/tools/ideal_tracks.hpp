@@ -64,6 +64,11 @@ struct IdealTrackOptions {
     std::uint64_t seed = 1;
 };
 
+/// Salt for the pixel-noise stream: seeded seed ^ salt, apart from the landmark
+/// geometry's stream. A consumer drawing other noise for the same run (the
+/// synthesized IMU, gt_spline.hpp) must use a different salt (#613).
+inline constexpr std::uint64_t kTrackNoiseSeedSalt = 0x9E3779B97F4A7C15ULL;
+
 template <class T>
 class IdealTracks {
 public:
@@ -74,7 +79,7 @@ public:
                 const math::lie::SE3<T>& T_imu_cam,
                 const IdealTrackOptions& opt = {})
         : gt_(std::move(gt)), cam_(camera), T_imu_cam_(T_imu_cam), opt_(opt), rng_(opt.seed),
-          noise_rng_(opt.seed ^ 0x9E3779B97F4A7C15ULL) {}
+          noise_rng_(opt.seed ^ kTrackNoiseSeedSalt) {}
 
     /// The observations at image stamp `t_s`: empty where the ground truth does
     /// not cover `t_s`.

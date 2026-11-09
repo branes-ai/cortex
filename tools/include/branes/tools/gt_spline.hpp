@@ -181,6 +181,11 @@ private:
     std::vector<Vec3> phi_;
 };
 
+/// Salt for the synthesized IMU's noise stream in a run whose ideal tracks
+/// share its seed: different from IdealTracks' kTrackNoiseSeedSalt, so the two
+/// noises are drawn from independent streams (#613).
+inline constexpr std::uint64_t kImuNoiseSeedSalt = 0xD1B54A32D192ED03ULL;
+
 /// The IMU's noise model, as VioConfig states it (continuous-time densities).
 struct ImuSynthesisOptions {
     double gyro_noise_density = 0.0;      ///< rad/s/√Hz
