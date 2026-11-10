@@ -74,10 +74,9 @@ nodes:
     tests:
       - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: the body-to-invariant map matches the exact error"}
       - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: initializes through the shipped MSCKF with its seed"}
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: the seed's tilt-bias correlation reaches the invariant prior"}
     status: implemented
-    note: "#608"
-    deviations:
-      - "the base's prior is itself an isotropic σ = 0.1 with no tilt-bias correlation (#609); this node maps it faithfully"
+    note: "#608; since #609 the base's prior correlates tilt and accelerometer bias, and J carries the correlation (δθ_world = R̂·δθ_body, b_a unchanged)"
 
   - id: propagate
     op: replace

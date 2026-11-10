@@ -71,7 +71,7 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 - *Post:* the mean equals the seed; P₀ = J·P_body·Jᵀ, positive-definite; the IMU sample in effect at the seed time is held, so propagation resumes at the seed time
 - *Test:* `tests/tools/invariant_backend_adapter.cpp` “invariant adapter: the body-to-invariant map matches the exact error…”
 - *Test:* `tests/tools/invariant_backend_adapter.cpp` “invariant adapter: initializes through the shipped MSCKF with its seed…”
-- *Deviates from the paper:* the base's prior is itself an isotropic σ = 0.1 with no tilt-bias correlation (#609); this node maps it faithfully
+- *Test:* `tests/tools/invariant_backend_adapter.cpp` “invariant adapter: the seed's tilt-bias correlation reaches the invariant prior…”
 
 **propagate** (S2, Invariant IMU propagation)
 
@@ -128,14 +128,13 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 | **CameraCalib** | input | intrinsics (fx, fy, cx, cy), radtan distortion, camera↔IMU extrinsic (R_imu_cam, p_imu_cam) | `math/include/branes/math/cameras/pinhole_radtan.hpp` `PinholeRadtanCamera` | ✓ R_imu_cam ∈ SO(3); ✓ intrinsics positive, principal point inside the image |
 | **NormalizedObs** | data | feature id, camera id, normalized image point (x, y) | `sdk/include/branes/sdk/msckf/stages/s0_sensor_model.hpp` `Result` | ✗ finite, and the ray is in front of the camera (z &gt; 0) |
 | **TrackDB** | data | feature id → [(clone time, normalized observation)], plus the tracks that ended this frame | `sdk/include/branes/sdk/msckf/stages/s4_frontend.hpp` `TrackTable` | ✗ every observation's clone time is a live clone, or the observation is purged; ✓ points inside the image; ✓ track length at most the clone window |
-| **NavSeed** | data | R, v, p, b_g, b_a, the time, and the prior P₀ in the filter's error convention | `sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp` `seed_from_imu` | ✓ gravity sign and magnitude; ✓ P₀ symmetric positive-definite; ✗ P₀ states what the init window does and does not determine (tilt-bias correlation) |
+| **NavSeed** | data | R, v, p, b_g, b_a, the time, and the prior P₀ in the filter's error convention | `sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp` `seed_from_imu` | ✓ gravity sign and magnitude; ✓ P₀ symmetric positive-definite; ✓ P₀ states what the init window does and does not determine (tilt-bias correlation) |
 | **FilterState** | state | nav on SE₂(3) with additive biases (θ, ν, ρ, b_g, b_a: 15), clones (θ, ρ: 6 each) in the same right-invariant error, the joint covariance P | `sdk/include/branes/sdk/msckf/invariant_propagator.hpp` `InvariantNavState` | ✓ P symmetric; ✓ P positive semidefinite; ✓ R and every clone rotation ∈ SO(3); ✗ every Jacobian and retraction uses R = Exp(δθ)·R̂, v = Exp(δθ)·v̂ + ν, p = Exp(δθ)·p̂ + ρ |
 | **Landmark** | data | feature position p_f (world), the triangulation's parallax and conditioning | `sdk/include/branes/sdk/msckf/stages/s5_triangulation.hpp` `Result` | ✓ positive depth in every observing camera; ✓ normal-matrix condition number reported |
 | **UpdateDiag** | output | NIS, dof, the gate verdict, and where a rejected track stopped | `sdk/include/branes/sdk/msckf/stages/s6_msckf_update.hpp` `Result` | ✓ NIS ~ χ²(dof) over windows (bound χ²₁₋α(dof) per update, α = 0.05, from what **msckf_update** resolves: the S6d gate rejects above it, so a consistent filter loses α of its inliers and no more) |
 
 - **ImageFrame** precision: integer pixels; no arithmetic-type choice
 - **NormalizedObs** precision: the narrowest edge that keeps sub-pixel accuracy; float holds (#532)
-- **NavSeed** deviates from the paper: P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
 - **FilterState** precision: stored in double; the Joseph form on EuRoC (the square-root form diverges there)
 
 ## Schedule
@@ -175,7 +174,7 @@ on image (20 Hz):
 ## Changes from the base
 
 - replace edge **FilterState**: the error convention changes; every consumer is revisited below
-- replace node **seed_state**: #608
+- replace node **seed_state**: #608; since #609 the base's prior correlates tilt and accelerometer bias, and J carries the correlation (δθ_world = R̂·δθ_body, b_a unchanged)
 - replace node **propagate**
 - replace node **augment**
 - replace node **triangulate**
@@ -187,20 +186,17 @@ on image (20 Hz):
 
 ## Gap report
 
-What `pipeline_graph.py gaps` reports for this spec (22 items):
+What `pipeline_graph.py gaps` reports for this spec (19 items):
 
 - edge 'ImageFrame': no validator for "t increasing and inside the IMU span"
 - edge 'ImageFrame': no validator for "the image matches the calibration's resolution"
 - edge 'NormalizedObs': no validator for "finite, and the ray is in front of the camera (z &gt; 0)"
 - edge 'TrackDB': no validator for "every observation's clone time is a live clone, or the observation is purged"
-- edge 'NavSeed': no validator for "P₀ states what the init window does and does not determine (tilt-bias correlation)"
-- edge 'NavSeed': deviates from the paper: P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
 - edge 'FilterState': no validator for "every Jacobian and retraction uses R = Exp(δθ)·R̂, v = Exp(δθ)·v̂ + ν, p = Exp(δθ)·p̂ + ρ"
 - node 'track': deviates from the paper: no RANSAC outlier rejection in the front end; the S6d gate carries it
 - node 'track': deviates from the paper: the shipped default churns (&gt;50% of new tracks lost on their first frame); the border margin is opt-in (#474, #574)
 - node 'initialize': deviates from the paper: the dynamic path is excitation-limited on EuRoC and has open SfM defects (#254, #499–#501)
 - node 'seed_state': no stage bench
-- node 'seed_state': deviates from the paper: the base's prior is itself an isotropic σ = 0.1 with no tilt-bias correlation (#609); this node maps it faithfully
 - node 'augment': no stage bench
 - node 'triangulate': no stage bench
 - node 'msckf_update': no stage bench

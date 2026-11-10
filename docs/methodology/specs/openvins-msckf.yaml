@@ -99,8 +99,7 @@ edges:
       - text: P₀ symmetric positive-definite
         check: {file: sdk/include/branes/sdk/eval/invariants/matrix_checks.hpp, symbol: check_spd}
       - text: P₀ states what the init window does and does not determine (tilt-bias correlation)
-    deviations:
-      - P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
+        check: {file: tests/sdk/tilt_bias_prior.cpp, case: "S1 prior: P0 covers a static seed's tilt and bias error (NEES 5)"}
 
   - id: FilterState
     kind: state
@@ -227,15 +226,35 @@ nodes:
       - "P₀ symmetric positive-definite, in the error convention every later node assumes"
     code: sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp
     bench: {file: tests/tools/stage_bench_s0_s1.cpp, case: "S1 bench: static paths pass every fixture"}
+    deviations:
+      - "the S1 bench seeds the mean with the isotropic P₀: its windows carry no duration for the #609 prior, which tests/sdk/tilt_bias_prior.cpp checks"
     tests:
       - {file: tests/sdk/msckf_backend.cpp, case: "the backend initializes attitude from a stationary window"}
+      - {file: tests/sdk/tilt_bias_prior.cpp, case: "S1 prior: P0 is the closed-form tilt-bias block about the seed's up"}
+      - {file: tests/sdk/tilt_bias_prior.cpp, case: "S1 prior: P0 covers a static seed's tilt and bias error (NEES 5)"}
+      - {file: tests/sdk/tilt_bias_prior.cpp, case: "MSCKF backend: a 0.5 m/s^2 accelerometer bias is learned once the motion rotates"}
     status: implemented
-    deviations:
-      - the prior is an isotropic σ = 0.1 with no tilt-bias correlation, whatever the init method (#609)
     decisions:
-      - question: the prior P₀
-        chosen: "isotropic σ = 0.1 on every core state"
-        alternatives: ["the tilt–accelerometer-bias correlation an IMU window implies (#609)"]
+      - question: the attitude and accelerometer-bias blocks of P₀ on a static or gravity-aligned seed
+        chosen: "the block the window implies (#609): P_θθ = (σ_ba² + σ_f²)/g²·(I − ûûᵀ) + σ_ψ²ûûᵀ, P_θb = σ_ba²/g·[û]ₓ, P_bb = σ_ba²(I − ûûᵀ) + σ_∥²ûûᵀ (stages::s1_initialization::TiltBiasPrior)"
+        alternatives: ["isotropic σ = 0.1 on every core state, uncorrelated (to #609)", "a tilt σ of σ_ba/g without the correlation"]
+        reason: "the window measures f̄ = g·u + b_a once, so a seed that takes û from f̄ with b_a = 0 knows the tilt and the horizontal bias only as one sum, δθ⊥ = [û]ₓ(b_a + n̄)/g. The isotropic prior put 99% of that sum in tilt (0.1 rad of tilt is 1 m/s² of gravity, against 0.1 m/s² of bias), so the filter never learned EuRoC's bias and stayed tilted 2.7° on V1_01. Without the correlation the prior would claim the tilt and bias independent, which the seed is not"
+      - question: σ_ba, the accelerometer-bias prior
+        chosen: "0.2 m/s² per axis (VioConfig::accel_bias_prior_sigma)"
+        alternatives: ["0.1 (the isotropic value to #609)", "a datasheet turn-on bias"]
+        reason: "EuRoC's ground-truth bias reaches 0.55 m/s² (V1_01 y) and is 0.09–0.20 elsewhere; 0.2 puts the largest inside 3σ. The tilt σ that follows is 0.2/g = 1.2°"
+      - question: σ_f, the error of the window's mean specific force
+        chosen: "static: the larger of the sample scatter over √N and σ_a/√(window); gravity-aligned: that plus the per-sample scatter and (|f̄| − g)², since a moving window's mean includes an acceleration nothing measures"
+        alternatives: ["the white-noise model alone", "zero"]
+        reason: "it bounds how well the window resolves the tilt–bias sum. EuRoC's rotor vibration gives 0.03–0.28 m/s² of per-sample scatter, far above the white-noise model's 0.028; a gravity-aligned window (MH_03) moves"
+      - question: the accelerometer bias along up at a static seed
+        chosen: "seeded from |f̄| − g, with σ_∥² = σ_f² + 0.026², half the spread of surface gravity"
+        alternatives: ["zero, with σ_ba (to #609)"]
+        reason: "with g known the window measures the bias along up. On EuRoC |f̄| − 9.81 is −0.011 to −0.035 m/s² at each sequence's stillest early second against the ground truth's −0.024 to −0.058 along up: it halves that component's error, and the residual is within the gravity σ"
+      - question: the prior of a dynamic (visual-inertial alignment) seed
+        chosen: "the fresh state's isotropic σ = 0.1, the alignment's bias estimate kept in the diagnostics, not seeded"
+        alternatives: ["the static block about the alignment's gravity direction", "the alignment's bias estimate and its least-squares covariance (#609's scope)"]
+        reason: "measured: the dynamic seed's tilt is accurate (0.14° on the gate's MH_04 draw that diverges, 1.0–1.4° on EuRoC MH_01/MH_02, inside the isotropic 5.7°), and its tilt comes from the alignment, not from the accelerometer mean, so the static correlation does not apply. The alignment's solve is unweighted with a regularized bias, so H⁻¹ is not a covariance. The MH_04 gate divergence is the seeded velocity (0.05 m/s against the truth's 0.42), not the tilt"
 
   - id: propagate
     stage: S2
