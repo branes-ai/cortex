@@ -119,6 +119,12 @@ public:
     /// than the time `set_nav` seeded: integrating those would run the seeded
     /// state forward over an interval that precedes it.
     void process_imu(const Vec3& gyro, const Vec3& accel, double t) {
+        if (have_last_ && t == last_imu_time_ && (!have_sample_ || last_sample_t_ < t)) {
+            // An image reached the clock first and held the previous sample up
+            // to it; this sample, new at the clock, starts the next interval.
+            remember_sample(gyro, accel, t);
+            return;
+        }
         if (have_last_ ? t <= last_imu_time_ : t < last_imu_time_)
             return;
         if (have_last_) {

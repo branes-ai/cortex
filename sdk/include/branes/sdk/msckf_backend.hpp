@@ -202,6 +202,13 @@ public:
         }
         if (have_last_time_) {
             const double dt = imu.timestamp_s - last_imu_time_;
+            if (dt == 0.0 && (!have_sample_ || last_sample_t_ < imu.timestamp_s)) {
+                // An image reached the clock first and held the previous sample
+                // up to it; this sample, new at the clock, starts the next
+                // interval. Nothing to propagate.
+                remember_sample(gyro, accel, imu.timestamp_s);
+                return;
+            }
             if (!(dt > 0.0))
                 return;  // drop out-of-order / duplicate samples — don't touch filter time
             // The interval from the filter clock to this sample, from both of its
