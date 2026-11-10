@@ -75,7 +75,7 @@ try_seed_static(const SO3& R_true, const Vec3& ba, Gauss& n, bs::InitDiagnostics
         return std::nullopt;
     State st(T{1} / T{10});
     const auto prior = s1::tilt_bias_prior<T>(
-        std::span<const Vec3>{accel}, bs::InitMethod::Static, kG, kSigmaBa, kDensity, static_cast<T>(kN) / kRate);
+        std::span<const Vec3>{accel}, bs::InitMethod::Static, kSigmaBa, kDensity, static_cast<T>(kN) / kRate);
     s1::seed_from_imu(st, r, bs::InitMethod::Static, 0.0, std::span<const Vec3>{accel}, kG, diag, prior);
     return st;
 }
@@ -181,6 +181,23 @@ TEST_CASE("S1 prior: P0 is the closed-form tilt-bias block about the seed's up",
             par2 += u[i] * P(State::kBa + i, State::kBa + j) * u[j];
     CHECK(std::sqrt(par2) < 0.03);
     CHECK(std::sqrt(par2) >= s1::kGravityMagnitudeSigma<T>);
+}
+
+TEST_CASE("S1 prior: only a static window sets it", "[sdk][s1][init][609]") {
+    // A gravity-aligned window moves and a dynamic seed's tilt comes from the
+    // alignment: both keep the fresh state's isotropic prior. So does a disabled
+    // prior (sigma_ba = 0, the P0 before #609).
+    const std::vector<Vec3> accel(kN, Vec3{{0.1, 0.2, kG}});
+    const std::span<const Vec3> a{accel};
+    const T w = static_cast<T>(kN) / kRate;
+    CHECK(s1::tilt_bias_prior<T>(a, bs::InitMethod::Static, kSigmaBa, kDensity, w).accel_bias_sigma == kSigmaBa);
+    for (const auto m : {bs::InitMethod::GravityAlign, bs::InitMethod::Dynamic, bs::InitMethod::Identity})
+        CHECK(s1::tilt_bias_prior<T>(a, m, kSigmaBa, kDensity, w).accel_bias_sigma == 0.0);
+    CHECK(s1::tilt_bias_prior<T>(a, bs::InitMethod::Static, 0.0, kDensity, w).accel_bias_sigma == 0.0);
+    State st(T{1} / T{10});
+    const auto before = st.covariance().d;
+    CHECK_FALSE(s1::apply_tilt_bias_prior(st, kG, s1::TiltBiasPrior<T>{}));
+    CHECK(st.covariance().d == before);
 }
 
 TEST_CASE("S1 prior: P0 covers a static seed's tilt and bias error (NEES 5)", "[sdk][s1][init][609]") {

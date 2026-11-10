@@ -5,7 +5,7 @@
 //
 //   seed_from_imu(state, init result, t, accel window, prior)     → (state', diagnostics)
 //   seed_from_alignment(state, VI alignment, SfM window, t, ...)  → (state', diagnostics)
-//   tilt_bias_prior(accel window, method, g, ...)                 → what the window determines (#609)
+//   tilt_bias_prior(accel window, method, σ_ba, ...)              → what a static window determines (#609)
 //
 // Seeds a fresh filter state from a resolved initialization: the static /
 // gravity-only / identity bootstrap of ImuInitializer, or the dynamic
@@ -139,15 +139,19 @@ inline constexpr T kGravityMagnitudeSigma = T{26} / T{1000};
 ///  - Static: the window is at rest, so σ_f is its mean's noise, the larger of
 ///    the sample scatter over √N and the white-noise model σ_a/√(window); the
 ///    bias along up is seeded, σ_∥² = σ_f² + kGravityMagnitudeSigma².
-///  - GravityAlign: the window moves, and its mean force includes an
-///    acceleration nothing measures. σ_f² adds the per-sample scatter and
-///    (|f̄| − g)² to the noise; the bias along up is not seeded.
-///  - Identity (and Dynamic, for now): no prior from the window.
+///  - GravityAlign, Dynamic and Identity: none; the fresh state's isotropic
+///    prior stays. A gravity-aligned window moves: its mean force includes a
+///    mean acceleration (|f̄| − g is 2.6 m/s² on the EuRoC gate's MH_03 seeds),
+///    so the honest tilt σ is about 15°, and the seed's zero velocity (σ 0.1
+///    m/s) is then what is wrong. Given that tilt σ the first updates explain
+///    the velocity by tilt (2.4° → 12–19°) and three of the gate's five MH_03
+///    draws diverge, against one with the isotropic 5.7° (#609). A dynamic
+///    seed's tilt comes from the visual-inertial alignment, not the
+///    accelerometer mean.
 /// `accel_bias_sigma` ≤ 0 disables the prior (the isotropic P₀ before #609).
 template <math::Scalar T>
 [[nodiscard]] TiltBiasPrior<T> tilt_bias_prior(std::span<const math::lie::detail::Vec<T, 3>> accel_window,
                                                InitMethod method,
-                                               T gravity_magnitude,
                                                T accel_bias_sigma,
                                                T accel_noise_density,
                                                T window_seconds) {
@@ -155,7 +159,7 @@ template <math::Scalar T>
     using DVec3 = ld::Vec<T, 3>;
     TiltBiasPrior<T> p;
     const std::size_t n = accel_window.size();
-    if (!(accel_bias_sigma > T{0}) || n < 2 || (method != InitMethod::Static && method != InitMethod::GravityAlign))
+    if (!(accel_bias_sigma > T{0}) || n < 2 || method != InitMethod::Static)
         return p;
     DVec3 am{};
     for (const DVec3& a : accel_window)
@@ -170,13 +174,8 @@ template <math::Scalar T>
     const T model2 = window_seconds > T{0} ? accel_noise_density * accel_noise_density / window_seconds : T{0};
     const T mean2 = scatter2 / static_cast<T>(n) > model2 ? scatter2 / static_cast<T>(n) : model2;
     p.accel_bias_sigma = accel_bias_sigma;
-    if (method == InitMethod::Static) {
-        p.mean_force_sigma = ld::sqrt_(mean2);
-        p.along_up_sigma = ld::sqrt_(mean2 + kGravityMagnitudeSigma<T> * kGravityMagnitudeSigma<T>);
-    } else {
-        const T excess = ld::norm(am) - gravity_magnitude;
-        p.mean_force_sigma = ld::sqrt_(mean2 + scatter2 + excess * excess);
-    }
+    p.mean_force_sigma = ld::sqrt_(mean2);
+    p.along_up_sigma = ld::sqrt_(mean2 + kGravityMagnitudeSigma<T> * kGravityMagnitudeSigma<T>);
     return p;
 }
 

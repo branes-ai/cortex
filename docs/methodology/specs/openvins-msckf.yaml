@@ -235,7 +235,7 @@ nodes:
       - {file: tests/sdk/tilt_bias_prior.cpp, case: "MSCKF backend: a 0.5 m/s^2 accelerometer bias is learned once the motion rotates"}
     status: implemented
     decisions:
-      - question: the attitude and accelerometer-bias blocks of P₀ on a static or gravity-aligned seed
+      - question: the attitude and accelerometer-bias blocks of P₀ on a static seed
         chosen: "the block the window implies (#609): P_θθ = (σ_ba² + σ_f²)/g²·(I − ûûᵀ) + σ_ψ²ûûᵀ, P_θb = σ_ba²/g·[û]ₓ, P_bb = σ_ba²(I − ûûᵀ) + σ_∥²ûûᵀ (stages::s1_initialization::TiltBiasPrior)"
         alternatives: ["isotropic σ = 0.1 on every core state, uncorrelated (to #609)", "a tilt σ of σ_ba/g without the correlation"]
         reason: "the window measures f̄ = g·u + b_a once, so a seed that takes û from f̄ with b_a = 0 knows the tilt and the horizontal bias only as one sum, δθ⊥ = [û]ₓ(b_a + n̄)/g. The isotropic prior put 99% of that sum in tilt (0.1 rad of tilt is 1 m/s² of gravity, against 0.1 m/s² of bias), so the filter never learned EuRoC's bias and stayed tilted 2.7° on V1_01. Without the correlation the prior would claim the tilt and bias independent, which the seed is not"
@@ -244,9 +244,13 @@ nodes:
         alternatives: ["0.1 (the isotropic value to #609)", "a datasheet turn-on bias"]
         reason: "EuRoC's ground-truth bias reaches 0.55 m/s² (V1_01 y) and is 0.09–0.20 elsewhere; 0.2 puts the largest inside 3σ. The tilt σ that follows is 0.2/g = 1.2°"
       - question: σ_f, the error of the window's mean specific force
-        chosen: "static: the larger of the sample scatter over √N and σ_a/√(window); gravity-aligned: that plus the per-sample scatter and (|f̄| − g)², since a moving window's mean includes an acceleration nothing measures"
+        chosen: "the larger of the sample scatter over √N and σ_a/√(window)"
         alternatives: ["the white-noise model alone", "zero"]
-        reason: "it bounds how well the window resolves the tilt–bias sum. EuRoC's rotor vibration gives 0.03–0.28 m/s² of per-sample scatter, far above the white-noise model's 0.028; a gravity-aligned window (MH_03) moves"
+        reason: "it bounds how well the window resolves the tilt–bias sum. EuRoC's rotor vibration gives 0.03–0.28 m/s² of per-sample scatter, far above the white-noise model's 0.028"
+      - question: the prior of a gravity-aligned seed (the moving-start fallback)
+        chosen: "the fresh state's isotropic σ = 0.1"
+        alternatives: ["the static block with σ_f² adding the window's per-sample scatter and (|f̄| − g)²", "the static block with σ_f² adding (|f̄| − g)² only"]
+        reason: "measured on the gate's five MH_03 draws (four gravity-aligned): a moving window's mean force includes its mean acceleration, |f̄| − g = 2.6 m/s² there, so either block gives a 15–16° tilt σ, and the seed's zero velocity (σ 0.1 m/s) is then the wrong part. The first updates explain the velocity by tilt (2.4° → 12–19°), and three draws diverge per backend (3.9–5.2 km at 0.5 px seed 1) against one with the isotropic 5.7°. On the real MH_03 the block gained 0.500 → 0.452 m. The defect is the zero-velocity seed of a moving start"
       - question: the accelerometer bias along up at a static seed
         chosen: "seeded from |f̄| − g, with σ_∥² = σ_f² + 0.026², half the spread of surface gravity"
         alternatives: ["zero, with σ_ba (to #609)"]

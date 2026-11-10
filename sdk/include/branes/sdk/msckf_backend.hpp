@@ -676,7 +676,6 @@ private:
                                 : 0.0;
         return msckf::stages::s1_initialization::tilt_bias_prior<T>(std::span<const DVec3>{init_accel_},
                                                                     method,
-                                                                    static_cast<T>(config_.gravity_magnitude),
                                                                     static_cast<T>(config_.accel_bias_prior_sigma),
                                                                     static_cast<T>(config_.accel_noise_density),
                                                                     static_cast<T>(span));
