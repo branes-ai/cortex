@@ -56,6 +56,23 @@ generates entries automatically from Conventional Commits on `main`.
   and Phase 3 (VIO). See [`docs/sessions/2026-05-24-phase-1-mvp-complete.md`](docs/sessions/2026-05-24-phase-1-mvp-complete.md).
 - **2026-05-22 — Phase 0 (foundation) complete.** Build system, CI, release
   flow, dev-environment scripts. See [`docs/arch/phase0-foundation/README.md`](docs/arch/phase0-foundation/README.md).
+## [0.85.0](https://github.com/branes-ai/cortex/compare/v0.84.1...v0.85.0) (2026-11-10)
+
+
+### Features
+
+* **sdk:** hold the velocity at zero while the platform rests (s8) ([#601](https://github.com/branes-ai/cortex/issues/601)) ([b4de9f1](https://github.com/branes-ai/cortex/commit/b4de9f11d3346c6c6568eee3ab30199260482e22))
+* **tools:** record spec design decisions with reasons; derive bounds from the consumer ([#617](https://github.com/branes-ai/cortex/issues/617)) ([fde8478](https://github.com/branes-ai/cortex/commit/fde847846d594b7b802dfdc7a3bf36c644ba2c56))
+* **tools:** split the euroc error between front end and estimator with ideal tracks ([#603](https://github.com/branes-ai/cortex/issues/603)) ([4654b1d](https://github.com/branes-ai/cortex/commit/4654b1dc44e0c6b3a114fe8e2e68e9d531b0767a))
+
+
+### Bug Fixes
+
+* **sdk:** integrate each imu interval from both samples by rk4, and teach sample alignment ([#618](https://github.com/branes-ai/cortex/issues/618)) ([fc0490f](https://github.com/branes-ai/cortex/commit/fc0490f040a811dd82bdc8487e805e54dfc4262f))
+* **sdk:** keep an imu sample that arrives after an image at its time ([#619](https://github.com/branes-ai/cortex/issues/619)) ([7e43d32](https://github.com/branes-ai/cortex/commit/7e43d320845f27d4afab36fa5853299e4113a1c5))
+* **sdk:** run the r-iekf on euroc through the shipped gate, init and s8, as a delta graph ([#614](https://github.com/branes-ai/cortex/issues/614)) ([d4e4f9c](https://github.com/branes-ai/cortex/commit/d4e4f9c5e6f410dcd728923e9c988f7ddba56a2b))
+* **tools:** give the consistency gate one truth, so matched r and q are the true noise ([#615](https://github.com/branes-ai/cortex/issues/615)) ([f07e689](https://github.com/branes-ai/cortex/commit/f07e689c13be07242f452fc7887bc85ee5331516))
+
 ## [0.84.1](https://github.com/branes-ai/cortex/compare/v0.84.0...v0.84.1) (2026-11-07)
 
 
