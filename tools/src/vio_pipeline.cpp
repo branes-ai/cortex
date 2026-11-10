@@ -115,9 +115,10 @@ struct Args {
     bool prefer_dynamic = false;                 ///< EuRoC: dynamic VI init only (VioConfig::prefer_dynamic_init)
     double gate_alpha = VioConfig{}.gate_alpha;  ///< MSCKF S6d chi-square gate significance (#481)
     bool gate_per_dof = false;                   ///< MSCKF S6d: the pre-#481 5-per-dof gate
-    bool gate_flag = false;                      ///< --gate-alpha or --gate-per-dof was given
-    bool detect_trackable_only = false;          ///< S4: skip the KLT border band when detecting (#474)
-    bool observability_ledger = false;           ///< per-stage spurious yaw/position information (#480)
+    double accel_bias_prior_sigma = VioConfig{}.accel_bias_prior_sigma;  ///< S1 seed prior (#609); 0 = isotropic
+    bool gate_flag = false;                                              ///< --gate-alpha or --gate-per-dof was given
+    bool detect_trackable_only = false;  ///< S4: skip the KLT border band when detecting (#474)
+    bool observability_ledger = false;   ///< per-stage spurious yaw/position information (#480)
     // Composition capture (#447): the loop over post-init frames [first, last].
     std::optional<std::pair<std::uint64_t, std::uint64_t>> capture_loop;
     // Ideal tracks (#602): --tracks gt replaces the KLT front end with
@@ -145,6 +146,7 @@ VioConfig config_of(const Args& a) {
     VioConfig cfg;
     cfg.gate_alpha = a.gate_alpha;
     cfg.gate_per_dof = a.gate_per_dof;
+    cfg.accel_bias_prior_sigma = a.accel_bias_prior_sigma;
     if (a.camera_sigma_px > 0.0)  // in normalized units through cam0's focal length
         cfg.camera_noise_normalized = a.camera_sigma_px / euroc_cam0().intrinsics.fx();
     return cfg;
@@ -279,6 +281,12 @@ Args parse(int argc, char** argv) {
             a.gate_flag = true;
             if (!(a.gate_alpha > 0.0 && 1.0 - a.gate_alpha < 1.0 && 1.0 - a.gate_alpha > 0.0))
                 throw std::invalid_argument("--gate-alpha needs a significance in (0,1)");
+        } else if (v == "--accel-bias-prior-sigma") {
+            if (!next_is_value())
+                throw std::invalid_argument("--accel-bias-prior-sigma needs a sigma in m/s^2 (0 = isotropic)");
+            a.accel_bias_prior_sigma = std::stod(argv[++i]);
+            if (!(a.accel_bias_prior_sigma >= 0.0))
+                throw std::invalid_argument("--accel-bias-prior-sigma needs a sigma >= 0");
         } else if (v == "--detect-trackable-only")
             a.detect_trackable_only = true;
         else if (v == "--riekf-legacy") {
@@ -821,6 +829,60 @@ void write_tum(const Args& args, const std::vector<ev::StampedPose<T>>& traj) {
     branes::tools::write_tum<T>(f, traj);
 }
 
+// <out>/tilt.csv (#609): per scored frame, the world roll/pitch error against
+// the ground truth, the filter's roll/pitch σ and NEES (from PoseConsistency),
+// and its accelerometer bias with σ next to the ground truth's
+// (state_groundtruth_estimate0; NaN with --imu gt, whose bias is synthesized).
+class TiltLog {
+public:
+    explicit TiltLog(const Args& args) {
+        if (args.out.empty())
+            return;
+        f_.open(args.out + "/tilt.csv");
+        if (!f_) {
+            std::cerr << "vio_pipeline: cannot write " << args.out << "/tilt.csv\n";
+            return;
+        }
+        f_ << std::setprecision(9)
+           << "t,tilt_err_deg,tilt_sigma_deg,tilt_nees,ba_x,ba_y,ba_z,ba_sx,ba_sy,ba_sz,gt_ba_x,gt_ba_y,gt_ba_z\n";
+        if (!args.gt_imu) {
+            try {
+                gt_ = euroc::parse_groundtruth_states<T>(args.dataset);
+            } catch (const std::exception&) {
+                gt_.clear();  // no bias column: the GT bias reads NaN
+            }
+        }
+    }
+    void add(double t, const branes::tools::TiltFrame& tf, const Vec3& ba, const msckf::DynMat<T>& P, std::size_t kba) {
+        if (!f_.is_open())
+            return;
+        constexpr double kDeg = 180.0 / std::numbers::pi;
+        f_ << std::fixed << std::setprecision(6) << t << std::defaultfloat << std::setprecision(9) << ','
+           << tf.err_rad * kDeg << ',' << tf.sigma_rad * kDeg << ',' << tf.nees;
+        for (std::size_t i = 0; i < 3; ++i)
+            f_ << ',' << static_cast<double>(ba[i]);
+        for (std::size_t i = 0; i < 3; ++i)
+            f_ << ',' << std::sqrt(static_cast<double>(P(kba + i, kba + i)));
+        const auto g = gt_ba(t);
+        for (std::size_t i = 0; i < 3; ++i)
+            f_ << ',' << g[i];
+        f_ << '\n';
+    }
+
+private:
+    [[nodiscard]] std::array<double, 3> gt_ba(double t) const {
+        constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+        const auto it = std::lower_bound(
+            gt_.begin(), gt_.end(), t, [](const euroc::GroundTruthState<T>& g, double x) { return g.t_s < x; });
+        if (it == gt_.end() || std::abs(it->t_s - t) > 0.02)
+            return {nan, nan, nan};
+        return {
+            static_cast<double>(it->nav.ba[0]), static_cast<double>(it->nav.ba[1]), static_cast<double>(it->nav.ba[2])};
+    }
+    std::ofstream f_;
+    std::vector<euroc::GroundTruthState<T>> gt_;
+};
+
 // --imu gt (#613): replace the real IMU with one synthesized from a smooth truth
 // through the ground truth, at the real IMU's timestamps and the filter's own
 // noise densities, and make that truth the ground truth for the ideal tracks,
@@ -942,6 +1004,7 @@ bool run_euroc(const Args& args,
         ideal.emplace(gt, cam0.intrinsics, branes::math::lie::SE3<T>(cam0.R_imu_cam, cam0.p_imu_cam), args.ideal);
     std::size_t ideal_obs = 0;
     branes::tools::PoseConsistency<T> consistency(gt);
+    TiltLog tilt(args);
 
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
@@ -976,12 +1039,17 @@ bool run_euroc(const Args& args,
         traj.push_back(sp);
         ++n;
         sigma_sum += pos_sigma(est.backend().state().covariance(), msckf::State<T>::kPos);
-        consistency.add(t,
-                        sp.pose,
-                        est.backend().state().covariance(),
-                        msckf::State<T>::kTheta,
-                        msckf::State<T>::kPos,
-                        branes::tools::PoseErrorConvention::body_right);
+        if (consistency.add(t,
+                            sp.pose,
+                            est.backend().state().covariance(),
+                            msckf::State<T>::kTheta,
+                            msckf::State<T>::kPos,
+                            branes::tools::PoseErrorConvention::body_right))
+            tilt.add(t,
+                     consistency.last_tilt(),
+                     est.backend().state().ba,
+                     est.backend().state().covariance(),
+                     msckf::State<T>::kBa);
         const auto tf = est.tracked_features();
         feat_total += ideal ? ideal_obs : tf.size();
         const double nis = safe_nis(est.backend().nis_consistency());
@@ -1028,7 +1096,7 @@ bool run_euroc(const Args& args,
 bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out, std::ofstream* stream) {
     using Adapter = branes::tools::InvariantBackendAdapter<T>;
     using Estimator = branes::sdk::VioEstimator<T, Adapter>;
-    constexpr std::size_t kInvTheta = 0, kInvPos = 6;  // invariant nav error-state: δθ(0) δv(3) δp(6)
+    constexpr std::size_t kInvTheta = 0, kInvPos = 6, kInvBa = 12;  // invariant nav error: δθ δv δp δbg δba
 
     std::vector<ImuMeasurement<T>> imu;
     std::vector<euroc::ImageEntry> images;
@@ -1060,6 +1128,7 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         ideal.emplace(gt, cam0.intrinsics, branes::math::lie::SE3<T>(cam0.R_imu_cam, cam0.p_imu_cam), args.ideal);
     std::size_t ideal_obs = 0;
     branes::tools::PoseConsistency<T> consistency(gt);
+    TiltLog tilt(args);
 
     std::vector<ev::StampedPose<T>> traj;
     std::size_t imu_idx = 0, feat_total = 0, n = 0;
@@ -1095,7 +1164,8 @@ bool run_euroc_invariant(const Args& args, const VioConfig& cfg, RunResult& out,
         ++n;
         const auto P = est.backend().covariance();
         sigma_sum += pos_sigma(P, kInvPos);
-        consistency.add(t, sp.pose, P, kInvTheta, kInvPos, branes::tools::PoseErrorConvention::right_invariant);
+        if (consistency.add(t, sp.pose, P, kInvTheta, kInvPos, branes::tools::PoseErrorConvention::right_invariant))
+            tilt.add(t, consistency.last_tilt(), est.backend().impl().nav().ba, P, kInvBa);
         feat_total += ideal ? ideal_obs : est.num_tracked_features();
         if (stream && stream->is_open()) {
             const Vec3 ep = est.current_pose().translation();
@@ -1199,6 +1269,8 @@ int main(int argc, char** argv) {
                "                             with --capture-stages S1_initialization, captures every attempt\n"
                "  --gate-alpha A             MSCKF: reject a track above the chi-square(dof) quantile at\n"
                "                             significance A (default 0.05)\n"
+               "  --accel-bias-prior-sigma S S1: the seed's accelerometer-bias prior sigma, m/s^2 (default\n"
+               "                             0.2); 0 restores the isotropic prior before #609\n"
                "  --gate-per-dof             MSCKF: gate at 5 per dof instead (the gate before #481)\n"
                "                             (both also select the R-IEKF's gate on EuRoC, #608)\n"
                "  --riekf-legacy LIST        R-IEKF on EuRoC: run these pieces as before #608, to measure\n"

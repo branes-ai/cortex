@@ -170,6 +170,7 @@ public:
         last_sample_t_ = 0.0;
         init_gyro_.clear();
         init_accel_.clear();
+        init_t_.clear();
         init_samples_seen_ = 0;
         rest_bias_.reset();
         init_frames_.clear();
@@ -589,6 +590,7 @@ private:
     void try_initialize(const DVec3& gyro, const DVec3& accel, double t) {
         init_gyro_.push_back(gyro);
         init_accel_.push_back(accel);
+        init_t_.push_back(t);
         ++init_samples_seen_;
         // Slide a fixed window of the most recent kInitSamples: the static
         // check wants the latest stretch (most likely to catch a quiet
@@ -599,6 +601,7 @@ private:
         if (init_gyro_.size() > kInitSamples) {
             init_gyro_.erase(init_gyro_.begin());
             init_accel_.erase(init_accel_.begin());
+            init_t_.erase(init_t_.begin());
         }
         if (init_gyro_.size() < kInitSamples)
             return;
@@ -659,8 +662,24 @@ private:
                                                         t,
                                                         std::span<const DVec3>{init_accel_},
                                                         static_cast<T>(config_.gravity_magnitude),
-                                                        init_diag_);
+                                                        init_diag_,
+                                                        seed_prior(method));
         finish_init(t);
+    }
+
+    // S1: the tilt–accelerometer-bias prior the IMU seed window implies (#609).
+    [[nodiscard]] msckf::stages::s1_initialization::TiltBiasPrior<T> seed_prior(InitMethod method) const {
+        // The window spans N samples, so N − 1 intervals of the IMU's period.
+        const double span = init_t_.size() > 1
+                                ? (init_t_.back() - init_t_.front()) * static_cast<double>(init_t_.size()) /
+                                      static_cast<double>(init_t_.size() - 1)
+                                : 0.0;
+        return msckf::stages::s1_initialization::tilt_bias_prior<T>(std::span<const DVec3>{init_accel_},
+                                                                    method,
+                                                                    static_cast<T>(config_.gravity_magnitude),
+                                                                    static_cast<T>(config_.accel_bias_prior_sigma),
+                                                                    static_cast<T>(config_.accel_noise_density),
+                                                                    static_cast<T>(span));
     }
 
     void finish_init(double t) {
@@ -669,6 +688,7 @@ private:
         last_imu_time_ = t;
         init_gyro_.clear();
         init_accel_.clear();
+        init_t_.clear();
         init_frames_.clear();
     }
 
@@ -901,6 +921,7 @@ private:
     std::vector<DVec3> init_gyro_;
     std::optional<RestBias<T>> rest_bias_;  ///< stillest vibrating_rest_bias while waiting to init (#591)
     std::vector<DVec3> init_accel_;
+    std::vector<double> init_t_;         ///< the init window's sample times
     std::size_t init_samples_seen_ = 0;  ///< total IMU samples seen during init (for the timeout)
 
     // Dynamic-init state: a bounded buffer of init-window camera frames and the

@@ -67,6 +67,15 @@ namespace branes::tools {
 /// Which error-state convention the covariance is written in.
 enum class PoseErrorConvention { body_right, right_invariant };
 
+/// The last scored frame's roll/pitch: what the tilt probe (#609) records per
+/// frame. The error and σ are the world roll/pitch components (rad); the NEES
+/// is their 2-dof quadratic form.
+struct TiltFrame {
+    double err_rad = 0.0;    ///< |world roll/pitch error|
+    double sigma_rad = 0.0;  ///< √(trace of the 2 × 2 roll/pitch covariance / 2)
+    double nees = 0.0;       ///< eᵀ P⁻¹ e over roll/pitch, target 2
+};
+
 /// Per-run summary: ANEES by block, and the world-yaw σ over the run.
 struct PoseConsistencySummary {
     std::size_t frames = 0;        ///< frames scored (a ground-truth match and a PD covariance)
@@ -239,6 +248,7 @@ public:
         nees_[1] += *rp;
         nees_[2] += *yaw;
         nees_[3] += *ps;
+        last_tilt_ = TiltFrame{std::hypot(e[0], e[1]), std::sqrt(0.5 * (Pw[0][0] + Pw[1][1])), *rp};
 
         const double ys = std::sqrt(Pw[2][2]);
         const double ye = std::abs(e[2]);
@@ -264,6 +274,11 @@ public:
             s.nees_pos = nees_[3] / n;
         }
         return s;
+    }
+
+    /// Roll/pitch of the last frame `add` scored (zeros before the first).
+    [[nodiscard]] const TiltFrame& last_tilt() const {
+        return last_tilt_;
     }
 
     /// The truth→estimate gauge fixed at the first scored frame, if any.
@@ -296,6 +311,7 @@ private:
     std::optional<SE3> anchor_;
     std::array<double, 4> nees_{};
     PoseConsistencySummary sum_;
+    TiltFrame last_tilt_;
 };
 
 }  // namespace branes::tools
