@@ -51,7 +51,7 @@ $$
 
 *   **Orthonormalization Singularity & Fallback**: If the gravity vector $\mathbf{z}_I$ is parallel or near-parallel to the temporary horizontal axis $\mathbf{x}_{\text{tmp}} = [1, 0, 0]^T$ (which happens if the drone is tilted exactly $90^\circ$ on its side), the cross product $\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}$ collapses to zero, making step 2 undefined. Cortex solves this by checking the norm of $\mathbf{z}_I \times \mathbf{x}_{\text{tmp}}$. If it falls below a strict threshold (e.g., $0.1$), it dynamically falls back to using $\mathbf{x}_{\text{tmp}} = [0, 1, 0]^T$ as the temporary axis, ensuring the basis construction is always well-conditioned.
 
-Because gravity has zero horizontal components, **static accelerometer readings can only observe the two tilt axes (roll and pitch)**. The heading (**yaw**) is completely unobservable relative to gravity. Yaw is a free gauge direction; we can set it to an arbitrary starting value ($0^\circ$), but the filter must be told that this yaw direction is completely unobserved.
+Because gravity has zero horizontal components, **static accelerometer readings can only observe the two tilt axes (roll and pitch)**, and those only if the accelerometer bias is known: with an unknown horizontal bias the window sees tilt and bias as one sum (section 3). The heading (**yaw**) is completely unobservable relative to gravity. Yaw is a free gauge direction; we can set it to an arbitrary starting value ($0^\circ$), but the filter must be told that this yaw direction is completely unobserved.
 
 ---
 
