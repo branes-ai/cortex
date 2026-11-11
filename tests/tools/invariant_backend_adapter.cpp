@@ -246,6 +246,45 @@ TEST_CASE("invariant adapter: initializes through the shipped MSCKF with its see
     CHECK(max_abs_diff(a.covariance(), expected) < 1e-15);
 }
 
+TEST_CASE("invariant adapter: the seed's tilt-bias correlation reaches the invariant prior",
+          "[tools][invariant_adapter][609]") {
+    // Since #609 the shipped seed correlates the body tilt with the accelerometer
+    // bias. The invariant error's attitude is the world one, R_hat times the body
+    // one, and b_a is unchanged, so the cross block must arrive as R_hat P_theta_b.
+    namespace ms = branes::sdk::msckf;
+    using Boot = bs::MsckfBackend<T>;
+    using St = ms::State<T>;
+    Adapter a = make_adapter();
+    Boot boot(std::vector<Boot::CameraCalibration>{
+        Boot::CameraCalibration{euroc_like_camera(), ms::CameraExtrinsics<T>{SO3{}, Vec3{}}}});
+    const bs::VioConfig cfg;
+    a.initialize(cfg);
+    boot.initialize(cfg);
+    for (int i = 0; i < 400 && !(boot.initialized() && a.initialized()); ++i) {
+        const auto m = tilted_sample(0.005 * i);
+        if (!boot.initialized())
+            boot.process_imu(m);
+        if (!a.initialized())
+            a.process_imu(m);
+    }
+    REQUIRE(boot.initialized());
+    REQUIRE(a.initialized());
+    const auto Pb = boot.state().covariance();
+    const auto Pi = a.covariance();
+    const auto R = boot.state().R.matrix();
+    double cross = 0;
+    for (std::size_t i = 0; i < 3; ++i) {
+        for (std::size_t j = 0; j < 3; ++j) {
+            double e = 0;
+            for (std::size_t k = 0; k < 3; ++k)
+                e += R(i, k) * Pb(St::kTheta + k, St::kBa + j);
+            CHECK(std::abs(Pi(ms::InvariantNavState<T>::kTheta + i, ms::InvariantNavState<T>::kBa + j) - e) < 1e-15);
+            cross = std::max(cross, std::abs(e));
+        }
+    }
+    CHECK(cross > 1e-3);  // the correlation is there: sigma_ba^2 / g = 4e-3
+}
+
 TEST_CASE("invariant adapter: S8 holds a frame at rest out of the window", "[tools][invariant_adapter]") {
     const auto run = [](Adapter::Options opt) {
         Adapter a = make_adapter(opt);

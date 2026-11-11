@@ -27,6 +27,12 @@
 //   sfm_adjacent_bootstrap
 //                  the same with the bootstrap on frame 1 (the pre-#247 choice)
 //
+// The static and gravity-aligned variants seed the backend's mean with the
+// fresh state's isotropic P₀. The backend then replaces the tilt and
+// accelerometer-bias blocks with the prior its window implies (#609,
+// s1_initialization::tilt_bias_prior), which needs the window's duration that
+// these inputs do not carry; tests/sdk/tilt_bias_prior.cpp checks that block.
+//
 // Fixtures:
 //   known_answer   a noiseless, tilted, gyro-biased static window: the expected
 //                  seed (attitude, biases, P₀, diagnostics) in closed form
@@ -118,7 +124,8 @@ struct S1InitializationBench {
     }
 
     [[nodiscard]] static std::vector<Variant> variants() {
-        return {{"shipped", "try_static -> seed_from_imu (backend default)"},
+        return {{"shipped",
+                 "try_static -> seed_from_imu (the backend's static seed, with the isotropic P0: no tilt-bias prior)"},
                 {"gravity_align", "try_gravity_align -> seed_from_imu (moving-start fallback)"},
                 {"dynamic", "try_dynamic -> seed_from_alignment (visual-inertial alignment)"},
                 {"sfm_two_view_pnp",

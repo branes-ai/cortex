@@ -42,6 +42,12 @@ struct VioConfig {
     double gyro_noise_density = 1.6e-4;   ///< continuous-time σ_g
     double accel_bias_random_walk = 3.0e-3;
     double gyro_bias_random_walk = 1.9e-5;
+    /// S1 prior σ of the accelerometer bias at the seed, m/s² per axis (#609).
+    /// A static window measures tilt and horizontal bias only as one sum, so
+    /// the seed's P₀ correlates them (σ_tilt ≈ σ_ba / g) and the filter learns
+    /// the bias as the platform rotates. 0.2 puts EuRoC's largest ground-truth
+    /// bias (V1_01, 0.55 m/s²) inside 3σ. 0 restores the isotropic P₀.
+    double accel_bias_prior_sigma = 0.2;
     /// Visual measurement σ in normalized image coordinates — the MSCKF camera
     /// update's R. Default matches the updater's historical hardcoded value.
     double camera_noise_normalized = 1.0e-2;

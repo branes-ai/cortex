@@ -74,10 +74,9 @@ nodes:
     tests:
       - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: the body-to-invariant map matches the exact error"}
       - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: initializes through the shipped MSCKF with its seed"}
+      - {file: tests/tools/invariant_backend_adapter.cpp, case: "invariant adapter: the seed's tilt-bias correlation reaches the invariant prior"}
     status: implemented
-    note: "#608"
-    deviations:
-      - "the base's prior is itself an isotropic σ = 0.1 with no tilt-bias correlation (#609); this node maps it faithfully"
+    note: "#608; since #609 the base's prior correlates tilt and accelerometer bias, and J carries the correlation (δθ_world = R̂·δθ_body, b_a unchanged)"
 
   - id: propagate
     op: replace
@@ -270,7 +269,7 @@ system_invariants:
     text: told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks)
     check: {file: scripts/euroc-consistency.sh}
     status: failing
-    note: "with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the MSCKF: the shared tilt and bias seed, #609), passes 2 (0.40× vs 0.41×; 0.18× vs 0.36×), passes 3 (0.984)"
+    note: "with one truth, S2 integrating both samples (#616) and the tilt–bias seed prior (#609), median NIS 1.00: fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the MSCKF: moving starts' velocity seeds, not the tilt), passes 2 (0.32× vs 0.53×; 0.19× vs 0.40×), passes 3 (0.969; V2_01 and V2_02 fall to 0.64–0.67 at 0.5 px, #620)"
   - id: accuracy
     text: 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences
     check: {file: scripts/euroc-baseline.sh}

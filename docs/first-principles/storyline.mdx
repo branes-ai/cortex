@@ -349,11 +349,57 @@ up to 624.
 
 The stage contract is on [S5 — Feature Triangulation](../pipeline/stages/s5-triangulation.mdx).
 
+## Chapter 7. One quantity, seen once
+
+Both backends seeded roll and pitch from the accelerometer mean as if its bias were zero, and
+gave tilt and bias an isotropic, uncorrelated σ = 0.1. On V1_01 they stayed 2.4–2.6° tilted from
+the ground truth for the whole run and claimed 0.05° (roll/pitch ANEES 2,981,
+<Issue id={609} />).
+
+- **The physics:** at rest the accelerometer reads f = Rᵀg·e_z + b_a. A seed that takes "up" from
+  f with b_a = 0 knows the tilt and the horizontal bias only as one sum: δθ⊥ = [û]ₓ b_a / g. A
+  tilt σ of 0.1 rad is 1 m/s² of gravity against 0.1 m/s² of bias, so the old prior put 99% of
+  the sum in tilt.
+- **The fix:** S1 now writes the block a static window implies, with the tilt and the bias
+  correlated (σ_tilt ≈ σ_ba / g to first order, about 1.2° for σ_ba = 0.2 m/s²), and seeds the
+  bias along up from |f| − g. A Monte Carlo of static seeds measured ANEES 4.93 against 5 (the test
+  asserts 4.5–5.5); on the synthetic world a
+  0.5 m/s² bias is learned and the tilt falls under 0.01°.
+- **What it did not do:** V1_01 is still 2.4° off its ground truth. The same answer comes back
+  with σ_ba = 0.2, with 1.0 and with the old prior: b_a y ≈ 0.13 m/s², the value the filter finds
+  on all eleven sequences and the ground truth gives on the others. The gap is a fixed rotation in
+  the body frame. The ground truth's 0.55 m/s² bias is its own estimator's output, and a 2.5°
+  error in its attitude would produce exactly that bias. The data supports the filter, so the
+  issue's acceptance target (0.55 on V1_01) was set against a quantity the truth estimated, not
+  measured.
+- **What separates them is motion the camera sees.** At rest, turning about gravity leaves the
+  body's "up" where it was, and only roll and pitch excursions tell a tilt from a bias. With vision
+  pinning the position, a turn separates them too (a body-fixed bias turns with the body, a tilt
+  error stays fixed in the world), and so does an acceleration: the synthetic world learns its bias
+  with yaw-only rotation and a moving loop. A drone that hovers level keeps the sum.
+- **A loose prior that's honest can still break the filter.** A gravity-aligned seed (the
+  moving-start fallback) averages a window that accelerates: on the gate's MH_03 draws |f| − g is
+  2.6 m/s², so the honest tilt σ is 15°. With it, three of the gate's five MH_03 draws diverged
+  against one (three of its 66 runs per backend, against two), because
+  that seed's zero velocity (σ 0.1 m/s) is the part that's wrong, and the first updates explained
+  the velocity by tilt. The gravity-aligned seed keeps the old prior until its velocity prior is
+  fixed.
+- **The two backends took it differently.** The MSCKF's worst roll/pitch NEES on the gate fell
+  from 24 to 4.8 and its rotation drift in the Vicon rooms 19–26%. The R-IEKF, which inherits the
+  seed, lost yaw σ on the V2 sequences (0.95 → 0.64) and drifted up to 26% more in rotation, a
+  bias-coupled path its invariant error doesn't close (<Issue id={620} />).
+- **The issue's other diagnosis was wrong too.** Both backends diverge on the gate's MH_04 draw
+  from a dynamic seed, and #609 blamed its tilt. Measured, the seed's tilt was 0.14° off; its
+  speed was 0.05 m/s against the truth's 0.42. The divergence is the dynamic alignment's velocity
+  and scale, not this seed's tilt.
+
 ## What finishes the story
 
 - The R-IEKF's NEES on real EuRoC (<Issue id={365} />) and its accuracy gap (<Issue id={429} />).
 - The time-offset state t_d, the one untested over-confidence candidate (<Issue id={332} />).
-- The dynamic-initialization defects of Chapter 2.
+- The dynamic-initialization defects of Chapter 2, and the moving starts' velocity seeds of
+  Chapter 7 (the dynamic alignment's 0.05 m/s against 0.42 on the gate's MH_04; the
+  gravity-aligned seed's zero velocity).
 - Real-time latency (<Issue id={213} />).
 - Why a front end without border churn costs about 10% EuRoC ATE (<Issue id={574} />): the
   detection margin that fixes it ships off until that is understood.

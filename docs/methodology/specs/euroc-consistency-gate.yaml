@@ -274,4 +274,4 @@ system_invariants:
   - id: verdict_attributable
     text: "each condition's result changes with the estimator, not with the gate's line"
     status: holds
-    note: "at c6b87ec each remaining failure was rerun with the gate at 5 per dof: one divergence per backend vanished, the others persisted, and condition 2's fast-sequence loss was #616's S2 skew. At f1551cc condition 2 passes for both; both backends diverge on the same two noise draws, from the shared initializer's seed (#609); the MSCKF's condition 3 is S6's yaw leak. Conditions 1 and 2 still depend on the noise draw at three seeds (#613)"
+    note: "at c6b87ec each remaining failure was rerun with the gate at 5 per dof: one divergence per backend vanished, the others persisted, and condition 2's fast-sequence loss was #616's S2 skew. At f1551cc condition 2 passes for both; both backends diverge on the same two noise draws, which #609 traced to the moving starts' velocity seeds (MH_04's dynamic seed 0.05 m/s against the truth's 0.42; MH_03's gravity-aligned zero velocity), not the tilt; the MSCKF's condition 3 is S6's yaw leak. Conditions 1 and 2 still depend on the noise draw at three seeds (#613)"

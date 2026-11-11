@@ -1,6 +1,6 @@
 ---
 title: Diagnostic Signatures and Pitfalls
-description: A symptom-to-cause table for VIO failures, each with the measurement that confirms it, and twenty-two pitfalls distilled from getting cortex's pipeline to work.
+description: A symptom-to-cause table for VIO failures, each with the measurement that confirms it, and twenty-five pitfalls distilled from getting cortex's pipeline to work.
 ---
 
 import Issue from '@site/components/Issue.astro';
@@ -33,6 +33,9 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
 | A "consistent" control with NEES ≪ dof | Noise-free inputs: the control measures nothing | Inject noise matched to the filter's model | <Issue id={551} /> |
 | Position variance under-predicted far from the origin | Process noise not mapped through the [p̂]× lever arm (invariant error) | Monte-Carlo of the propagated error about 20 m from the origin | <Issue id={537} /> |
 | NIS ≈ 1 on slow sequences, 1.1–1.9 on fast ones, with R and Q exact | An IMU sample held over an interval it doesn't represent: a half-sample IMU–camera skew | Close S2 on a continuous truth at the real rate; average the interval's two samples and watch NIS return to 1.00 | <Issue id={616} /> |
+| Tilted from the start by about b_a / g, the tilt σ far smaller than the error | The seed took "up" from the accelerometer with b_a = 0 and its prior doesn't correlate tilt with bias | Tilt error and σ per frame against the truth (`vio_pipeline --out` writes `tilt.csv`); the seed's P_θb block | <Issue id={609} /> |
+| A tilt gap to the ground truth that no prior moves, fixed in the body frame | The ground truth's own attitude (and the bias its estimator fitted to it) | Rerun with a loose bias prior: the same answer means the data supports the filter; check the gap's frame | <Issue id={609} /> |
+| A moving start diverges, its tilt dragged off in the first second | A loose tilt prior meeting a wrong velocity seed: the updates explain the velocity by tilt | The seed's speed against the truth's; tighten nothing until the velocity prior is right | <Issue id={609} /> |
 | Most new tracks die on their first frame | Detector margin narrower than the KLT pyramid footprint | Fraction of tracks lost on their first frame | <Issue id={474} /> |
 
 ## Pitfalls
@@ -86,3 +89,13 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
     ([Aligning Sensor Samples](sample-alignment.mdx), <Issue id={616} />).
 22. **Take every tolerance from what the next stage resolves, never from the current residual.** A
     closure test fitted to what S2 achieved blessed the skew in item 21.
+23. **A prior is a joint statement.** At rest the accelerometer measures tilt and horizontal bias as
+    one sum; an isotropic prior claims they are independent and hands the sum to whichever σ is
+    larger. At rest only roll and pitch excursions separate them; with vision pinning the position,
+    turns and accelerations do too, and a level hover never does (<Issue id={609} />).
+24. **Know which parts of the ground truth were measured.** EuRoC's bias and, in places, its
+    attitude are its estimator's outputs. V1_01's 0.55 m/s² bias came with a 2.5° body-frame
+    attitude offset that no prior moved; a target set against it can't be met.
+25. **An honest prior can still break a filter when another prior is wrong.** Loosening the
+    gravity-aligned seed's tilt to its true 15° let the updates absorb its wrong zero velocity, and
+    divergences tripled. Fix the wrong prior; don't loosen the right one to cover it.

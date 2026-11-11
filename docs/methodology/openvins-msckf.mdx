@@ -66,8 +66,16 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 - *Pre:* a successful seed
 - *Post:* P₀ symmetric positive-definite, in the error convention every later node assumes
 - *Test:* `tests/sdk/msckf_backend.cpp` “the backend initializes attitude from a stationary window…”
-- *Decision — the prior P₀:* isotropic σ = 0.1 on every core state over the tilt–accelerometer-bias correlation an IMU window implies (#609). **no reason recorded**
-- *Deviates from the paper:* the prior is an isotropic σ = 0.1 with no tilt-bias correlation, whatever the init method (#609)
+- *Test:* `tests/sdk/tilt_bias_prior.cpp` “S1 prior: P0 is the closed-form tilt-bias block about the seed's up…”
+- *Test:* `tests/sdk/tilt_bias_prior.cpp` “S1 prior: P0 covers a static seed's tilt and bias error (NEES 5)…”
+- *Test:* `tests/sdk/tilt_bias_prior.cpp` “MSCKF backend: a 0.5 m/s^2 accelerometer bias is learned once the motion rotates…”
+- *Decision — the attitude and accelerometer-bias blocks of P₀ on a static seed:* the block the window implies (#609): P_θθ = (σ_ba² + σ_f²)/g²·(I − ûûᵀ) + σ_ψ²ûûᵀ, P_θb = σ_ba²/g·[û]ₓ, P_bb = σ_ba²(I − ûûᵀ) + σ_∥²ûûᵀ (stages::s1_initialization::TiltBiasPrior) over isotropic σ = 0.1 on every core state, uncorrelated (to #609), a tilt σ of σ_ba/g without the correlation. the window measures f̄ = g·u + b_a once, so a seed that takes û from f̄ with b_a = 0 knows the tilt and the horizontal bias only as one sum, δθ⊥ = [û]ₓ(b_a + n̄)/g. The isotropic prior put 99% of that sum in tilt (0.1 rad of tilt is 1 m/s² of gravity, against 0.1 m/s² of bias), so the filter never learned EuRoC's bias and stayed tilted 2.4–2.6° on V1_01. Without the correlation the prior would claim the tilt and bias independent, which the seed is not
+- *Decision — σ_ba, the accelerometer-bias prior:* 0.2 m/s² per axis (VioConfig::accel_bias_prior_sigma) over 0.1 (the isotropic value to #609), a datasheet turn-on bias. EuRoC's ground-truth bias reaches 0.55 m/s² (V1_01 y) and is 0.09–0.20 elsewhere; 0.2 puts the largest inside 3σ. The tilt σ that follows is 0.2/g = 1.2°
+- *Decision — σ_f, the error of the window's mean specific force:* the larger of the sample scatter over √N and σ_a/√(window) over the white-noise model alone, zero. it bounds how well the window resolves the tilt–bias sum. EuRoC's rotor vibration gives 0.03–0.28 m/s² of per-sample scatter, far above the white-noise model's 0.028
+- *Decision — the prior of a gravity-aligned seed (the moving-start fallback):* the fresh state's isotropic σ = 0.1 over the static block with σ_f² adding the window's per-sample scatter and (\|f̄\| − g)², the static block with σ_f² adding (\|f̄\| − g)² only. measured on the gate's five MH_03 draws (four gravity-aligned): a moving window's mean force includes its mean acceleration, \|f̄\| − g = 2.6 m/s² there, so either block gives a 15–16° tilt σ, and the seed's zero velocity (σ 0.1 m/s) is then the wrong part. The first updates explain the velocity by tilt (2.4° → 12–19°), and three draws diverge per backend (3.9–5.2 km at 0.5 px seed 1) against one with the isotropic 5.7°. On the real MH_03 the block gained 0.500 → 0.452 m. The defect is the zero-velocity seed of a moving start
+- *Decision — the accelerometer bias along up at a static seed:* seeded from \|f̄\| − g, with σ_∥² = σ_f² + 0.026², half the spread of surface gravity over zero, with σ_ba (to #609). with g known the window measures the bias along up. On EuRoC \|f̄\| − 9.81 is −0.011 to −0.035 m/s² at each sequence's stillest early second against the ground truth's −0.024 to −0.058 along up: it halves that component's error, and the residual is within the gravity σ
+- *Decision — the prior of a dynamic (visual-inertial alignment) seed:* the fresh state's isotropic σ = 0.1, the alignment's bias estimate kept in the diagnostics, not seeded over the static block about the alignment's gravity direction, the alignment's bias estimate and its least-squares covariance (#609's scope). measured: the dynamic seed's tilt is accurate (0.14° on the gate's MH_04 draw that diverges, 1.0–1.4° on EuRoC MH_01/MH_02, inside the isotropic 5.7°), and its tilt comes from the alignment, not from the accelerometer mean, so the static correlation does not apply. The alignment's solve is unweighted with a regularized bias, so H⁻¹ is not a covariance. The MH_04 gate divergence is the seeded velocity (0.05 m/s against the truth's 0.42), not the tilt
+- *Deviates from the paper:* the S1 bench seeds the mean with the isotropic P₀: its windows carry no duration for the #609 prior, which tests/sdk/tilt_bias_prior.cpp checks
 
 **propagate** (S2, IMU propagation)
 
@@ -136,14 +144,13 @@ Each has the shape *(state, inputs, params) → (state′, diagnostics)*.
 | **CameraCalib** | input | intrinsics (fx, fy, cx, cy), radtan distortion, camera↔IMU extrinsic (R_imu_cam, p_imu_cam) | `math/include/branes/math/cameras/pinhole_radtan.hpp` `PinholeRadtanCamera` | ✓ R_imu_cam ∈ SO(3); ✓ intrinsics positive, principal point inside the image |
 | **NormalizedObs** | data | feature id, camera id, normalized image point (x, y) | `sdk/include/branes/sdk/msckf/stages/s0_sensor_model.hpp` `Result` | ✗ finite, and the ray is in front of the camera (z &gt; 0) |
 | **TrackDB** | data | feature id → [(clone time, normalized observation)], plus the tracks that ended this frame | `sdk/include/branes/sdk/msckf/stages/s4_frontend.hpp` `TrackTable` | ✗ every observation's clone time is a live clone, or the observation is purged; ✓ points inside the image; ✓ track length at most the clone window |
-| **NavSeed** | data | R, v, p, b_g, b_a, the time, and the prior P₀ in the filter's error convention | `sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp` `seed_from_imu` | ✓ gravity sign and magnitude; ✓ P₀ symmetric positive-definite; ✗ P₀ states what the init window does and does not determine (tilt-bias correlation) |
+| **NavSeed** | data | R, v, p, b_g, b_a, the time, and the prior P₀ in the filter's error convention | `sdk/include/branes/sdk/msckf/stages/s1_initialization.hpp` `seed_from_imu` | ✓ gravity sign and magnitude; ✓ P₀ symmetric positive-definite; ✓ P₀ states what the init window does and does not determine (tilt-bias correlation) |
 | **FilterState** | state | nav (θ, p, v, b_g, b_a: 15), clones (θ, p: 6 each), optional camera↔IMU extrinsics (6 per camera), the joint covariance P, and the error-state convention every Jacobian assumes | `sdk/include/branes/sdk/msckf/state.hpp` `State` | ✓ P symmetric; ✓ P positive semidefinite; ✓ R and every clone rotation ∈ SO(3); ✗ the layout and the error convention agree with every node's Jacobians |
 | **Landmark** | data | feature position p_f (world), the triangulation's parallax and conditioning | `sdk/include/branes/sdk/msckf/stages/s5_triangulation.hpp` `Result` | ✓ positive depth in every observing camera; ✓ normal-matrix condition number reported |
 | **UpdateDiag** | output | NIS, dof, the gate verdict, and where a rejected track stopped | `sdk/include/branes/sdk/msckf/stages/s6_msckf_update.hpp` `Result` | ✓ NIS ~ χ²(dof) over windows (bound χ²₁₋α(dof) per update, α = 0.05, from what **msckf_update** resolves: the S6d gate rejects above it, so a consistent filter loses α of its inliers and no more) |
 
 - **ImageFrame** precision: integer pixels; no arithmetic-type choice
 - **NormalizedObs** precision: the narrowest edge that keeps sub-pixel accuracy; float holds (#532)
-- **NavSeed** deviates from the paper: P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
 - **FilterState** precision: stored in double; the P-writing stages must stay double (#532)
 - **FilterState** deviates from the paper: error convention R = R̂·Exp(δθ) (body-frame right perturbation); OpenVINS uses a left quaternion error. Legitimate if consistent everywhere.
 
@@ -179,33 +186,30 @@ on image (20 Hz):
 | NIS ≈ dim(measurement) per update | `tests/sdk/consistency.cpp` “NEES/NIS flag over- and under-confidence…” | unknown |
 | innovations zero-mean and white | `tests/sdk/innovation_whiteness.cpp` “i.i.d. N(0,1) innovations read as zero-mean and white…” | unknown |
 | no information gained along global yaw and translation (the 4-D unobservable space) | `tests/tools/observability_ledger.cpp` “Observability ledger: on the synthetic world the leak is yaw…” | failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608) |
-| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480) |
+| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth, S2 integrating both samples (#616) and the tilt–bias seed prior (#609), median NIS 1.00: fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: moving starts' velocity seeds, not the tilt), passes 2 (0.36× vs 0.64×; 0.25× vs 0.58×), fails 3 (yaw σ ratio 0.152: the S6 yaw leak, #480) |
 | 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences | `scripts/euroc-baseline.sh` | failing — median 2.8× OpenVINS mono (#595) |
 
 ## Gap report
 
-What `pipeline_graph.py gaps` reports for this spec (23 items):
+What `pipeline_graph.py gaps` reports for this spec (20 items):
 
 - edge 'ImageFrame': no validator for "t increasing and inside the IMU span"
 - edge 'ImageFrame': no validator for "the image matches the calibration's resolution"
 - edge 'NormalizedObs': no validator for "finite, and the ray is in front of the camera (z &gt; 0)"
 - edge 'TrackDB': no validator for "every observation's clone time is a live clone, or the observation is purged"
-- edge 'NavSeed': no validator for "P₀ states what the init window does and does not determine (tilt-bias correlation)"
-- edge 'NavSeed': deviates from the paper: P₀ is an isotropic σ = 0.1 on every core state, with no tilt-bias correlation (#609)
 - edge 'FilterState': no validator for "the layout and the error convention agree with every node's Jacobians"
 - edge 'FilterState': deviates from the paper: error convention R = R̂·Exp(δθ) (body-frame right perturbation); OpenVINS uses a left quaternion error. Legitimate if consistent everywhere.
 - node 'track': deviates from the paper: no RANSAC outlier rejection in the front end; the S6d gate carries it
 - node 'track': deviates from the paper: the shipped default churns (&gt;50% of new tracks lost on their first frame); the border margin is opt-in (#474, #574)
 - node 'initialize': deviates from the paper: the dynamic path is excitation-limited on EuRoC and has open SfM defects (#254, #499–#501)
-- node 'seed_state': deviates from the paper: the prior is an isotropic σ = 0.1 with no tilt-bias correlation, whatever the init method (#609)
+- node 'seed_state': deviates from the paper: the S1 bench seeds the mean with the isotropic P₀: its windows carry no duration for the #609 prior, which tests/sdk/tilt_bias_prior.cpp checks
 - node 'propagate': deviates from the paper: no first-estimates Jacobians on Φ (FEJ, #606)
 - node 'msckf_update': deviates from the paper: no first-estimates Jacobians on H (FEJ, #606); the yaw leak is S6 moving the mean (95–99%, #480)
 - node 'msckf_update': deviates from the paper: S6c compression is the identity (one feature per update leaves 2m − 3 rows)
 - node 'slam_update' (S7): not implemented
 - node 'online_calib' (S10): partially implemented
 - node 'online_calib': deviates from the paper: extrinsics only (VioConfig::estimate_extrinsics, off by default); no intrinsics; no time offset (#332)
-- node 'seed_state': decision 'the prior P₀' has no recorded reason (chosen: isotropic σ = 0.1 on every core state)
 - system invariant 'nees': failing — the body-frame filter is over-confident on EuRoC (#212, #605)
 - system invariant 'gauge': failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608)
-- system invariant 'consistency_gate': failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480)
+- system invariant 'consistency_gate': failing — with one truth, S2 integrating both samples (#616) and the tilt–bias seed prior (#609), median NIS 1.00: fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: moving starts' velocity seeds, not the tilt), passes 2 (0.36× vs 0.64×; 0.25× vs 0.58×), fails 3 (yaw σ ratio 0.152: the S6 yaw leak, #480)
 - system invariant 'accuracy': failing — median 2.8× OpenVINS mono (#595)

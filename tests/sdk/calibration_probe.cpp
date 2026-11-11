@@ -50,16 +50,22 @@ TEST_CASE("S10 end-to-end: with perfect calibration and exact sensors the world 
     const auto sw = ev::r_inflation_sweep<T>();
     REQUIRE(sw.curve.size() >= 5);
     // With PERFECT calibration and EXACT sensors the pose NEES is below the
-    // 6-DoF target (0.04 measured) and the pose tracks to centimetres. The
+    // 6-DoF target (0.007 measured; 0.04 before the #609 seed prior) and the
+    // pose tracks to centimetres. The
     // assumed R (4.6 px) is pessimistic against zero noise, so this checks the
     // world and the plumbing, not consistency under noise: that is the
     // matched-noise control below (#551).
     REQUIRE(sw.curve.front().r_scale == 1.0);
     REQUIRE(sw.curve.front().nees < 6.0);
     REQUIRE(sw.curve.front().ate < 0.05);
-    // Inflating R only makes the filter less confident…
-    for (std::size_t i = 1; i < sw.curve.size(); ++i)
-        REQUIRE(sw.curve[i].nees <= sw.curve[i - 1].nees);
+    // Inflating R never makes the filter over-confident. With exact sensors the
+    // error grows with R about as fast as the covariance (NEES 0.007-0.009 from
+    // R x1 to x64 since #609), so the NEES is flat, not falling: what holds at
+    // every scale is that it stays under the dof.
+    for (const auto& pt : sw.curve) {
+        INFO("R x" << pt.r_scale << ": NEES " << pt.nees);
+        REQUIRE(pt.nees < 6.0);
+    }
     // …and no R-scale is needed to reach consistency.
     REQUIRE(sw.r_scale_for_consistency == 0.0);
     // The 1° calibration budget is a real fraction of that deficit (the R×4 part).
@@ -84,7 +90,7 @@ TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information int
         CHECK(r.ate < 0.5);  // it still tracks: the defect is the covariance
         // The leak signature: an unobservable direction gained information.
         CHECK(r.yaw_sigma_last < r.yaw_sigma_first / 3);
-        nees.push_back(r.nees);
+        nees.push_back(r.nees_yaw);
         pos.push_back(r.nees_pos);
     }
     // Position is gauge too, but its σ stays near the prior and is mostly honest:
@@ -93,9 +99,12 @@ TEST_CASE("S10 matched-noise control: the body-frame MSCKF leaks information int
     // is on the median, 2× the dof.
     std::sort(pos.begin(), pos.end());
     CHECK(pos[pos.size() / 2] < 6.0);
-    // Median 6-DoF pose NEES; consistent ≈ 6. Seeds 1–3 measure 23.5, 10.6 and
-    // 112; over seeds 1–10 it is 10.6–112, median 34 (11.5–288, median 47, under
-    // the 5-per-dof gate before #481). The bound asks for at least 1.5× the dof.
+    // Median yaw NEES; consistent ≈ 1. Seeds 1–3 measure 5.6, 2.0 and 112. The
+    // bound asks for at least 1.5× the dof. Until #609 this was the 6-DoF pose
+    // NEES (seeds 1–3: 23.5, 10.6, 112), which also carried the seed's
+    // roll/pitch over-confidence; with the window's tilt-bias prior roll/pitch
+    // read 1.8, 2.5 and 15 against 2, the pose NEES 7.3, 4.6 and 143, and what
+    // is left over-confident is the yaw.
     std::sort(nees.begin(), nees.end());
-    CHECK(nees[nees.size() / 2] > 9.0);
+    CHECK(nees[nees.size() / 2] > 1.5);
 }

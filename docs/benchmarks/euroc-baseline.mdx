@@ -55,14 +55,14 @@ The numbers come from `scripts/euroc-baseline.json`, which
 | MH_01_easy | 0.331 | 0.333 | 0.096 | 0.072 | 3.5× |
 | MH_02_easy | 0.456 | 0.393 | 0.168 | 0.117 | 2.3× |
 | MH_03_medium | 0.500 | 0.472 | 0.147 | 0.096 | 3.2× |
-| MH_04_difficult | 0.375 | 0.379 | 0.147 | 0.127 | 2.6× |
-| MH_05_difficult | 0.671 | 0.629 | 0.458 | 0.281 | 1.4× |
-| V1_01_easy | 0.200 | 0.197 | 0.069 | 0.063 | 2.8× |
-| V1_02_medium | 0.163 | 0.162 | 0.058 | 0.048 | 2.8× |
-| V1_03_difficult | 0.158 | 0.161 | 0.067 | 0.059 | 2.4× |
-| V2_01_easy | 0.223 | 0.215 | 0.127 | 0.060 | 1.7× |
-| V2_02_medium | 0.338 | 0.334 | 0.073 | 0.044 | 4.6× |
-| V2_03_difficult | 0.173 | 0.175 | 0.181 | 0.087 | 1.0× |
+| MH_04_difficult | 0.384 | 0.385 | 0.147 | 0.127 | 2.6× |
+| MH_05_difficult | 0.686 | 0.640 | 0.458 | 0.281 | 1.4× |
+| V1_01_easy | 0.192 | 0.188 | 0.069 | 0.063 | 2.7× |
+| V1_02_medium | 0.155 | 0.153 | 0.058 | 0.048 | 2.6× |
+| V1_03_difficult | 0.145 | 0.147 | 0.067 | 0.059 | 2.2× |
+| V2_01_easy | 0.191 | 0.184 | 0.127 | 0.060 | 1.5× |
+| V2_02_medium | 0.327 | 0.322 | 0.073 | 0.044 | 4.4× |
+| V2_03_difficult | 0.174 | 0.177 | 0.181 | 0.087 | 1.0× |
 
 The ratio compares cortex's window with OpenVINS mono; both are monocular.
 
@@ -75,14 +75,14 @@ Over the window:
 | MH_01_easy | 0.370 m / 1.57° | 0.137 m / 1.55° | 0.141 m / 1.67° |
 | MH_02_easy | 0.478 m / 1.35° | 0.173 m / 1.07° | 0.132 m / 0.86° |
 | MH_03_medium | 0.386 m / 0.75° | 0.178 m / 0.61° | 0.159 m / 0.62° |
-| MH_04_difficult | 0.548 m / 1.03° | 0.206 m / 0.83° | 0.213 m / 0.50° |
-| MH_05_difficult | 0.701 m / 0.95° | 0.506 m / 1.06° | 0.300 m / 0.85° |
-| V1_01_easy | 0.330 m / 4.04° | 0.262 m / 2.84° | 0.229 m / 2.83° |
-| V1_02_medium | 0.209 m / 2.31° | 0.110 m / 0.57° | 0.106 m / 0.73° |
-| V1_03_difficult | 0.235 m / 2.56° | 0.125 m / 1.24° | 0.125 m / 1.02° |
-| V2_01_easy | 0.447 m / 2.41° | 0.220 m / 1.06° | 0.102 m / 0.89° |
-| V2_02_medium | 0.301 m / 4.09° | 0.090 m / 1.55° | 0.061 m / 1.27° |
-| V2_03_difficult | 0.225 m / 1.74° | 0.201 m / 1.56° | 0.108 m / 1.38° |
+| MH_04_difficult | 0.548 m / 0.76° | 0.206 m / 0.83° | 0.213 m / 0.50° |
+| MH_05_difficult | 0.722 m / 0.87° | 0.506 m / 1.06° | 0.300 m / 0.85° |
+| V1_01_easy | 0.318 m / 4.02° | 0.262 m / 2.84° | 0.229 m / 2.83° |
+| V1_02_medium | 0.208 m / 1.87° | 0.110 m / 0.57° | 0.106 m / 0.73° |
+| V1_03_difficult | 0.207 m / 1.93° | 0.125 m / 1.24° | 0.125 m / 1.02° |
+| V2_01_easy | 0.370 m / 1.94° | 0.220 m / 1.06° | 0.102 m / 0.89° |
+| V2_02_medium | 0.272 m / 3.03° | 0.090 m / 1.55° | 0.061 m / 1.27° |
+| V2_03_difficult | 0.222 m / 1.50° | 0.201 m / 1.56° | 0.108 m / 1.38° |
 
 ## What the baseline says
 
@@ -256,6 +256,57 @@ turns that into a pass/fail check that any backend can be run through:
     collapse.
   - Every verdict below is the same at any bound between 0.13 and 0.9.
 
+### Results with the tilt–bias seed prior (#609)
+
+Recorded at 7a38162 for both backends, median over the three seeds. #609 made a
+static seed's P₀ correlate tilt with accelerometer bias as the window implies
+(σ_tilt = σ_ba / g, σ_ba = 0.2 m/s²), and seed the bias along up from
+|f| − g. Gravity-aligned and dynamic seeds keep the isotropic prior
+([S1](../pipeline/stages/s1-initialization.mdx)).
+
+| Gate condition | MSCKF | R-IEKF |
+|---|---|---|
+| 1. No divergence (66 matched runs) | **fail:** the same 2 (MH_03 1 px seed 2, 26.8 m; MH_04 1 px seed 3, 8.8 km) | **fail:** the same 2 (2.3 m; 9.0 km) |
+| 2. Matched beats default (median, 1 px / 0.5 px) | **pass:** 0.36× vs 0.64×; 0.25× vs 0.58× (0.45/0.52, 0.33/0.53 before) | **pass:** 0.32× vs 0.53×; 0.19× vs 0.40× (0.40/0.41, 0.18/0.36 before) |
+| 3. No yaw collapse (median yaw σ min ÷ anchor ≥ 0.5) | **fail:** 0.152 (0.179 before) | **pass:** 0.969 (0.984 before) |
+| Median NIS, matched runs | 1.00 | 1.00 |
+| Roll/pitch NEES, matched runs that don't diverge | 1.0–4.8 (1.1–24 before) | 0.9–12.6 (0.9–6.8 before) |
+
+At 0.5 px, matched `R`, per sequence (window ATE ratio to OpenVINS mono, yaw σ
+min ÷ anchor, NIS):
+
+| Sequence | MSCKF ratio | MSCKF yaw σ | MSCKF NIS | R-IEKF ratio | R-IEKF yaw σ | R-IEKF NIS |
+|---|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.4× | 0.09 | 1.00 | 0.4× | 0.84 | 1.00 |
+| MH_02_easy | 0.4× | 0.17 | 1.00 | 0.2× | 0.90 | 1.00 |
+| MH_03_medium | 0.3× | 0.17 | 1.00 | 0.2× | 0.89 | 1.00 |
+| MH_04_difficult | 0.2× | 0.16 | 1.00 | 0.2× | 0.91 | 1.00 |
+| MH_05_difficult | 0.1× | 0.19 | 1.00 | 0.0× | 0.91 | 1.00 |
+| V1_01_easy | 0.3× | 0.16 | 1.00 | 0.3× | 0.81 | 1.00 |
+| V1_02_medium | 0.4× | 0.21 | 1.00 | 0.2× | 0.90 | 1.00 |
+| V1_03_difficult | 0.2× | 0.16 | 1.00 | 0.2× | 0.90 | 1.00 |
+| V2_01_easy | 0.2× | 0.14 | 1.00 | 0.2× | 0.64 | 1.00 |
+| V2_02_medium | 0.2× | 0.15 | 1.00 | 0.2× | 0.67 | 1.00 |
+| V2_03_difficult | 0.1× | 0.15 | 1.00 | 0.1× | 0.82 | 1.00 |
+
+- **The MSCKF's tilt is consistent now.** Its worst roll/pitch NEES among the
+  runs that don't diverge fell from 24 to 4.8, and matched `R` beats the
+  default by a wider margin at both noise levels.
+- **The R-IEKF's yaw σ falls further on the V2 sequences** (0.95 → 0.64 on
+  V2_01 and 0.94 → 0.67 on V2_02 at 0.5 px), and its worst roll/pitch NEES
+  rose from 6.8 to 12.6. Its median still passes condition 3. The suspicion is
+  that the bias couples a correlated prior into yaw through propagation, which
+  the invariant error doesn't make exact (#620).
+- **Neither divergence was the tilt seed.** On MH_04 (1 px, seed 3) the dynamic
+  seed was 0.14° from the truth's tilt; its speed was 0.05 m/s against the
+  truth's 0.42, and the filters explain the missing motion by tilt (3° after
+  1 s, 117° at the end). MH_03 (1 px, seed 2) is gravity-aligned and seeds zero
+  velocity on a moving start. Both are velocity seeds of moving starts.
+- **A looser prior on the gravity-aligned seed made it worse.** Its window
+  accelerates (|f| − g = 2.6 m/s² on MH_03), so the honest tilt σ is 15–16°.
+  With it three of 66 diverged per backend, MH_03 0.5 px seed 1 at 3.9–5.2 km,
+  and the gravity-aligned seed kept the isotropic prior.
+
 ### Results with one truth, and S2 integrating both samples (#616)
 
 Recorded at f1551cc for both backends, median over the three seeds. #616 made S2
@@ -304,7 +355,8 @@ min ÷ anchor, NIS):
   R-IEKF runs the MSCKF's initializer since #608), and both reach a roll/pitch
   NEES of 34,000–40,000 and about 9 km: the seed, not either filter. MH_03
   (1 px, seed 2) starts by gravity alignment; the MSCKF reaches 26.8 m, the
-  R-IEKF 2.3 m. Both point at the tilt and bias seed of #609.
+  R-IEKF 2.3 m. #609 first suspected the tilt and bias seed; measured, neither
+  is the tilt seed: both are moving starts' velocity seeds (see above).
 
 ### Results with one truth, before #616
 
@@ -521,8 +573,48 @@ Per sequence, window 4-DoF ATE (m) and window rotation RPE (°):
 - **Its NIS is now reported.** It averages 0.97–2.55 on the Machine Hall and on
   V1_01 and V2_01, and 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03, where the filter
   is over-confident or the gate admits outliers.
-- **Roll/pitch is still wrong at the start:** V1_01 has a roll/pitch NEES near
-  3000 in every configuration, the tilt and accelerometer-bias seed of #609.
+- **Roll/pitch is still wrong at the start (before #609):** V1_01 has a
+  roll/pitch NEES near 3000 in every configuration. #609 changed the seed's
+  prior; the 2.4° gap to V1_01's ground truth stays, for the reason below.
+
+### After #609: the tilt–bias seed prior
+
+On the real KLT front end, window 4-DoF ATE (m) and window rotation RPE (°),
+#616 → #609:
+
+| Sequence | MSCKF ATE | R-IEKF ATE | OpenVINS mono | MSCKF ÷ mono | R-IEKF ÷ mono | MSCKF rot | R-IEKF rot |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MH_01_easy | 0.333 → 0.333 | 0.312 → 0.312 | 0.096 | 3.5× | 3.2× | 1.57 → 1.57 | 0.82 → 0.82 |
+| MH_02_easy | 0.393 → 0.393 | 0.370 → 0.370 | 0.168 | 2.3× | 2.2× | 1.35 → 1.35 | 1.37 → 1.37 |
+| MH_03_medium | 0.472 → 0.472 | 0.402 → 0.402 | 0.147 | 3.2× | 2.7× | 0.75 → 0.75 | 0.66 → 0.66 |
+| MH_04_difficult | 0.379 → 0.385 | 0.359 → 0.360 | 0.147 | 2.6× | 2.4× | 1.03 → 0.76 | 0.46 → 0.47 |
+| MH_05_difficult | 0.629 → 0.640 | 0.612 → 0.614 | 0.458 | 1.4× | 1.3× | 0.95 → 0.87 | 0.68 → 0.68 |
+| V1_01_easy | 0.197 → 0.188 | 0.182 → 0.181 | 0.069 | 2.7× | 2.6× | 4.04 → 4.02 | 3.74 → 3.69 |
+| V1_02_medium | 0.162 → 0.153 | 0.146 → 0.144 | 0.058 | 2.6× | 2.5× | 2.31 → 1.87 | 0.81 → 0.82 |
+| V1_03_difficult | 0.161 → 0.147 | 0.131 → 0.131 | 0.067 | 2.2× | 2.0× | 2.56 → 1.93 | 0.88 → 1.11 |
+| V2_01_easy | 0.215 → 0.184 | 0.219 → 0.217 | 0.127 | 1.4× | 1.7× | 2.41 → 1.94 | 1.33 → 1.62 |
+| V2_02_medium | 0.334 → 0.322 | 0.261 → 0.259 | 0.073 | 4.4× | 3.5× | 4.09 → 3.03 | 1.37 → 1.48 |
+| V2_03_difficult | 0.175 → 0.177 | 0.177 → 0.177 | 0.181 | 1.0× | 1.0× | 1.74 → 1.50 | 1.80 → 1.89 |
+| **median** | | | | **2.58× → 2.62×** | **2.44× → 2.45×** | **1.74 → 1.57** | **0.88 → 1.11** |
+
+MH_01, MH_02 (dynamic) and MH_03 (gravity-aligned) start from seeds the change
+doesn't touch, and don't move.
+
+- **The MSCKF's rotation drift falls 19–26% in the Vicon rooms** (V2_02 4.09° →
+  3.03°, V1_03 2.56° → 1.93°) and its V2_01 ATE 14%. Nothing is worse beyond the
+  10% tolerance; the recorded baseline (`scripts/euroc-baseline.json`) is now
+  7a38162.
+- **The R-IEKF's rotation drift rises on V1_03 (+26%), V2_01 (+22%), V2_02
+  (+8%) and V2_03 (+5%)**, its median 26% (0.88° → 1.11°), its ATE flat. That
+  is the same family as its gate's
+  yaw σ on V2 (#620).
+- **V1_01 is still 2.4° from its ground truth's tilt**, and the tilt probe
+  (`vio_pipeline --out` writes `tilt.csv`) shows why it can't be closed by the
+  seed: both filters settle at b_a y ≈ 0.13 m/s² with σ_ba = 0.2, with 1.0 and
+  with the isotropic prior, the value they reach on every sequence and the
+  ground truth gives on all but V1_01 (0.55). The gap is a fixed 2.5° rotation
+  in the body frame. The ground truth's bias is its own estimator's output,
+  so the data supports the filter.
 
 ### After #616: S2 integrates both samples
 
