@@ -91,7 +91,8 @@ from its look-alikes; the [storyline](storyline.mdx) has the full account.
     closure test fitted to what S2 achieved blessed the skew in item 21.
 23. **A prior is a joint statement.** At rest the accelerometer measures tilt and horizontal bias as
     one sum; an isotropic prior claims they are independent and hands the sum to whichever σ is
-    larger. Only roll and pitch excursions separate them, never yaw (<Issue id={609} />).
+    larger. At rest only roll and pitch excursions separate them; with vision pinning the position,
+    turns and accelerations do too, and a level hover never does (<Issue id={609} />).
 24. **Know which parts of the ground truth were measured.** EuRoC's bias and, in places, its
     attitude are its estimator's outputs. V1_01's 0.55 m/s² bias came with a 2.5° body-frame
     attitude offset that no prior moved; a target set against it can't be met.

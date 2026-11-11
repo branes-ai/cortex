@@ -117,8 +117,12 @@ against 0.1 m/s² of bias. Since #609 S1 writes this block on a static seed
 | $\sigma_\psi$ (yaw) | unchanged, 0.1 | a gauge: the gate watches that its σ never falls |
 
 The tilt σ that follows is $\sigma_{ba}/g \approx 1.2°$ to first order; the mean's own error
-$\sigma_f$ adds a few percent on a vibrating window. Only roll and pitch excursions separate
-the two; a turn about gravity leaves the body's up where it was.
+$\sigma_f$ adds a few percent on a vibrating window. At rest, the accelerometer alone separates
+the two only through roll and pitch excursions; a turn about gravity leaves the body's up where it
+was. Once vision pins the position, motion separates them too: a body-fixed bias turns with the
+body while a tilt error stays fixed in the world, and an acceleration the camera sees is not
+gravity. The synthetic world's 0.5 m/s² bias is learned with yaw-only rotation and a moving loop;
+a platform that hovers level, without turning or accelerating, keeps the sum.
 
 ### What it fixed, and what it didn't
 

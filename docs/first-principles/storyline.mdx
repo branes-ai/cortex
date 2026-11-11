@@ -372,8 +372,11 @@ the ground truth for the whole run and claimed 0.05° (roll/pitch ANEES 2,981,
   error in its attitude would produce exactly that bias. The data supports the filter, so the
   issue's acceptance target (0.55 on V1_01) was set against a quantity the truth estimated, not
   measured.
-- **Yaw doesn't separate them.** Turning about gravity leaves the body's "up" where it was; only
-  roll and pitch excursions tell a tilt from a bias. A drone that flies level keeps the sum.
+- **What separates them is motion the camera sees.** At rest, turning about gravity leaves the
+  body's "up" where it was, and only roll and pitch excursions tell a tilt from a bias. With vision
+  pinning the position, a turn separates them too (a body-fixed bias turns with the body, a tilt
+  error stays fixed in the world), and so does an acceleration: the synthetic world learns its bias
+  with yaw-only rotation and a moving loop. A drone that hovers level keeps the sum.
 - **A loose prior that's honest can still break the filter.** A gravity-aligned seed (the
   moving-start fallback) averages a window that accelerates: on the gate's MH_03 draws |f| − g is
   2.6 m/s², so the honest tilt σ is 15°. With it, three of the gate's five MH_03 draws diverged
