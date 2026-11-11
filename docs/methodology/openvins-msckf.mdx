@@ -186,7 +186,7 @@ on image (20 Hz):
 | NIS ≈ dim(measurement) per update | `tests/sdk/consistency.cpp` “NEES/NIS flag over- and under-confidence…” | unknown |
 | innovations zero-mean and white | `tests/sdk/innovation_whiteness.cpp` “i.i.d. N(0,1) innovations read as zero-mean and white…” | unknown |
 | no information gained along global yaw and translation (the 4-D unobservable space) | `tests/tools/observability_ledger.cpp` “Observability ledger: on the synthetic world the leak is yaw…” | failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608) |
-| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480) |
+| told the true noise, the filter improves and its yaw σ never collapses (EuRoC ideal tracks) | `scripts/euroc-consistency.sh` | failing — with one truth, S2 integrating both samples (#616) and the tilt–bias seed prior (#609), median NIS 1.00: fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: moving starts' velocity seeds, not the tilt), passes 2 (0.36× vs 0.64×; 0.25× vs 0.58×), fails 3 (yaw σ ratio 0.152: the S6 yaw leak, #480) |
 | 4-DoF ATE and rotation RPE within a factor of OpenVINS mono on the 11 EuRoC sequences | `scripts/euroc-baseline.sh` | failing — median 2.8× OpenVINS mono (#595) |
 
 ## Gap report
@@ -211,5 +211,5 @@ What `pipeline_graph.py gaps` reports for this spec (20 items):
 - node 'online_calib': deviates from the paper: extrinsics only (VioConfig::estimate_extrinsics, off by default); no intrinsics; no time offset (#332)
 - system invariant 'nees': failing — the body-frame filter is over-confident on EuRoC (#212, #605)
 - system invariant 'gauge': failing — the yaw leak (#480); fixed structurally by FEJ (#606) or the R-IEKF (#608)
-- system invariant 'consistency_gate': failing — with one truth and S2 integrating both samples (#616, median NIS 1.00): fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: the shared tilt and bias seed, #609), passes 2 (0.45× vs 0.52×; 0.33× vs 0.53×), fails 3 (yaw σ ratio 0.179: the S6 yaw leak, #480)
+- system invariant 'consistency_gate': failing — with one truth, S2 integrating both samples (#616) and the tilt–bias seed prior (#609), median NIS 1.00: fails 1 (2 of 66 at 1 px, MH_03 and MH_04, the same draws as the R-IEKF: moving starts' velocity seeds, not the tilt), passes 2 (0.36× vs 0.64×; 0.25× vs 0.58×), fails 3 (yaw σ ratio 0.152: the S6 yaw leak, #480)
 - system invariant 'accuracy': failing — median 2.8× OpenVINS mono (#595)
