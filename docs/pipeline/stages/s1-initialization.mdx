@@ -116,13 +116,14 @@ against 0.1 m/s² of bias. Since #609 S1 writes this block on a static seed
 | bias along up | seeded from $\lvert\bar{\mathbf{f}}\rvert - g$, $\sigma_\parallel^2 = \sigma_f^2 + 0.026^2$ | with $g$ known the window measures it; 0.026 is half the spread of surface gravity |
 | $\sigma_\psi$ (yaw) | unchanged, 0.1 | a gauge: the gate watches that its σ never falls |
 
-The tilt σ that follows is $\sigma_{ba}/g \approx 1.2°$. Only roll and pitch excursions separate
+The tilt σ that follows is $\sigma_{ba}/g \approx 1.2°$ to first order; the mean's own error
+$\sigma_f$ adds a few percent on a vibrating window. Only roll and pitch excursions separate
 the two; a turn about gravity leaves the body's up where it was.
 
 ### What it fixed, and what it didn't
 
-- **The seed is consistent:** over 600 Monte-Carlo static seeds the 5-dof tilt-and-bias ANEES is
-  4.93 against 5 (`tests/sdk/tilt_bias_prior.cpp`). On the synthetic world a 0.5 m/s² bias is
+- **The seed is consistent:** over 600 Monte-Carlo static seeds the 5-dof tilt-and-bias ANEES
+  measured 4.93 against 5 (`tests/sdk/tilt_bias_prior.cpp` asserts 4.5–5.5). On the synthetic world a 0.5 m/s² bias is
   learned and the tilt falls under 0.01°.
 - **V1_01's 2.4° gap to the ground truth stays.** The filter reaches the same bias (b_a y ≈ 0.13
   m/s²) with $\sigma_{ba}$ = 0.2, 1.0 and the old prior, the value it finds on all eleven sequences.
@@ -144,7 +145,7 @@ The mathematical contracts ensuring safe filter bootstrapping:
 
 | Element | Contract Specification |
 | :--- | :--- |
-| **Signature** | $\text{init}(\text{imu\_window}, \text{vision\_window}) \rightarrow (\mathbf{R}_{I}^{W}, v, b_g, b_a, g, \text{scale})$ | $\mathbf{P}_0$ |
+| **Signature** | $\text{init}(\text{imu\_window}, \text{vision\_window}) \rightarrow (\mathbf{R}_{I}^{W}, v, b_g, b_a, g, \text{scale}, \mathbf{P}_0)$ |
 | **Pre-conditions** | Gyro/accel variance is below stationary noise threshold (static init); singular-value conditioning of SfM-IMU matrix is below 100 (dynamic init). |
 | **Post-conditions & Invariants** | **1. Gravity alignment**: Gravity vector aligns with measured mean specific force: $\|\mathbf{R}_{I}^{W} \mathbf{a}_{\text{avg}} - [0, 0, g]^T\| < 10^{-4}\text{ m/s}^2$.<br/>**2. Positive Scale**: Dynamically recovered scale $s$ is strictly positive ($s > 0$) and finite.<br/>**3. Realistic Yaw Prior**: Heading (yaw) standard deviation is seeded with a large variance: $\text{std\_dev}(yaw) \ge 45^\circ$ to reflect its unobserved status (not met: the shipped yaw σ is 0.1 rad).<br/>**4. Tilt–bias correlation**: a static seed's $\mathbf{P}_{\theta b} = \sigma_{ba}^2/g\,[\hat{\mathbf{u}}]_\times$, its 5-dof tilt-and-bias ANEES 5 (#609). |
 

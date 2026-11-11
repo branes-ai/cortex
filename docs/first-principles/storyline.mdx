@@ -361,8 +361,9 @@ the ground truth for the whole run and claimed 0.05° (roll/pitch ANEES 2,981,
   tilt σ of 0.1 rad is 1 m/s² of gravity against 0.1 m/s² of bias, so the old prior put 99% of
   the sum in tilt.
 - **The fix:** S1 now writes the block a static window implies, with the tilt and the bias
-  correlated (σ_tilt = σ_ba / g, about 1.2° for σ_ba = 0.2 m/s²), and seeds the bias along up from
-  |f| − g. A Monte Carlo of static seeds reads ANEES 4.93 against 5; on the synthetic world a
+  correlated (σ_tilt ≈ σ_ba / g to first order, about 1.2° for σ_ba = 0.2 m/s²), and seeds the
+  bias along up from |f| − g. A Monte Carlo of static seeds measured ANEES 4.93 against 5 (the test
+  asserts 4.5–5.5); on the synthetic world a
   0.5 m/s² bias is learned and the tilt falls under 0.01°.
 - **What it did not do:** V1_01 is still 2.4° off its ground truth. The same answer comes back
   with σ_ba = 0.2, with 1.0 and with the old prior: b_a y ≈ 0.13 m/s², the value the filter finds
@@ -375,7 +376,8 @@ the ground truth for the whole run and claimed 0.05° (roll/pitch ANEES 2,981,
   roll and pitch excursions tell a tilt from a bias. A drone that flies level keeps the sum.
 - **A loose prior that's honest can still break the filter.** A gravity-aligned seed (the
   moving-start fallback) averages a window that accelerates: on the gate's MH_03 draws |f| − g is
-  2.6 m/s², so the honest tilt σ is 15°. With it, three of five draws diverged against one, because
+  2.6 m/s², so the honest tilt σ is 15°. With it, three of the gate's five MH_03 draws diverged
+  against one (three of its 66 runs per backend, against two), because
   that seed's zero velocity (σ 0.1 m/s) is the part that's wrong, and the first updates explained
   the velocity by tilt. The gravity-aligned seed keeps the old prior until its velocity prior is
   fixed.

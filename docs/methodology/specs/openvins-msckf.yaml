@@ -238,7 +238,7 @@ nodes:
       - question: the attitude and accelerometer-bias blocks of P₀ on a static seed
         chosen: "the block the window implies (#609): P_θθ = (σ_ba² + σ_f²)/g²·(I − ûûᵀ) + σ_ψ²ûûᵀ, P_θb = σ_ba²/g·[û]ₓ, P_bb = σ_ba²(I − ûûᵀ) + σ_∥²ûûᵀ (stages::s1_initialization::TiltBiasPrior)"
         alternatives: ["isotropic σ = 0.1 on every core state, uncorrelated (to #609)", "a tilt σ of σ_ba/g without the correlation"]
-        reason: "the window measures f̄ = g·u + b_a once, so a seed that takes û from f̄ with b_a = 0 knows the tilt and the horizontal bias only as one sum, δθ⊥ = [û]ₓ(b_a + n̄)/g. The isotropic prior put 99% of that sum in tilt (0.1 rad of tilt is 1 m/s² of gravity, against 0.1 m/s² of bias), so the filter never learned EuRoC's bias and stayed tilted 2.7° on V1_01. Without the correlation the prior would claim the tilt and bias independent, which the seed is not"
+        reason: "the window measures f̄ = g·u + b_a once, so a seed that takes û from f̄ with b_a = 0 knows the tilt and the horizontal bias only as one sum, δθ⊥ = [û]ₓ(b_a + n̄)/g. The isotropic prior put 99% of that sum in tilt (0.1 rad of tilt is 1 m/s² of gravity, against 0.1 m/s² of bias), so the filter never learned EuRoC's bias and stayed tilted 2.4–2.6° on V1_01. Without the correlation the prior would claim the tilt and bias independent, which the seed is not"
       - question: σ_ba, the accelerometer-bias prior
         chosen: "0.2 m/s² per axis (VioConfig::accel_bias_prior_sigma)"
         alternatives: ["0.1 (the isotropic value to #609)", "a datasheet turn-on bias"]

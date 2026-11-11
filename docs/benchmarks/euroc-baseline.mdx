@@ -355,9 +355,8 @@ min ÷ anchor, NIS):
   R-IEKF runs the MSCKF's initializer since #608), and both reach a roll/pitch
   NEES of 34,000–40,000 and about 9 km: the seed, not either filter. MH_03
   (1 px, seed 2) starts by gravity alignment; the MSCKF reaches 26.8 m, the
-  R-IEKF 2.3 m. Both point at the tilt and bias seed of #609. (#609 measured
-  it: neither is the tilt seed; both are moving starts' velocity seeds, see
-  above.)
+  R-IEKF 2.3 m. #609 first suspected the tilt and bias seed; measured, neither
+  is the tilt seed: both are moving starts' velocity seeds (see above).
 
 ### Results with one truth, before #616
 
@@ -574,8 +573,9 @@ Per sequence, window 4-DoF ATE (m) and window rotation RPE (°):
 - **Its NIS is now reported.** It averages 0.97–2.55 on the Machine Hall and on
   V1_01 and V2_01, and 6.8–15.4 on V1_02, V1_03, V2_02 and V2_03, where the filter
   is over-confident or the gate admits outliers.
-- **Roll/pitch is still wrong at the start:** V1_01 has a roll/pitch NEES near
-  3000 in every configuration, the tilt and accelerometer-bias seed of #609.
+- **Roll/pitch is still wrong at the start (before #609):** V1_01 has a
+  roll/pitch NEES near 3000 in every configuration. #609 changed the seed's
+  prior; the 2.4° gap to V1_01's ground truth stays, for the reason below.
 
 ### After #609: the tilt–bias seed prior
 
@@ -605,7 +605,8 @@ doesn't touch, and don't move.
   10% tolerance; the recorded baseline (`scripts/euroc-baseline.json`) is now
   7a38162.
 - **The R-IEKF's rotation drift rises on V1_03 (+26%), V2_01 (+22%), V2_02
-  (+8%) and V2_03 (+5%)**, its ATE flat. That is the same family as its gate's
+  (+8%) and V2_03 (+5%)**, its median 26% (0.88° → 1.11°), its ATE flat. That
+  is the same family as its gate's
   yaw σ on V2 (#620).
 - **V1_01 is still 2.4° from its ground truth's tilt**, and the tilt probe
   (`vio_pipeline --out` writes `tilt.csv`) shows why it can't be closed by the

@@ -6,13 +6,14 @@
 // (stages::s1_initialization::TiltBiasPrior), and the filter then learns the
 // bias as the platform rotates. Before #609 P0 was an isotropic sigma = 0.1
 // with no correlation, and a 0.55 m/s^2 bias (EuRoC V1_01) left both filters
-// tilted by 2.7 deg for the whole run.
+// tilted by 2.4-2.6 deg for the whole run.
 //
 // ASCII-only TEST_CASE names (the Windows MSVC ctest job rejects non-ASCII).
 
 #include <branes/math/lie/so3.hpp>
 #include <branes/sdk/eval/synthetic_world.hpp>
 #include <branes/sdk/imu_init.hpp>
+#include <branes/sdk/msckf/sqrt_covariance.hpp>
 #include <branes/sdk/msckf/stages/s1_initialization.hpp>
 #include <branes/sdk/msckf/state.hpp>
 #include <branes/sdk/msckf_backend.hpp>
@@ -181,6 +182,43 @@ TEST_CASE("S1 prior: P0 is the closed-form tilt-bias block about the seed's up",
             par2 += u[i] * P(State::kBa + i, State::kBa + j) * u[j];
     CHECK(std::sqrt(par2) < 0.03);
     CHECK(std::sqrt(par2) >= s1::kGravityMagnitudeSigma<T>);
+}
+
+TEST_CASE("S1 prior: the square-root covariance carries the same block", "[sdk][s1][init][609]") {
+    // apply_tilt_bias_prior maps P through G = L_M L_cur^-1 with cov.transform(G).
+    // The square-root backend's transform is S -> G S, retriangularized: the
+    // block it carries must be the dense one, entry by entry.
+    Gauss n(11);
+    const SO3 R_true = SO3::exp(Vec3{{-0.4, 0.25, 2.1}});
+    const T s = kDensity * std::sqrt(kRate);
+    const Vec3 f = R_true.inverse() * Vec3{{0, 0, kG}} + Vec3{{0.08, -0.12, 0.04}};
+    std::vector<Vec3> gyro(kN, Vec3{}), accel(kN);
+    for (auto& a : accel)
+        a = f + Vec3{{s * n(), s * n(), s * n()}};
+    bs::ImuInitConfig<T> cfg;
+    cfg.gravity_magnitude = kG;
+    const auto r = bs::ImuInitializer<T>(cfg).try_static(std::span<const Vec3>{gyro}, std::span<const Vec3>{accel});
+    REQUIRE(r.success);
+    const auto prior = s1::tilt_bias_prior<T>(
+        std::span<const Vec3>{accel}, bs::InitMethod::Static, kSigmaBa, kDensity, static_cast<T>(kN) / kRate);
+    REQUIRE(prior.accel_bias_sigma == kSigmaBa);
+
+    State full(T{1} / T{10});
+    ms::State<T, ms::SqrtCovariance<T>> sq(T{1} / T{10});
+    bs::InitDiagnostics<T> d1, d2;
+    s1::seed_from_imu(full, r, bs::InitMethod::Static, 0.0, std::span<const Vec3>{accel}, kG, d1, prior);
+    s1::seed_from_imu(sq, r, bs::InitMethod::Static, 0.0, std::span<const Vec3>{accel}, kG, d2, prior);
+
+    const auto Pf = full.covariance();
+    const auto Ps = sq.covariance();
+    REQUIRE(Ps.rows == Pf.rows);
+    for (std::size_t i = 0; i < Pf.rows; ++i)
+        for (std::size_t j = 0; j < Pf.cols; ++j) {
+            INFO("i = " << i << ", j = " << j);
+            CHECK(std::abs(Ps(i, j) - Pf(i, j)) < 1e-12);
+        }
+    // And it is the block, not the isotropic prior: the tilt-bias correlation is there.
+    CHECK(std::abs(Ps(State::kTheta, State::kBa + 1)) + std::abs(Ps(State::kTheta, State::kBa + 2)) > 1e-4);
 }
 
 TEST_CASE("S1 prior: only a static window sets it", "[sdk][s1][init][609]") {

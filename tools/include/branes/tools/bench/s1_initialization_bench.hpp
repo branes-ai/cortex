@@ -124,7 +124,8 @@ struct S1InitializationBench {
     }
 
     [[nodiscard]] static std::vector<Variant> variants() {
-        return {{"shipped", "try_static -> seed_from_imu (backend default)"},
+        return {{"shipped",
+                 "try_static -> seed_from_imu (the backend's static seed, with the isotropic P0: no tilt-bias prior)"},
                 {"gravity_align", "try_gravity_align -> seed_from_imu (moving-start fallback)"},
                 {"dynamic", "try_dynamic -> seed_from_alignment (visual-inertial alignment)"},
                 {"sfm_two_view_pnp",
