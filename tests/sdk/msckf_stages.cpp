@@ -14,9 +14,12 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace {
@@ -240,4 +243,142 @@ TEST_CASE("S9 track bookkeeping: touching tracks in id order, purge drops emptie
     REQUIRE(tracks.size() == 2);
     REQUIRE(tracks.at(4).size() == 1);
     REQUIRE(tracks.count(2) == 0);
+}
+
+// ── S6b invariants ──────────────────────────────────────────────────────────
+// For ANY orthonormal basis of the left null space of H_f (Householder or
+// Givens): H0'H0 = Hx'Hx - (Hx'Hf) G (Hf'Hx) and H0'r0 = Hx'r - (Hx'Hf) G (Hf'r),
+// with G = (Hf'Hf)^-1. Plain double, independent of the code under test.
+namespace {
+
+using Vd = std::vector<double>;
+
+Vd mm(const Vd& A, std::size_t ar, std::size_t ac, const Vd& B, std::size_t bc) {
+    Vd C(ar * bc, 0.0);
+    for (std::size_t i = 0; i < ar; ++i)
+        for (std::size_t k = 0; k < ac; ++k)
+            for (std::size_t j = 0; j < bc; ++j)
+                C[i * bc + j] += A[i * ac + k] * B[k * bc + j];
+    return C;
+}
+Vd tp(const Vd& A, std::size_t r, std::size_t c) {
+    Vd R(c * r);
+    for (std::size_t i = 0; i < r; ++i)
+        for (std::size_t j = 0; j < c; ++j)
+            R[j * r + i] = A[i * c + j];
+    return R;
+}
+Vd inv3(const Vd& M) {
+    const double a = M[0], b = M[1], c = M[2], d = M[3], e = M[4], f = M[5], g = M[6], h = M[7], i = M[8];
+    const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    return {(e * i - f * h) / det,
+            (c * h - b * i) / det,
+            (b * f - c * e) / det,
+            (f * g - d * i) / det,
+            (a * i - c * g) / det,
+            (c * d - a * f) / det,
+            (d * h - e * g) / det,
+            (b * g - a * h) / det,
+            (a * e - b * d) / det};
+}
+double max_abs(const Vd& a) {
+    double m = 0;
+    for (double x : a)
+        m = std::max(m, std::abs(x));
+    return m;
+}
+double rel_diff(const Vd& a, const Vd& b) {
+    for (std::size_t i = 0; i < a.size(); ++i)
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i]))
+            return std::numeric_limits<double>::infinity();
+    double d = 0;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        d = std::max(d, std::abs(a[i] - b[i]));
+    return d / std::max(max_abs(b), 1e-300);
+}
+
+struct Info {
+    Vd hth, htr;
+};
+
+// What the marginalized information must be, from the S6a system alone.
+Info expected_info(const ms::MeasurementSystem<T>& s) {
+    const std::size_t m = s.rows, n = s.cols;
+    const Vd Hf(s.Hf.begin(), s.Hf.end()), Hx(s.Hx.begin(), s.Hx.end()), r(s.r.begin(), s.r.end());
+    const Vd HxT = tp(Hx, m, n), HfT = tp(Hf, m, 3);
+    const Vd G = inv3(mm(HfT, 3, m, Hf, 3));
+    const Vd HxT_Hf = mm(HxT, n, m, Hf, 3);  // n x 3
+    const Vd Hf_T_Hx = tp(HxT_Hf, n, 3);     // 3 x n
+    Vd hth = mm(HxT, n, m, Hx, n);
+    const Vd corr = mm(mm(HxT_Hf, n, 3, G, 3), n, 3, Hf_T_Hx, n);
+    for (std::size_t i = 0; i < hth.size(); ++i)
+        hth[i] -= corr[i];
+    Vd htr = mm(HxT, n, m, r, 1);
+    const Vd corr_r = mm(mm(HxT_Hf, n, 3, G, 3), n, 3, mm(HfT, 3, m, r, 1), 1);
+    for (std::size_t i = 0; i < htr.size(); ++i)
+        htr[i] -= corr_r[i];
+    return {hth, htr};
+}
+
+Info actual_info(const ms::ProjectedMeasurement<T>& p) {
+    const Vd Ht = tp(p.H.d, p.H.rows, p.H.cols);
+    return {mm(Ht, p.H.cols, p.H.rows, p.H.d, p.H.cols), mm(Ht, p.H.cols, p.H.rows, Vd(p.r.begin(), p.r.end()), 1)};
+}
+
+ms::MeasurementSystem<T> system_for(std::size_t m) {
+    auto s = window(m);
+    const auto upd = updater();
+    const auto track = track_of(s, Vec3{{0.7, 0.2, 5.0}});
+    const auto tri = st::s5_triangulation::apply(s, upd, track);
+    REQUIRE(tri.ok);
+    const auto jac = st::s6a_jacobians::apply(s, upd, track, tri.p_f);
+    REQUIRE(jac.ok);
+    return jac.system;
+}
+
+}  // namespace
+
+TEST_CASE("S6b invariant: rows = 2m-3 and H0'H0, H0'r0 equal the feature-marginalized information",
+          "[sdk][stages][s6b]") {
+    for (std::size_t m : {3u, 4u, 5u}) {
+        const auto sys = system_for(m);
+        const auto want = expected_info(sys);
+        for (auto method :
+             {st::s6b_nullspace_projection::Method::Householder, st::s6b_nullspace_projection::Method::Givens}) {
+            const auto out = st::s6b_nullspace_projection::apply(sys, method);
+            REQUIRE(out.ok);
+            REQUIRE(inv::check_dimension(out.projected.H.rows, 2 * m - 3, inv::Stage::S6b_nullspace_projection).pass);
+            REQUIRE(out.projected.r.size() == 2 * m - 3);
+            const auto got = actual_info(out.projected);
+            CHECK(rel_diff(got.hth, want.hth) < 1e-8);
+            CHECK(rel_diff(got.htr, want.htr) < 1e-8);
+        }
+    }
+}
+
+TEST_CASE("S6b invariant: Householder and Givens agree on H'H and H'r", "[sdk][stages][s6b]") {
+    const auto sys = system_for(5);
+    const auto hh = st::s6b_nullspace_projection::apply(sys);
+    const auto gv = st::s6b_nullspace_projection::apply_givens(sys);
+    REQUIRE(hh.ok);
+    REQUIRE(gv.ok);
+    const auto res = inv::check_compression<T>(hh.projected.H,
+                                               std::span<const T>(hh.projected.r),
+                                               gv.projected.H,
+                                               std::span<const T>(gv.projected.r),
+                                               inv::Stage::S6b_nullspace_projection);
+    REQUIRE(res.size() >= 2);
+    CHECK(res[0].pass);  // normal matrix
+    CHECK(res[1].pass);  // normal rhs
+}
+
+TEST_CASE("S6b: a single observation (2 rows) leaves nothing to project", "[sdk][stages][s6b]") {
+    ms::MeasurementSystem<T> sys;
+    sys.rows = 2;
+    sys.cols = 3;
+    sys.Hf = {1, 0, 0, 0, 1, 0};
+    sys.Hx = {1, 0, 0, 0, 1, 0};
+    sys.r = {0.1, 0.2};
+    CHECK_FALSE(st::s6b_nullspace_projection::apply(sys).ok);
+    CHECK_FALSE(st::s6b_nullspace_projection::apply_givens(sys).ok);
 }
