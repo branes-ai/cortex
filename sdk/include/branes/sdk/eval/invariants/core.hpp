@@ -72,6 +72,7 @@ enum class Stage {
     S6c_compression,           ///< QR compression of the stacked measurement
     S6d_gating,                ///< chi-square (Mahalanobis) gate
     S6e_ekf_update,            ///< gain, correction delta-x, Joseph covariance update
+    S6_riekf_update,           ///< R-IEKF invariant camera update (issue #612)
     S9_marginalization,        ///< drop clones: P -> principal submatrix
     S10_online_calibration,    ///< refine extrinsics / intrinsics / time offset
     EndToEnd,                  ///< whole-run statistics (NEES/NIS windows, ATE/RPE)
@@ -103,6 +104,8 @@ enum class Stage {
         return "S6d_gating";
     case Stage::S6e_ekf_update:
         return "S6e_ekf_update";
+    case Stage::S6_riekf_update:
+        return "S6_riekf_update";
     case Stage::S9_marginalization:
         return "S9_marginalization";
     case Stage::S10_online_calibration:
